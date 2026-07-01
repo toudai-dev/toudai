@@ -1,0 +1,75 @@
+#!/bin/sh
+
+# Migration management script
+# Usage: ./scripts/migration <command> [args...]
+
+export GOOSE_DRIVER="clickhouse"
+export GOOSE_TABLE="migrations"
+export GOOSE_DBSTRING="${GOOSE_DBSTRING:-clickhouse://admin:admin@127.0.0.1:9000/lighthouse_dev}"
+export GOOSE_MIGRATION_DIR="${GOOSE_MIGRATION_DIR:-pkg/db/migrations}"
+
+COMMAND="$1"
+[ $# -gt 0 ] && shift
+
+case "$COMMAND" in
+create)
+    if [ $# -eq 0 ]; then
+        echo "Usage: $0 create <migration_name>"
+        echo "Example: $0 create add new table"
+        exit 1
+    fi
+    NAME="$*"
+    goose create "$NAME" sql
+    ;;
+up)
+    goose up
+    # Local-only schema snapshots. Production deploys use the lighthouse
+    # migrate command and do not run this script.
+    if [ "${SCHEMA_DUMP:-1}" != "0" ]; then
+        SCHEMA_OUT="${SCHEMA_OUT:-pkg/db/schema.sql}"
+        SCHEMA_PROFILE="${SCHEMA_PROFILE:-${DEPLOY_PROFILE:-}}"
+        SCHEMA_MODE="${SCHEMA_MODE:-live}"
+        SCHEMA_IMAGE="${SCHEMA_IMAGE:-clickhouse/clickhouse-server:25.8-alpine}"
+        go run ./tools/schema-dump \
+            -mode "$SCHEMA_MODE" \
+            -profile "$SCHEMA_PROFILE" \
+            -out "$SCHEMA_OUT" \
+            -migrations-dir "$GOOSE_MIGRATION_DIR" \
+            -image "$SCHEMA_IMAGE"
+    fi
+    ;;
+down)
+    goose down
+    ;;
+validate)
+    goose validate
+    ;;
+status)
+    goose status
+    ;;
+*)
+    echo "Usage: $0 <command> [args...]"
+    echo ""
+    echo "Commands:"
+    echo "  create <name>  Create a new migration"
+    echo "  up             Run pending migrations"
+    echo "  down           Rollback the last migration"
+    echo "  validate       Validate migration files"
+    echo "  status         Show migration status"
+    echo ""
+    echo "Environment:"
+    echo "  SCHEMA_DUMP=0       Disable local schema.sql generation after up"
+    echo "  SCHEMA_OUT=<path>   Schema dump path (default: pkg/db/schema.sql)"
+    echo "  SCHEMA_PROFILE=<p>  Optional schema profile: cloud or onprem"
+    echo "  SCHEMA_MODE=<mode>  Schema dump mode: live or migrations (default: live)"
+    echo "  SCHEMA_IMAGE=<img>  ClickHouse image for live mode"
+    echo ""
+    echo "Examples:"
+    echo "  $0 create add new table"
+    echo "  $0 up"
+    echo "  $0 down"
+    echo "  $0 validate"
+    echo "  $0 status"
+    exit 1
+    ;;
+esac
