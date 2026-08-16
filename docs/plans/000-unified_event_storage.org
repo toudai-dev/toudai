@@ -1,0 +1,509 @@
+#+TITLE: Unified Event Storage and Scale Validation
+#+AUTHOR: Darwin D. Wu
+#+DATE: 2026-08-16
+#+STATUS: Draft
+#+STARTUP: showall
+
+* Context
+
+Lighthouse is being redesigned as a ClickHouse-backed telemetry system. The
+initial proof of concept lives at =~/workspace/inngest/lighthouse= and provides
+useful ingestion, query-planning, Prometheus compatibility, schema, and staging
+performance evidence. The new repository is greenfield and is not required to
+preserve the proof of concept's physical schema.
+
+The product should provide a high-level event model rather than force users to
+choose between logs and traces:
+
+- logs, trace spans, and application-wide events share one event medium;
+- a trace is a rendering of correlated events with span relationships;
+- raw events remain available at full resolution without ingestion sampling;
+- users can filter, group, aggregate, build heatmaps, and calculate percentiles
+  over any retained event field;
+- common dashboards remain fast through derived storage without limiting raw
+  exploration;
+- native metrics use separate time-series storage because their data model and
+  access patterns differ from events.
+
+The available performance corpus is under =~/storage/lighthouse=. It originated
+as JSON log entries retrieved from GCP Logging and was compacted into Parquet.
+
+* Goals
+
+- Store logs, spans, and arbitrary structured events in one physical raw event
+  table with a common envelope.
+- Retain every accepted event and its queryable context at full resolution.
+- Support exact raw queries and approximate or exact aggregate execution.
+- Make interactive, arbitrary exploration possible without predeclaring every
+  future query dimension.
+- Accelerate known dashboard and incident workflows with projections,
+  materialized aggregate states, metadata catalogs, caching, and query routing.
+- Preserve typed dynamic attributes and promote frequently queried fields into
+  physical columns only when measurement justifies it.
+- Validate behavior at 1 TB, 10 TB, and 100 TB of GCP-equivalent uncompressed
+  event data before considering a 1 PB clustered test.
+- Measure storage amplification across the complete schema, not only base-table
+  compression.
+
+* Non-goals
+
+- LogSQL or LogQL compatibility is not required in the initial design.
+- A 1 PB benchmark is deferred until the 100 TB architecture is understood.
+- Native metrics do not need to share the physical event table.
+- Every arbitrary query is not required to have dashboard-class latency.
+- Rollups do not replace or expire the full-resolution source events.
+- The initial implementation will not automatically create schema objects from
+  observed query traffic. Field promotion can start as an explicit operation.
+
+* Settled Design Principles
+
+** Unified events
+
+One raw =events= table stores logs, spans, and application events. An
+=event_kind= discriminator affects ingestion validation and rendering, not the
+event's queryability. Common queries can aggregate all event kinds together.
+
+Trace-specific fields such as trace ID, span ID, parent span ID, span kind, and
+duration are nullable or have empty defaults for non-span events. Logs carrying
+trace context are returned with spans when querying a trace.
+
+** Separate native metrics
+
+Native Prometheus or OpenTelemetry metrics remain in signal-specific tables.
+Prometheus API compatibility remains useful for native metrics and dashboards,
+but it must not define the event query model.
+
+Event-derived counts, rates, histograms, heatmaps, and percentiles are computed
+from raw events or event aggregate states. They do not require conversion into
+native metric samples unless a later interoperability feature needs it.
+
+** Full-resolution retention
+
+Ingestion does not sample accepted events. Raw events remain the source of truth
+across storage tiers. Approximate percentile and histogram functions may be used
+for interactive execution, but this changes the aggregation algorithm rather
+than the retained data. Exact execution remains available with cost guardrails.
+
+** Raw fallback
+
+Materialized views and projections accelerate supported query shapes. A query
+using an unmaterialized field falls back to raw events rather than becoming
+invalid. Query responses must disclose whether an aggregate is exact or
+approximate.
+
+** Bounded derived storage
+
+Do not expand every attribute of every event into inverted index rows. Derived
+tables must have a measured query benefit and a bounded amplification model.
+Field-name and field-value discovery must use metadata catalogs rather than
+array-joining the raw corpus at request time.
+
+* Reference Evidence
+
+** Honeycomb model
+
+Honeycomb's current public model treats logs and spans as structured events
+whose fields can be queried without a predefined schema. Native metrics use
+dedicated metrics datasets and metric-specific operations. Its unified
+experience therefore does not require one physical model for every telemetry
+signal.
+
+Relevant references:
+
+- https://docs.honeycomb.io/get-started/honeycomb/traces-metrics-logs
+- https://www.honeycomb.io/blog/introducing-honeycomb-telemetry-pipeline
+- =../experiments/000-gcp-parquet-corpus-profile.md=
+- =../decisions/000-unified-events-separate-metrics.md=
+
+** Proof-of-concept findings
+
+The proof of concept used typed nested key/value arrays, fingerprints,
+attribute index tables, rollups, and alternate tail layouts. Its staging data
+showed the principal failure mode to avoid:
+
+#+BEGIN_SRC text
+logs                         62.40M rows   10.55 GiB
+logs_string_fingerprints      3.73B rows   69.42 GiB
+#+END_SRC
+
+The string fingerprint index had about 60 rows per source event. Broad metadata
+queries still read tens to hundreds of GiB, timed out, or exceeded a 14.4 GiB
+memory limit. A wide inverted index is therefore not a substitute for a raw
+event layout, promoted fields, and bounded metadata catalogs.
+
+** Current corpus
+
+Parquet footer metadata reports:
+
+#+BEGIN_SRC text
+files                         2,685
+Parquet bytes                 1,332,877,136,312
+rows                          6,674,704,383
+event-time coverage           12 complete 24-hour periods
+daily rows                    433M-734M
+average daily rows            556M
+#+END_SRC
+
+A representative 3.63M-row file has about 22.6 =labels= keys and 5 resource
+keys per event. Its average =raw_entry= is 3.58 KB. Re-serializing the Parquet
+columns as canonical JSON produces about 5.46 KB per row, but this is not the
+same measurement as GCP Logging's billable entry size because it adds textual
+field names and escapes the embedded raw entry.
+
+GCP reports approximately 32 TB of monthly Logging storage/ingestion for this
+workload. GCP defines storage volume as the actual size of log entries before
+indexing. Projecting the observed row rate to a 30-day month gives about 16.7B
+events, or a provisional average of 1.9 KB of GCP-equivalent input per event.
+
+The benchmark must verify the exact GCP metric and period before treating this
+calibration as final. Until then, use it for capacity planning:
+
+#+BEGIN_SRC text
+1 TB GCP-equivalent input       ~520M events
+10 TB GCP-equivalent input      ~5.2B events
+32 TB GCP-equivalent input      ~16.7B events
+100 TB GCP-equivalent input     ~52B events
+1 PB GCP-equivalent input       ~520B events
+#+END_SRC
+
+The current 12-day corpus represents approximately 12.8 TB on this calibrated
+scale. It can supply natural subsets for the 1 TB and 10 TB tests. A 100 TB test
+will require roughly eight time-shifted passes over the corpus.
+
+* Proposed Logical Event Schema
+
+The first schema candidate should preserve this common envelope:
+
+#+BEGIN_SRC sql
+CREATE TABLE events
+(
+    tenant_id       UInt64,
+    dataset         LowCardinality(String),
+    timestamp       DateTime64(9),
+    observed_at     DateTime64(9),
+    event_id        UUID,
+
+    event_kind      Enum8('event' = 1, 'log' = 2, 'span' = 3),
+    event_name      LowCardinality(String),
+    body            String,
+
+    service_name    LowCardinality(String),
+    environment     LowCardinality(String),
+    severity        LowCardinality(String),
+    status_code     LowCardinality(String),
+
+    trace_id        FixedString(16),
+    span_id         FixedString(8),
+    parent_span_id  FixedString(8),
+    span_kind       LowCardinality(String),
+    duration_ns     UInt64,
+
+    resource        JSON,
+    scope           JSON,
+    attributes      JSON
+)
+ENGINE = MergeTree
+PARTITION BY toDate(timestamp)
+ORDER BY
+(
+    tenant_id,
+    dataset,
+    toStartOfHour(timestamp),
+    service_name,
+    timestamp,
+    event_id
+);
+#+END_SRC
+
+This is a benchmark candidate, not final DDL. Tests must determine:
+
+- whether native =JSON=, =Map=, or typed key/value arrays provide the best
+  long-tail attribute representation;
+- the number and boundaries of attribute namespaces;
+- the correct timestamp bucket in the sorting key;
+- whether =service_name= belongs before or after the time bucket;
+- the best ClickHouse representation for event and trace identifiers;
+- which GCP and OpenTelemetry fields deserve fixed or materialized columns;
+- whether raw source JSON is retained in addition to normalized fields;
+- appropriate partition granularity and retention behavior.
+
+* Attribute Storage Candidates
+
+** Candidate A: native JSON with promoted columns
+
+- Preserve dynamic value types and nested paths.
+- Materialize common routing and grouping fields.
+- Test =advanced= shared-data serialization and dynamic-path limits available in
+  the selected ClickHouse version.
+- Measure inserts, merges, uncommon-path filters, full-object reads, and schema
+  evolution.
+
+** Candidate B: Map-based attributes with promoted columns
+
+- Use ClickStack's established =Map(LowCardinality(String), String)= approach as
+  a baseline.
+- Preserve separate resource, scope, and event attribute namespaces.
+- Measure the cost of string conversion and typed numeric aggregation.
+
+** Candidate C: typed key/value arrays
+
+- Use the proof of concept's separate string, integer, float, and boolean arrays
+  as a comparison.
+- Do not reproduce its unbounded per-attribute materialized index tables.
+- Measure type preservation, compression, filtering syntax, and scan cost.
+
+* Query and Storage Architecture
+
+** Primary raw path
+
+The raw table optimizes tenant, dataset, time, and common service-scoped reads.
+It is the exact fallback for every supported event query.
+
+** Trace path
+
+Add a narrow projection or derived trace table ordered by tenant and trace ID.
+It should contain enough fields to render a waterfall and identify correlated
+logs without duplicating every dynamic attribute. Benchmark projection storage
+and trace-fetch latency before choosing projection versus table.
+
+** Metadata catalogs
+
+Maintain bounded, time-aware catalogs for:
+
+- known field names and observed types;
+- promoted fields;
+- bounded values for explicitly discoverable low-cardinality fields;
+- approximate cardinality and last-seen metadata used by query planning.
+
+High-cardinality values such as event, trace, span, request, account, or run IDs
+must not be enumerated for broad autocomplete.
+
+** Dashboard aggregate states
+
+Materialized dashboard tables may store mergeable states such as:
+
+#+BEGIN_SRC sql
+countState()
+sumState(duration_ns)
+minState(duration_ns)
+maxState(duration_ns)
+quantilesTDigestState(0.5, 0.9, 0.95, 0.99)(duration_ns)
+#+END_SRC
+
+Initial rollups should cover only measured common dimensions and time buckets.
+Do not construct a cube over every dynamic attribute. Unsupported groupings use
+the raw table.
+
+** Exact and approximate modes
+
+- =auto=: use mergeable approximate states or raw approximate functions when
+  they satisfy the query.
+- =exact=: execute against full-resolution values with stricter cost limits.
+- =raw=: force raw-event execution for validation and forensic workflows.
+
+Exact and approximate results must be clearly identified in API responses and
+query diagnostics.
+
+** Storage tiers
+
+Retain one logical raw table while allowing ClickHouse storage policies to move
+older parts from local NVMe to object storage. Measure cold-query latency rather
+than assuming object-backed parts satisfy interactive exploration.
+
+* Benchmark Volume Definition
+
+Each test records three independent byte measurements:
+
+1. =logical_input_bytes=: GCP-equivalent pre-index event bytes. This defines the
+   1 TB, 10 TB, and 100 TB test levels.
+2. =clickhouse_uncompressed_bytes=: =system.parts.data_uncompressed_bytes= for
+   the internal columnar representation.
+3. =physical_bytes=: =system.parts.bytes_on_disk= summed across base tables,
+   indexes, projections, and derived tables.
+
+Report:
+
+#+BEGIN_SRC text
+base compression ratio      = logical_input_bytes / base_table_physical_bytes
+storage amplification       = all_physical_bytes / base_table_physical_bytes
+effective physical ratio    = logical_input_bytes / all_physical_bytes
+#+END_SRC
+
+Volume and ingestion rate are separate benchmark axes. A retained 100 TB corpus
+must be tested while ingestion continues at representative rates rather than
+only as a static database.
+
+Provisional daily-rate targets at 1.9 KB/event are:
+
+#+BEGIN_SRC text
+500M events/day       5,787 events/sec       ~0.96 TB/day
+1B events/day        11,574 events/sec       ~1.9 TB/day
+3B events/day        34,722 events/sec       ~5.8 TB/day
+#+END_SRC
+
+* Corpus Scaling Method
+
+- Select natural, contiguous event-time subsets for 1 TB and 10 TB.
+- Preserve the original distribution, width, nullability, and attribute
+  cardinality during schema comparisons.
+- Build 100 TB by replaying the complete corpus into distinct shifted daily
+  partitions.
+- Regenerate timestamps and event IDs for each replay.
+- Rotate or regenerate selected naturally changing high-cardinality dimensions,
+  such as pod, task, and instance IDs, so long-retention cardinality does not
+  remain artificially fixed.
+- Keep the same transformed corpus for every schema candidate.
+- Record that repeated body distributions remain a limitation of the synthetic
+  100 TB corpus.
+- Do not benchmark with exact duplicate inserts in the same time partition.
+
+* Representative Query Inventory
+
+Every schema must run the same parameterized inventory:
+
+1. Recent unscoped tail by dataset and time.
+2. Recent tail scoped by service and severity.
+3. Body token/text search.
+4. Exact filter on a promoted low-cardinality field.
+5. Exact filter on a dynamic low-cardinality field.
+6. Exact lookup on a dynamic high-cardinality identifier.
+7. Multiple dynamic-field conjunction with mixed selectivity.
+8. Field-name discovery.
+9. Allowed field-value discovery.
+10. Trace waterfall lookup by trace ID.
+11. Trace lookup including correlated logs.
+12. Count/rate time series over a promoted grouping.
+13. Duration heatmap over a promoted grouping.
+14. Approximate p50/p90/p95/p99 over a promoted grouping.
+15. Approximate percentile grouped by an arbitrary dynamic field.
+16. Exact percentile over a bounded raw window.
+17. High-cardinality arbitrary group-by with planner guardrails.
+18. Standard dashboard query set under concurrent ingestion.
+19. Concurrent dashboard and exploratory workloads.
+20. Cold/object-storage versions of selected exploration queries.
+
+Each run records:
+
+- cold and warm latency, including p50 and p95 over repeated runs;
+- rows and bytes read;
+- peak query memory;
+- result rows and correctness checksum;
+- selected parts, granules, indexes, and projections;
+- CPU time and query concurrency;
+- background merges, pending parts, and ingest lag;
+- physical bytes for every supporting schema object.
+
+Initial latency and concurrency acceptance thresholds must be agreed before the
+1 TB bakeoff. Relative improvement alone is not a product acceptance criterion.
+
+* Implementation Phases
+
+** Phase 0: benchmark contract and reproducibility
+
+- [X] Inventory the Parquet corpus by files, rows, bytes, and daily coverage.
+- [X] Establish the provisional GCP monthly calibration and distinguish it from
+  canonical JSON reconstruction size.
+- [X] Establish experiment and architecture decision record conventions.
+- [X] Record the initial corpus profile and unified-event storage boundary.
+- [ ] Verify the exact GCP metric, bucket scope, exclusions, and calendar period
+  represented by the 32 TB monthly figure.
+- [ ] Define the repeatable transformation from Parquet rows to each candidate
+  event schema.
+- [ ] Define logical input byte accounting and persist it with benchmark runs.
+- [ ] Turn the representative query inventory into versioned fixtures.
+- [ ] Agree query latency, concurrency, ingestion, and maximum amplification
+  acceptance thresholds.
+- [ ] Capture hardware, ClickHouse settings, caches, and storage configuration
+  with every run.
+
+** Phase 1: 1 TB schema bakeoff
+
+- [ ] Implement native JSON, Map, and typed-array candidate tables.
+- [ ] Load the same approximately 1 TB natural subset into each candidate.
+- [ ] Measure ingestion, merge behavior, base compression, and total storage.
+- [ ] Run the complete query inventory with cold and warm cache conditions.
+- [ ] Compare candidate sort keys and timestamp bucket widths.
+- [ ] Compare trace projection and derived trace-table approaches using a
+  deterministic correlated-event fixture.
+- [ ] Select the base attribute representation, sort key, identifier types, and
+  promoted-column baseline in a written decision record.
+
+** Phase 2: unified query semantics
+
+- [ ] Define the event filter, grouping, time-series, heatmap, percentile, and
+  raw-result query contract.
+- [ ] Implement a planner that chooses raw, projection, metadata, or aggregate
+  paths without changing query semantics.
+- [ ] Implement and expose exact, approximate, and raw execution modes.
+- [ ] Return plan diagnostics including selected storage path and approximation
+  mode.
+- [ ] Prove logs, spans, and application events can be queried together.
+- [ ] Prove trace rendering includes span events and correlated logs.
+
+** Phase 3: dashboard and metadata acceleration
+
+- [ ] Implement bounded field-name and field-value catalogs.
+- [ ] Implement the minimum measured aggregate states needed by the dashboard
+  fixture.
+- [ ] Route eligible dashboard queries to aggregate states with raw fallback.
+- [ ] Add normalized query-result caching and measure hit behavior.
+- [ ] Add query cost estimation and guardrails for raw exact and
+  high-cardinality operations.
+- [ ] Verify derived storage remains within the agreed amplification budget.
+
+** Phase 4: 10 TB validation
+
+- [ ] Load a natural approximately 10 TB subset while sustaining representative
+  ingestion.
+- [ ] Run the full inventory and mixed-concurrency workload.
+- [ ] Validate dashboard isolation from exploratory scans.
+- [ ] Measure query performance during merges and after restart.
+- [ ] Validate object-storage or cold-tier behavior on selected partitions.
+- [ ] Confirm storage ratio and capacity assumptions for the 100 TB run.
+- [ ] Record any schema or planner changes required before scaling further.
+
+** Phase 5: 100 TB architectural validation
+
+- [ ] Generate the approximately 100 TB transformed corpus reproducibly.
+- [ ] Load it at the 1B-events/day rate and then at the 3B-events/day rate.
+- [ ] Run hot, mixed-age, and cold query workloads during sustained ingestion.
+- [ ] Validate merge capacity, part counts, retention movement, and recovery.
+- [ ] Determine whether the target requires sharding and measure the chosen
+  shard key if it does.
+- [ ] Measure replica rebuild and failure-recovery behavior.
+- [ ] Produce a cost and capacity model per retained logical TB.
+- [ ] Decide whether the design is ready for a later 1 PB clustered benchmark.
+
+* Decision Gates
+
+** After 1 TB
+
+Choose the event attribute representation, base sort key, partitioning,
+identifier representation, trace access path, and initial promoted columns. Do
+not proceed with all candidates to 10 TB.
+
+** After 10 TB
+
+Confirm that the chosen schema, dashboard materializations, metadata catalogs,
+and query planner meet product thresholds without unbounded storage
+amplification. Size the physical environment required for 100 TB.
+
+** After 100 TB
+
+Decide the production sharding, replication, storage-tier, workload-isolation,
+and recovery architecture. Treat 1 PB as a separate distributed-systems test,
+not a linear extrapolation.
+
+* Open Questions
+
+- What exact GCP metric and bucket scope produced the 32 TB monthly figure?
+- What retention targets apply to local, object-backed, and archival data?
+- What are the interactive p50/p95 latency targets by query class and time
+  range?
+- What dashboard and exploratory concurrency must one deployment support?
+- Is exact aggregation required synchronously above a bounded scan cost, or may
+  it run as an asynchronous query job?
+- Which tenancy boundary must lead the physical sort and sharding keys?
+- Which fields must be searchable as text versus exact structured values?
+- Should raw source JSON be retained indefinitely after normalized typed fields
+  are stored?
