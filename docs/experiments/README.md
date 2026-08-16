@@ -31,3 +31,4 @@ conditions. Add a new run or record and link the relationship.
 | 000 | Completed | [GCP Parquet corpus profile](000-gcp-parquet-corpus-profile.md) |
 | 001 | Completed | [Local benchmark host profile](001-local-benchmark-host-profile.md) |
 | 002 | Completed | [Native ClickHouse harness smoke test](002-native-clickhouse-harness-smoke.md) |
+| 003 | In progress | [GCP Parquet source adapter calibration](003-gcp-parquet-source-adapter.md) |
