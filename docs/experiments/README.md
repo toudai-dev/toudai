@@ -29,3 +29,4 @@ conditions. Add a new run or record and link the relationship.
 | ID | Status | Experiment |
 |---|---|---|
 | 000 | Completed | [GCP Parquet corpus profile](000-gcp-parquet-corpus-profile.md) |
+| 001 | Completed | [Local benchmark host profile](001-local-benchmark-host-profile.md) |
