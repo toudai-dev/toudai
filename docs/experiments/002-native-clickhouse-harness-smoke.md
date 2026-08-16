@@ -25,6 +25,10 @@ administration requires an interactive `sudo` password on this host. The smoke
 directory was therefore created directly on the writable `fast-storage` pool
 root and removed after validation.
 
+On 2026-08-16 the child datasets were created and verified with the intended
+properties. The smoke test was repeated successfully against the default
+`/mnt/fast-storage/lighthouse` root.
+
 ## Method
 
 The smoke command:
@@ -68,6 +72,7 @@ scripts/benchmark-clickhouse stop
 | Remaining ClickHouse processes | None |
 | Temporary root size before cleanup | 204 KiB |
 | Temporary root cleanup | Passed |
+| Final SSD dataset smoke test | Passed |
 
 The first attempted start failed because ClickHouse treats configuration
 property overrides as positional arguments after a `--` separator. The
@@ -77,16 +82,13 @@ lifecycle script was corrected and the complete smoke test then passed.
 
 - Native ClickHouse can run without a system service or container and keep all
   benchmark state off the OS disk.
-- The versioned configuration and lifecycle script are sufficient for the next
-  small load calibration.
+- The versioned configuration and lifecycle script supported the subsequent
+  source-adapter calibration.
 - This smoke test validates control flow and permissions only; it provides no
   storage, ingestion, or query-performance evidence.
-- The final benchmark root still needs its quota-limited ZFS child dataset.
+- The final SSD and HDD benchmark datasets are available with 750 GiB and 4 TiB
+  refquotas respectively.
 
 ## Follow-ups
 
-- Run `scripts/benchmark-storage-setup` once with interactive `sudo` access.
-- Record the resulting ZFS properties before loading data.
 - Add run manifests and system-table measurement collection.
-- Load a small representative Parquet subset to calibrate the three candidate
-  attribute representations before scaling to 1 TB.

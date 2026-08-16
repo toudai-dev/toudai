@@ -61,16 +61,98 @@ is not a valid candidate because it changes source semantics.
 6. The adapter derives stable IDs and promoted fields identically for all three
    attribute representations.
 
-## Still To Define Before Loading
+## Initial Mapping
 
-- Exact common-envelope mapping for GCP resource labels, log labels,
-  `json_payload`, `text_payload`, and `proto_payload`.
-- Deterministic event-ID fallback when `insert_id` is empty.
-- Representation of nested objects and arrays in the Map and typed-array
-  candidates.
+The first executable adapter uses the following mapping for comparison. It is a
+benchmark hypothesis rather than a production schema decision:
+
+- GCP log `labels` become resource attributes with their literal keys.
+- GCP monitored-resource type and labels use the `gcp.resource.*` prefix in the
+  same resource namespace, avoiding collisions with OpenTelemetry keys.
+- `json_payload` becomes event attributes. `proto_payload` is the fallback when
+  no JSON payload exists.
+- `json_payload.message`, then `text_payload`, supplies the body.
+- `service.name` and `service.namespace` are promoted from literal log-label
+  keys. The monitored-resource namespace is the environment fallback.
+- GCP `insert_id` supplies the event ID. A stable SipHash of timestamp, log
+  name, and raw source is the fallback.
+- Trace IDs are stripped from the GCP resource-name prefix. This file has no
+  populated trace or span IDs, so that mapping still needs another fixture.
+- The original `raw_entry` is retained in `source_raw` for fidelity and later
+  storage-sensitivity measurement.
+
+The Map candidate converts top-level scalar values to strings and retains
+objects and arrays as JSON strings. The typed-array candidate separates String,
+Int64, UInt64, Double, Bool, and JSON object/array/null values. The native JSON
+candidate preserves non-null dynamic types and parses dotted keys with escaping
+enabled. ClickHouse native JSON normalizes explicit nulls to absent paths; exact
+source reconstruction therefore depends on `source_raw` for this candidate.
+
+## 10,000-row Correctness Calibration
+
+The native harness loaded 10,000 rows from the representative file into native
+JSON, Map, and typed key/value-array tables. This bounded run validates the
+adapter and candidate equivalence; it is too small and too warm to support a
+performance conclusion.
+
+| Candidate | Rows | Service mismatches | Duration sum | Common-field checksum | Bytes on disk |
+|---|---:|---:|---:|---:|---:|
+| Native JSON | 10,000 | 0 | 2,973,400,783 | 8,348,159,556,535,307,444 | 1.86 MiB |
+| Map | 10,000 | 0 | 2,973,400,783 | 8,348,159,556,535,307,444 | 1.53 MiB |
+| Typed arrays | 10,000 | 0 | 2,973,400,783 | 8,348,159,556,535,307,444 | 1.56 MiB |
+
+The bounded source scan uses one thread because a parallel Parquet scan can
+reach its limit from different row groups. Two clean loads produced the same
+duration sum and checksum. The staged source table occupied 2.61 MiB.
+Storage sizes include one small part
+per table and must not be extrapolated. Matching duration aggregates and
+checksums establish that the three representations retained the tested promoted
+and duration values.
+
+## Complete Representative-File Calibration
+
+The same adapter then loaded all 3,629,077 rows. Each table was forced into one
+active part before recording storage. The resulting values are preliminary:
+background merges were not controlled, caches were warm, the candidates ran
+sequentially, and the staging load was not measured separately by a run
+manifest.
+
+| Candidate | Insert duration | Peak query memory | Final merge duration | Bytes on disk |
+|---|---:|---:|---:|---:|
+| Native JSON | 229.24 s | 2.46 GiB | 425.94 s | 895,001,985 |
+| Map | 43.18 s | 1.17 GiB | 18.92 s | 775,363,865 |
+| Typed arrays | 44.78 s | 1.28 GiB | 18.20 s | 797,066,333 |
+
+All candidates produced 3,629,077 rows, zero promoted-service mismatches, the
+same duration sum of 5,343,709,954,117, and the same common-field checksum of
+8,077,539,968,839,479,491. The staged source occupied 1,305,971,395 bytes.
+
+The source contained 39,678,041 top-level attributes, including 820,871
+explicit nulls across 659,314 rows. Map and typed arrays retained the full
+attribute count and all null markers after a fidelity correction. Native JSON
+omitted those null paths when serialized, confirming that absent and explicit
+null are not distinguishable in that representation without consulting the raw
+source or adding a separate marker.
+
+ClickHouse used JSON serialization v3, `advanced` shared-data serialization for
+merged parts, and `map_with_buckets` for level-zero parts. Under these exact
+conditions, native JSON used 15.5% more final-part storage than Map and took
+about 5.3× as long to insert and 22.5× as long to merge. These ratios are a strong
+reason to keep all candidates in the controlled bakeoff, not a selection
+decision: the next run must isolate insertion, merge, and query workloads and
+repeat them under captured cold and warm conditions.
+
+## Still To Define Before Timed Loading
+
 - Logical input-byte accounting for this transformed row set.
 - A trace-bearing input fixture for correctness tests that this file cannot
   supply.
+- Whether the GCP source mapping should classify structured payloads as `event`
+  instead of retaining their source signal kind `log`.
+- Whether `source_raw` is retained indefinitely or moved to a shorter or colder
+  retention tier after normalization.
+- Run manifests and measurement capture required before interpreting throughput
+  or latency.
 
 ## Interpretation
 
@@ -79,5 +161,5 @@ detail. Without the explicit string read, the native JSON candidate would be
 benchmarked against altered attributes while Map and typed-array candidates
 could preserve the original flat keys.
 
-The next step is to finalize the common-envelope mapping and encode it as a
-versioned transformation before writing any candidate table.
+The next step is to capture a complete run manifest and measurement set, then
+execute the versioned query inventory against each candidate.

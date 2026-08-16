@@ -39,6 +39,29 @@ Run the lifecycle and write smoke test with:
 scripts/benchmark-clickhouse smoke
 ```
 
+## GCP Parquet calibration load
+
+With the server running, load a bounded sample into the three schema candidates:
+
+```bash
+scripts/benchmark-clickhouse start
+scripts/benchmark-load-gcp \
+  /mnt/storage/lighthouse/2026-08-01/compact-0000.parquet 10000
+```
+
+The loader stages the Parquet JSON logical columns as strings so literal dotted
+attribute keys are not interpreted as nested JSON paths. It refuses to append
+to non-empty calibration tables. To deliberately replace a prior run:
+
+```bash
+LIGHTHOUSE_BENCH_RESET=1 scripts/benchmark-load-gcp \
+  /mnt/storage/lighthouse/2026-08-01/compact-0000.parquet 10000
+```
+
+Omit the row limit, or pass `0`, to load the complete file. Do not use this
+calibration loader for timed ingestion results yet: source staging and candidate
+loads are separate, and run-manifest measurement capture is still pending.
+
 Override the root or ports for an isolated run:
 
 ```bash

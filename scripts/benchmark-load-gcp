@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+source_path="${1:-}"
+row_limit="${2:-0}"
+
+if [[ -z "${source_path}" ]]; then
+  echo "usage: $0 PARQUET_FILE [ROW_LIMIT]" >&2
+  exit 2
+fi
+
+if [[ ! -f "${source_path}" ]]; then
+  echo "Parquet source does not exist: ${source_path}" >&2
+  exit 1
+fi
+
+if [[ ! "${row_limit}" =~ ^[0-9]+$ ]]; then
+  echo "ROW_LIMIT must be a non-negative integer" >&2
+  exit 2
+fi
+
+client=("${repo_root}/scripts/benchmark-clickhouse" client)
+"${client[@]}" --query "SELECT 1" >/dev/null
+"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/candidates.sql"
+
+tables=(gcp_source events_json events_map events_typed)
+existing_rows="$("${client[@]}" --query \
+  "SELECT sum(total_rows) FROM system.tables WHERE database = 'benchmark' AND name IN ('gcp_source', 'events_json', 'events_map', 'events_typed')")"
+
+if [[ "${existing_rows}" != "0" ]]; then
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+    echo "benchmark tables contain ${existing_rows} rows; set LIGHTHOUSE_BENCH_RESET=1 to replace them" >&2
+    exit 1
+  fi
+
+  for table in "${tables[@]}"; do
+    "${client[@]}" --query "TRUNCATE TABLE benchmark.${table}"
+  done
+fi
+
+structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
+limit_clause=""
+source_description="${source_path}"
+local_settings=()
+if [[ "${row_limit}" != "0" ]]; then
+  limit_clause="LIMIT {row_limit:UInt64}"
+  source_description+=" (limit ${row_limit})"
+  # A parallel Parquet scan can select different row groups before LIMIT.
+  # Bounded correctness samples must identify the same source rows on every run.
+  local_settings+=(--max_threads=1)
+fi
+
+echo "staging ${source_description}"
+clickhouse local \
+  "${local_settings[@]}" \
+  --param_source="${source_path}" \
+  --param_row_limit="${row_limit}" \
+  --param_structure="${structure}" \
+  --query "SELECT * FROM file({source:String}, Parquet, {structure:String}) ${limit_clause} FORMAT Native" |
+  "${client[@]}" --query "INSERT INTO benchmark.gcp_source FORMAT Native"
+
+echo "loading schema candidates"
+"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/load-candidates.sql"
+
+"${client[@]}" --query \
+  "SELECT table, sum(rows) AS rows, formatReadableSize(sum(bytes_on_disk)) AS bytes_on_disk FROM system.parts WHERE active AND database = 'benchmark' GROUP BY table ORDER BY table FORMAT PrettyCompactMonoBlock"

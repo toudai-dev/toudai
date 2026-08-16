@@ -409,7 +409,7 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 - [X] Add and smoke-test an isolated native ClickHouse benchmark harness.
 - [ ] Verify the exact GCP metric, bucket scope, exclusions, and calendar period
   represented by the 32 TB monthly figure.
-- [ ] Define the repeatable transformation from Parquet rows to each candidate
+- [X] Define the repeatable transformation from Parquet rows to each candidate
   event schema.
 - [ ] Define logical input byte accounting and persist it with benchmark runs.
 - [ ] Turn the representative query inventory into versioned fixtures.
@@ -420,7 +420,7 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 
 ** Phase 1: 1 TB schema bakeoff
 
-- [ ] Implement native JSON, Map, and typed-array candidate tables.
+- [X] Implement native JSON, Map, and typed-array candidate tables.
 - [ ] Load the same approximately 1 TB natural subset into each candidate.
 - [ ] Measure ingestion, merge behavior, base compression, and total storage.
 - [ ] Run the complete query inventory with cold and warm cache conditions.
