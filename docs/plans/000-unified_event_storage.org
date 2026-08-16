@@ -406,6 +406,7 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 - [X] Establish experiment and architecture decision record conventions.
 - [X] Record the initial corpus profile and unified-event storage boundary.
 - [X] Profile local benchmark storage, runtime options, and safe data placement.
+- [X] Add and smoke-test an isolated native ClickHouse benchmark harness.
 - [ ] Verify the exact GCP metric, bucket scope, exclusions, and calendar period
   represented by the 32 TB monthly figure.
 - [ ] Define the repeatable transformation from Parquet rows to each candidate
