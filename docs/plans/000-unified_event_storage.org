@@ -411,11 +411,14 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
   represented by the 32 TB monthly figure.
 - [X] Define the repeatable transformation from Parquet rows to each candidate
   event schema.
-- [ ] Define logical input byte accounting and persist it with benchmark runs.
-- [ ] Turn the representative query inventory into versioned fixtures.
+- [X] Define provisional GCP-equivalent logical input byte accounting and
+  persist it with benchmark runs.
+- [ ] Complete the versioned query fixture inventory; promoted, dynamic-field,
+  field-discovery, time-series, heatmap, and percentile fixtures are present,
+  while trace, concurrency, exact-percentile, and cold-tier fixtures remain.
 - [ ] Agree query latency, concurrency, ingestion, and maximum amplification
   acceptance thresholds.
-- [ ] Capture hardware, ClickHouse settings, caches, and storage configuration
+- [X] Capture hardware, ClickHouse settings, caches, and storage configuration
   with every run.
 
 ** Phase 1: 1 TB schema bakeoff

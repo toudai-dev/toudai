@@ -62,6 +62,36 @@ Omit the row limit, or pass `0`, to load the complete file. Do not use this
 calibration loader for timed ingestion results yet: source staging and candidate
 loads are separate, and run-manifest measurement capture is still pending.
 
+## Query benchmark runs
+
+Run the versioned query fixtures against all populated candidates:
+
+```bash
+nix develop --command scripts/benchmark-clickhouse start
+nix develop --command scripts/benchmark-run-queries experiment-005-smoke
+nix develop --command scripts/benchmark-clickhouse stop
+```
+
+By default, each fixture runs three times in both `clickhouse-cold` and `warm`
+modes. `clickhouse-cold` drops ClickHouse-managed caches but does not clear the
+Linux page cache or ZFS ARC; the manifest records this limitation. `warm` runs
+one unmeasured prewarm before its measured repetitions.
+
+Useful overrides:
+
+```bash
+LIGHTHOUSE_BENCH_REPETITIONS=1 \
+LIGHTHOUSE_BENCH_CACHE_MODES=warm \
+LIGHTHOUSE_BENCH_CANDIDATES=map,typed,json \
+nix develop --command scripts/benchmark-run-queries experiment-005-order-b
+```
+
+Run artifacts are immutable directories below
+`/mnt/fast-storage/lighthouse/runs` by default. Each contains the manifest,
+rendered SQL, raw results, wall timings, ClickHouse query log, settings, active
+parts, hardware details, and ZFS properties. Set
+`LIGHTHOUSE_BENCH_RUNS_ROOT` to place artifacts elsewhere.
+
 Override the root or ports for an isolated run:
 
 ```bash
