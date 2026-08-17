@@ -22,6 +22,16 @@ Prefer these commit types because they are the ones grouped or validated in the 
 
 Use standard conventional commit formatting such as `fix(promapi): handle empty query` or `chore(ci): align changelog workflow permissions`.
 
+## Version Control
+
+- Use `jj` for every version-control operation it supports whenever the workspace
+  is colocated with a Jujutsu repository. This includes status, diffs, history,
+  commits, rebases, bookmarks, and pushes.
+- Fall back to `git` only when `jj` is unavailable or does not provide the
+  required interoperability or check. Commands such as `git diff --check` and
+  GitHub CLI operations are acceptable because they are not repository-history
+  mutations that `jj` replaces.
+
 ## Development Commands
 
 ### Building and Running
