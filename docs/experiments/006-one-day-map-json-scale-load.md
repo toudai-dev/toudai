@@ -1,7 +1,7 @@
 # Experiment 006: One-day Map versus JSON scale load
 
-- **Status:** Planned
-- **Planned:** 2026-08-17
+- **Status:** Running
+- **Started:** 2026-08-17T01:54:44Z
 
 ## Question
 
