@@ -16,10 +16,15 @@ CREATE TABLE IF NOT EXISTS benchmark.gcp_source
     trace Nullable(String),
     span_id Nullable(String),
     trace_sampled Nullable(Bool),
-    raw_entry Nullable(String)
+    raw_entry Nullable(String),
+    source_file LowCardinality(String) DEFAULT ''
 )
 ENGINE = MergeTree
 ORDER BY (coalesce(timestamp, toDateTime64(0, 6, 'UTC')), coalesce(insert_id, ''));
+
+-- Existing calibration roots predate resumable multi-file staging.
+ALTER TABLE benchmark.gcp_source
+    ADD COLUMN IF NOT EXISTS source_file LowCardinality(String) DEFAULT '';
 
 CREATE OR REPLACE VIEW benchmark.gcp_events AS
 WITH
@@ -74,7 +79,8 @@ SELECT
     '{}' AS scope_json,
     attributes_json,
     attribute_entries,
-    source_raw
+    source_raw,
+    source_file
 FROM benchmark.gcp_source;
 
 -- ClickHouse JSON normalizes explicit null attributes to absent paths. The raw

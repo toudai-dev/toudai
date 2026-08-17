@@ -93,6 +93,41 @@ rendered SQL, raw results, wall timings, ClickHouse query log, settings, active
 parts, hardware details, and ZFS properties. Set
 `LIGHTHOUSE_BENCH_RUNS_ROOT` to place artifacts elsewhere.
 
+## Resumable day-scale load
+
+Stage one natural Parquet day and load Map and native JSON in hourly windows:
+
+```bash
+nix develop --command scripts/benchmark-clickhouse start
+
+LIGHTHOUSE_BENCH_RESET=1 \
+LIGHTHOUSE_BENCH_EXPECTED_ROWS=547356173 \
+nix develop --command scripts/benchmark-load-day \
+  /mnt/storage/lighthouse/2026-08-05 \
+  experiment-006-1tb
+```
+
+The initial invocation deliberately truncates all calibration tables. If it is
+interrupted, rerun the same command without `LIGHTHOUSE_BENCH_RESET`; completed
+files and hourly candidate windows are skipped after row-count and content
+checksum validation. The loader deliberately stops if an interrupted insert
+left a partial unit rather than silently duplicating or mutating benchmark data.
+The loader stops before starting a new unit when free space is below 100 GiB and
+records phase metrics, query logs, part growth, merges, settings, and the source
+file inventory.
+
+For an isolated harness validation, use a separate benchmark root and limit the
+input without changing production defaults:
+
+```bash
+LIGHTHOUSE_BENCH_MAX_FILES=1 \
+LIGHTHOUSE_BENCH_ROW_LIMIT_PER_FILE=10000 \
+LIGHTHOUSE_BENCH_RESET=1 \
+nix develop --command scripts/benchmark-load-day \
+  /mnt/storage/lighthouse/2026-08-05 \
+  day-loader-smoke
+```
+
 Override the root or ports for an isolated run:
 
 ```bash

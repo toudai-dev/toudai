@@ -57,7 +57,7 @@ clickhouse local \
   --param_source="${source_path}" \
   --param_row_limit="${row_limit}" \
   --param_structure="${structure}" \
-  --query "SELECT * FROM file({source:String}, Parquet, {structure:String}) ${limit_clause} FORMAT Native" |
+  --query "SELECT *, _file AS source_file FROM file({source:String}, Parquet, {structure:String}) ${limit_clause} FORMAT Native" |
   "${client[@]}" --query "INSERT INTO benchmark.gcp_source FORMAT Native"
 
 echo "loading schema candidates"
