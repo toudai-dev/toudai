@@ -60,7 +60,8 @@ LIGHTHOUSE_BENCH_RESET=1 scripts/benchmark-load-gcp \
 
 Omit the row limit, or pass `0`, to load the complete file. Do not use this
 calibration loader for timed ingestion results yet: source staging and candidate
-loads are separate, and run-manifest measurement capture is still pending.
+loads are separate, and ingestion-specific run-manifest capture is still
+pending.
 
 ## Query benchmark runs
 
