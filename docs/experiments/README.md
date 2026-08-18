@@ -29,3 +29,9 @@ conditions. Add a new run or record and link the relationship.
 | ID | Status | Experiment |
 |---|---|---|
 | 000 | Completed | [GCP Parquet corpus profile](000-gcp-parquet-corpus-profile.md) |
+| 001 | Completed | [Local benchmark host profile](001-local-benchmark-host-profile.md) |
+| 002 | Completed | [Native ClickHouse harness smoke test](002-native-clickhouse-harness-smoke.md) |
+| 003 | In progress | [GCP Parquet source adapter calibration](003-gcp-parquet-source-adapter.md) |
+| 004 | Completed | [ClickHouse 26.3.17 patch comparison](004-clickhouse-26-3-17-comparison.md) |
+| 005 | Completed | [Representative query calibration](005-representative-query-calibration.md) |
+| 006 | Completed | [One-day Map versus JSON scale load](006-one-day-map-json-scale-load.md) |

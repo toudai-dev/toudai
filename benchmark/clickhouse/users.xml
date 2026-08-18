@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <profiles>
+        <default>
+            <!-- Leave headroom for the server, filesystem cache, and host tools. -->
+            <max_memory_usage>42949672960</max_memory_usage>
+            <max_threads>12</max_threads>
+            <use_uncompressed_cache>0</use_uncompressed_cache>
+        </default>
+    </profiles>
+
+    <users>
+        <default>
+            <password></password>
+            <networks>
+                <ip>127.0.0.1</ip>
+                <ip>::1</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+        </default>
+    </users>
+
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+    </quotas>
+</clickhouse>

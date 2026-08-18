@@ -405,22 +405,30 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
   canonical JSON reconstruction size.
 - [X] Establish experiment and architecture decision record conventions.
 - [X] Record the initial corpus profile and unified-event storage boundary.
+- [X] Profile local benchmark storage, runtime options, and safe data placement.
+- [X] Add and smoke-test an isolated native ClickHouse benchmark harness.
 - [ ] Verify the exact GCP metric, bucket scope, exclusions, and calendar period
   represented by the 32 TB monthly figure.
-- [ ] Define the repeatable transformation from Parquet rows to each candidate
+- [X] Define the repeatable transformation from Parquet rows to each candidate
   event schema.
-- [ ] Define logical input byte accounting and persist it with benchmark runs.
-- [ ] Turn the representative query inventory into versioned fixtures.
+- [X] Define provisional GCP-equivalent logical input byte accounting and
+  persist it with benchmark runs.
+- [ ] Complete the versioned query fixture inventory; promoted, dynamic-field,
+  field-discovery, time-series, heatmap, and percentile fixtures are present,
+  while trace, concurrency, exact-percentile, and cold-tier fixtures remain.
 - [ ] Agree query latency, concurrency, ingestion, and maximum amplification
   acceptance thresholds.
-- [ ] Capture hardware, ClickHouse settings, caches, and storage configuration
+- [X] Capture hardware, ClickHouse settings, caches, and storage configuration
   with every run.
 
 ** Phase 1: 1 TB schema bakeoff
 
-- [ ] Implement native JSON, Map, and typed-array candidate tables.
-- [ ] Load the same approximately 1 TB natural subset into each candidate.
-- [ ] Measure ingestion, merge behavior, base compression, and total storage.
+- [X] Implement native JSON, Map, and typed-array candidate tables.
+- [X] Load the approximately 1 TB natural subset into Map and attempt the same
+  load into native JSON; terminate JSON at 63.2% after measured descriptor,
+  part-count, and inode exhaustion.
+- [X] Measure Map ingestion, merge behavior, base compression, and total
+  storage, and record native JSON's operational failure bounds.
 - [ ] Run the complete query inventory with cold and warm cache conditions.
 - [ ] Compare candidate sort keys and timestamp bucket widths.
 - [ ] Compare trace projection and derived trace-table approaches using a
