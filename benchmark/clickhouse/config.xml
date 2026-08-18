@@ -34,9 +34,9 @@
         <policies>
             <benchmark_overflow>
                 <volumes>
-                    <fast>
+                    <default>
                         <disk>default</disk>
-                    </fast>
+                    </default>
                     <overflow>
                         <disk>os_overflow</disk>
                     </overflow>
