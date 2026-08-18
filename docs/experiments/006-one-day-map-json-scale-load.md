@@ -1,7 +1,8 @@
 # Experiment 006: One-day Map versus JSON scale load
 
-- **Status:** Running
+- **Status:** Completed — native JSON terminated after operational failure
 - **Started:** 2026-08-17T01:54:44Z
+- **Completed:** 2026-08-18T19:43:56Z
 
 ## Question
 
@@ -101,9 +102,54 @@ After interruption, use the same command without
 
 ## Results
 
-Pending.
+Map completed all 24 hourly windows and retained all 547,356,173 source rows.
+Native JSON completed 14 windows and 345,964,348 logical rows before the
+candidate was terminated. Every completed window matched its source row count
+and content checksum.
 
-Planned immutable artifacts:
+| Measurement | Map | Native JSON |
+|---|---:|---:|
+| Completed rows | 547,356,173 | 345,964,348 |
+| Completed windows | 24/24 | 14/24 |
+| Recorded insert duration | 16,819 s (4.67 h) | 31,952 s (8.88 h) |
+| Peak insert memory | 1.42 GiB | 5.37 GiB |
+| Active physical size at comparison point | 172.45 GiB | 130.34 GiB |
+| Approximate physical bytes/logical row | 338 B | 405 B |
+| Active parts | 28 | 7,014 |
+
+The JSON duration excludes failed inserts, cleanup, server restarts, checksum
+rescans, and storage moves. After the first JSON failure, merges were suppressed
+and insertion thresholds were raised, so it is not a comparable steady-state
+ingestion result. The Map duration completed under normal background merging.
+
+At JSON's observed bytes per logical row, a complete day projects to about
+206.2 GiB, approximately 19.6% larger than Map. This projection includes the
+lightweight deletion mask left by recovery of the first partial JSON insert and
+is therefore conservative, but the size premium is consistent with Experiment
+005.
+
+### Operational failure sequence
+
+1. During the fourth JSON window, concurrent insertion and dynamic-subcolumn
+   merges exhausted the server's 524,288 file-descriptor limit. The insert left
+   4,670,930 partial rows. A checksum-validated lightweight deletion restored
+   the three completed windows.
+2. With JSON merges suppressed to avoid descriptor exhaustion, the table
+   reached the default 3,000-part insertion limit at 221.6M logical rows. The
+   recovery phase raised the delay and throw thresholds to 8,000 and 10,000.
+3. After 14 completed windows, the loader correctly stopped at its 100 GiB SSD
+   free-space guardrail.
+4. The completed Map partition moved successfully to the OS NVMe. Moving JSON
+   there failed after 299,467,353 physical rows and 110.78 GiB had moved because
+   the ext4 filesystem exhausted all 56,500,224 inodes. Only 612 remained even
+   though 120 GiB of byte capacity was free.
+5. Continuing JSON would risk the benchmark host without producing comparable
+   ingestion evidence. Failure-state parts, settings, query errors, and storage
+   measurements were captured before `events_json` was truncated. Truncation
+   restored the OS filesystem to 9% inode use. Map and staged source remained
+   intact at 547,356,173 rows each.
+
+Immutable artifacts and failure evidence:
 
 ```text
 /mnt/fast-storage/lighthouse/runs/experiment-006-2026-08-05-map-json
@@ -111,12 +157,27 @@ Planned immutable artifacts:
 
 ## Interpretation
 
-Pending.
+Map is the selected general-purpose long-tail attribute representation for the
+next experiment phase. Native JSON's known-path query advantage from Experiment
+005 does not offset its ingestion memory, merge, part-count, file-descriptor,
+and inode behavior on this high-cardinality GCP corpus.
+
+The failure is architectural rather than a single undersized host setting.
+Raising the file-descriptor or part limits merely moved the bottleneck: each
+dynamic path materialized many physical files per part, and suppressing merges
+caused unbounded part growth. Native JSON should not remain a primary candidate
+without a materially different bound on dynamic paths or physical layout.
+
+The preflight linear projection understated all major tables on this natural
+day: staged source reached 278.40 GiB and Map reached 172.45 GiB. Future capacity
+preflights need a safety factor derived from multiple natural days, plus
+temporary merge and inactive-part amplification.
 
 ## Follow-ups
 
-- Run the representative query suite against both scale candidates.
-- Compare natural merge convergence and storage after a controlled quiet
-  period without forcing a final merge.
-- Decide whether candidate query advantages justify JSON's expected ingestion
-  and storage cost.
+- Return Map from temporary OS overflow storage to the benchmark ZFS dataset.
+- Run the representative scale query suite against the complete Map day.
+- Benchmark bounded metadata catalogs and promoted/materialized fields as the
+  acceleration path for Map's slower known-value extraction.
+- Record the base attribute representation decision after the Map scale query
+  run; do not carry native JSON to 10 TB.

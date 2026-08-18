@@ -424,8 +424,11 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 ** Phase 1: 1 TB schema bakeoff
 
 - [X] Implement native JSON, Map, and typed-array candidate tables.
-- [ ] Load the same approximately 1 TB natural subset into each candidate.
-- [ ] Measure ingestion, merge behavior, base compression, and total storage.
+- [X] Load the approximately 1 TB natural subset into Map and attempt the same
+  load into native JSON; terminate JSON at 63.2% after measured descriptor,
+  part-count, and inode exhaustion.
+- [X] Measure Map ingestion, merge behavior, base compression, and total
+  storage, and record native JSON's operational failure bounds.
 - [ ] Run the complete query inventory with cold and warm cache conditions.
 - [ ] Compare candidate sort keys and timestamp bucket widths.
 - [ ] Compare trace projection and derived trace-table approaches using a
