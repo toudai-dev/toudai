@@ -24,6 +24,27 @@
     <user_files_path>/mnt/fast-storage/lighthouse/clickhouse/user_files/</user_files_path>
     <format_schema_path>/mnt/fast-storage/lighthouse/clickhouse/format_schemas/</format_schema_path>
 
+    <!-- Optional second local disk for capacity recovery during large runs. -->
+    <storage_configuration>
+        <disks>
+            <os_overflow>
+                <path replace="1" from_env="LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH">/mnt/fast-storage/lighthouse/clickhouse/os-overflow/</path>
+            </os_overflow>
+        </disks>
+        <policies>
+            <benchmark_overflow>
+                <volumes>
+                    <fast>
+                        <disk>default</disk>
+                    </fast>
+                    <overflow>
+                        <disk>os_overflow</disk>
+                    </overflow>
+                </volumes>
+            </benchmark_overflow>
+        </policies>
+    </storage_configuration>
+
     <users_config>users.xml</users_config>
     <user_directories>
         <users_xml>

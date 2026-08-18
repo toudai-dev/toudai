@@ -36,6 +36,8 @@ Environment:
   LIGHTHOUSE_BENCH_ROOT             Data root (default: /mnt/fast-storage/lighthouse)
   LIGHTHOUSE_CLICKHOUSE_TCP_PORT    Native port (default: 19000)
   LIGHTHOUSE_CLICKHOUSE_HTTP_PORT   HTTP port (default: 18123)
+  LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH
+                                      Optional local overflow disk path
 EOF
 }
 

@@ -33,6 +33,11 @@ scripts/benchmark-clickhouse client --query 'SELECT version()'
 scripts/benchmark-clickhouse stop
 ```
 
+Set `LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH` when a capacity experiment needs a
+second local ClickHouse disk. Tables remain on the primary disk unless their
+storage policy is explicitly changed to `benchmark_overflow` and parts are
+moved to `os_overflow`.
+
 Run the lifecycle and write smoke test with:
 
 ```bash
