@@ -108,62 +108,44 @@ done
   PARTITION BY toDate(timestamp)
   ORDER BY (tenant_id, dataset, toStartOfHour(timestamp), service_name, timestamp, event_id)
   SETTINGS storage_policy = 'benchmark_overflow';
-
-  CREATE TABLE benchmark.event_payloads AS benchmark.events_map
-  ENGINE = MergeTree
-  PARTITION BY toDate(timestamp)
-  ORDER BY (tenant_id, dataset, toStartOfHour(timestamp), service_name, timestamp, event_id)
-  SETTINGS storage_policy = 'benchmark_overflow';
 "
+"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/event-payloads.sql"
 
 "${client[@]}" --query "
   SELECT DISTINCT partition_id
   FROM system.parts
   WHERE active AND database = 'benchmark' AND table = 'events_map'
   ORDER BY partition_id FORMAT TSVRaw" > "${run_dir}/partitions.tsv"
-printf 'path\tpartition_id\n' > "${run_dir}/builds.tsv"
+printf 'path\tunit\n' > "${run_dir}/builds.tsv"
 
 echo "building" > "${run_dir}/status"
 while read -r partition_id; do
-  for path in hot payload; do
-    if [[ "${path}" == "hot" ]]; then
-      table="events_map_hot"
-    else
-      table="event_payloads"
-    fi
-    query_id="${query_prefix}_attach_${path}_${partition_id}"
-    "${client[@]}" --query_id="${query_id}" --query "
-      ALTER TABLE benchmark.${table}
-      ATTACH PARTITION ID '${partition_id}' FROM benchmark.events_map"
-    printf '%s\t%s\n' "${path}" "${partition_id}" >> "${run_dir}/builds.tsv"
-  done
+  query_id="${query_prefix}_attach_hot_${partition_id}"
+  "${client[@]}" --query_id="${query_id}" --query "
+    ALTER TABLE benchmark.events_map_hot
+    ATTACH PARTITION ID '${partition_id}' FROM benchmark.events_map"
+  printf 'hot\t%s\n' "${partition_id}" >> "${run_dir}/builds.tsv"
 done < "${run_dir}/partitions.tsv"
 
 "${client[@]}" --query_id="${query_prefix}_drop_hot_payload" --query "
   ALTER TABLE benchmark.events_map_hot DROP COLUMN source_raw"
-"${client[@]}" --query_id="${query_prefix}_drop_payload_normalized" --query "
-  ALTER TABLE benchmark.event_payloads
-    DROP COLUMN observed_at,
-    DROP COLUMN event_kind,
-    DROP COLUMN event_name,
-    DROP COLUMN body,
-    DROP COLUMN environment,
-    DROP COLUMN severity,
-    DROP COLUMN status_code,
-    DROP COLUMN trace_id,
-    DROP COLUMN span_id,
-    DROP COLUMN parent_span_id,
-    DROP COLUMN span_kind,
-    DROP COLUMN duration_ns,
-    DROP COLUMN resource,
-    DROP COLUMN scope,
-    DROP COLUMN attributes"
 
-while read -r partition_id; do
-  "${client[@]}" --query_id="${query_prefix}_move_payload_${partition_id}" --query "
-    ALTER TABLE benchmark.event_payloads
-    MOVE PARTITION ID '${partition_id}' TO DISK 'bulk_archive'"
-done < "${run_dir}/partitions.tsv"
+"${client[@]}" --query "
+  SELECT toString(toStartOfHour(timestamp)), count()
+  FROM benchmark.events_map
+  GROUP BY toStartOfHour(timestamp)
+  ORDER BY toStartOfHour(timestamp)
+  FORMAT TSVRaw" > "${run_dir}/windows.tsv"
+while IFS=$'\t' read -r window_start window_rows; do
+  window_id="$(date -u -d "${window_start}" +%Y%m%dT%H)"
+  window_end="$(date -u -d "${window_start} UTC +1 hour" '+%F %T')"
+  query_id="${query_prefix}_build_payload_${window_id}"
+  "${client[@]}" --query_id="${query_id}" \
+    --receive_timeout=86400 --send_timeout=86400 \
+    --param_window_start="${window_start}" --param_window_end="${window_end}" \
+    --queries-file "${repo_root}/benchmark/clickhouse/insert-payload-window.sql"
+  printf 'payload\t%s:%s\n' "${window_start}" "${window_rows}" >> "${run_dir}/builds.tsv"
+done < "${run_dir}/windows.tsv"
 
 echo "validating" > "${run_dir}/status"
 "${client[@]}" --query "
