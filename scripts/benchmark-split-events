@@ -170,7 +170,7 @@ if rows["source"]["payload_checksum"] != rows["payload"]["payload_checksum"]:
 PY
 
 event_id="$("${client[@]}" --query "SELECT event_id FROM benchmark.events_map ORDER BY timestamp DESC, event_id DESC LIMIT 1 FORMAT TSVRaw")"
-timestamp="$("${client[@]}" --param_event_id="${event_id}" --query "SELECT timestamp FROM benchmark.events_map WHERE event_id = {event_id:String} ORDER BY timestamp DESC LIMIT 1 FORMAT TSVRaw")"
+IFS=$'\t' read -r timestamp service_name < <("${client[@]}" --param_event_id="${event_id}" --query "SELECT timestamp, service_name FROM benchmark.events_map WHERE event_id = {event_id:String} ORDER BY timestamp DESC LIMIT 1 FORMAT TSVRaw")
 for path in source payload; do
   if [[ "${path}" == "source" ]]; then
     table="events_map"
@@ -178,10 +178,12 @@ for path in source payload; do
     table="event_payloads"
   fi
   "${client[@]}" --query_id="${query_prefix}_lookup_${path}" \
-    --param_event_id="${event_id}" --param_timestamp="${timestamp}" --query "
+    --param_event_id="${event_id}" --param_timestamp="${timestamp}" \
+    --param_service_name="${service_name}" --query "
       SELECT source_raw FROM benchmark.${table}
       WHERE tenant_id = 1 AND dataset = 'gcp-logging'
         AND timestamp = {timestamp:DateTime64(6, 'UTC')}
+        AND service_name = {service_name:String}
         AND event_id = {event_id:String}
       FORMAT JSONEachRow" > "${run_dir}/lookup-${path}.jsonl"
 done

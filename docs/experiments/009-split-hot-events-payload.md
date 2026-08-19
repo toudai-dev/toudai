@@ -16,8 +16,9 @@ Build two derived copies of the completed 547,356,173-row day:
 
 1. `events_map_hot` contains every normalized event column except `source_raw`
    and remains on the benchmark SSD policy.
-2. `event_payloads` contains tenant, dataset, timestamp, event ID, and exact raw
-   payload on the bulk archive policy.
+2. `event_payloads` contains tenant, dataset, timestamp, service, event ID, and
+   exact raw payload on the bulk archive policy. The small service column keeps
+   its ordering aligned with the ingestion-friendly hot table.
 
 Record build time, CPU, memory, physical bytes, row and checksum equality, and
 exact payload lookup behavior. Preserve all prior experiment artifacts on bulk
