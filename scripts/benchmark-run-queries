@@ -8,6 +8,7 @@ source_path="${LIGHTHOUSE_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compa
 candidate_order="${LIGHTHOUSE_BENCH_CANDIDATES:-json,map,typed}"
 cache_modes="${LIGHTHOUSE_BENCH_CACHE_MODES:-clickhouse-cold,warm}"
 repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-3}"
+fixture_filter="${LIGHTHOUSE_BENCH_FIXTURES:-}"
 gcp_bytes_per_event="${LIGHTHOUSE_GCP_BYTES_PER_EVENT:-1900}"
 run_id="${1:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
@@ -38,6 +39,7 @@ client=("${repo_root}/scripts/benchmark-clickhouse" client)
 
 IFS=',' read -r -a candidates <<< "${candidate_order}"
 IFS=',' read -r -a modes <<< "${cache_modes}"
+IFS=',' read -r -a selected_fixtures <<< "${fixture_filter}"
 for candidate in "${candidates[@]}"; do
   case "${candidate}" in
     json|map|typed) ;;
@@ -66,27 +68,38 @@ fi
 rows="$("${client[@]}" --query "SELECT count() FROM benchmark.events_map FORMAT TSVRaw")"
 start="$("${client[@]}" --query "SELECT min(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
 end="$("${client[@]}" --query "SELECT max(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
-IFS=$'\t' read -r service severity < <("${client[@]}" --query "
-  SELECT service_name, severity
-  FROM benchmark.events_map
-  WHERE notEmpty(service_name) AND notEmpty(severity)
-  GROUP BY service_name, severity
-  ORDER BY count() DESC, service_name, severity
-  LIMIT 1 FORMAT TSVRaw")
-IFS=$'\t' read -r dynamic_low_value caller < <("${client[@]}" --query "
-  SELECT attributes['type'], attributes['caller']
-  FROM benchmark.events_map
-  WHERE notEmpty(attributes['type']) AND notEmpty(attributes['caller'])
-  GROUP BY attributes['type'], attributes['caller']
-  ORDER BY count() DESC, attributes['type'], attributes['caller']
-  LIMIT 1 FORMAT TSVRaw")
-dynamic_high_value="$("${client[@]}" --query "
-  SELECT attributes['workspace_id']
-  FROM benchmark.events_map
-  WHERE notEmpty(attributes['workspace_id'])
-  GROUP BY attributes['workspace_id']
-  ORDER BY count() DESC, attributes['workspace_id']
-  LIMIT 1 FORMAT TSVRaw")"
+service="${LIGHTHOUSE_BENCH_SERVICE:-}"
+severity="${LIGHTHOUSE_BENCH_SEVERITY:-}"
+if [[ -z "${service}" || -z "${severity}" ]]; then
+  IFS=$'\t' read -r service severity < <("${client[@]}" --query "
+    SELECT service_name, severity
+    FROM benchmark.events_map
+    WHERE notEmpty(service_name) AND notEmpty(severity)
+    GROUP BY service_name, severity
+    ORDER BY count() DESC, service_name, severity
+    LIMIT 1 FORMAT TSVRaw")
+fi
+dynamic_low_value="${LIGHTHOUSE_BENCH_DYNAMIC_LOW_VALUE:-}"
+caller="${LIGHTHOUSE_BENCH_CALLER:-}"
+if [[ -z "${dynamic_low_value}" || -z "${caller}" ]]; then
+  IFS=$'\t' read -r dynamic_low_value caller < <("${client[@]}" --query "
+    SELECT attributes['type'], attributes['caller']
+    FROM benchmark.events_map
+    WHERE notEmpty(attributes['type']) AND notEmpty(attributes['caller'])
+    GROUP BY attributes['type'], attributes['caller']
+    ORDER BY count() DESC, attributes['type'], attributes['caller']
+    LIMIT 1 FORMAT TSVRaw")
+fi
+dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-}"
+if [[ -z "${dynamic_high_value}" ]]; then
+  dynamic_high_value="$("${client[@]}" --query "
+    SELECT attributes['workspace_id']
+    FROM benchmark.events_map
+    WHERE notEmpty(attributes['workspace_id'])
+    GROUP BY attributes['workspace_id']
+    ORDER BY count() DESC, attributes['workspace_id']
+    LIMIT 1 FORMAT TSVRaw")"
+fi
 body_term="${LIGHTHOUSE_BENCH_BODY_TERM:-error}"
 logical_input_bytes="$((rows * gcp_bytes_per_event))"
 
@@ -108,7 +121,8 @@ fi
 export RUN_ID="${run_id}" STARTED_AT="${started_at}" REVISION="${revision}"
 export CHANGE_ID="${change_id}" CLICKHOUSE_VERSION="${clickhouse_version}"
 export CANDIDATE_ORDER="${candidate_order}" CACHE_MODES="${cache_modes}"
-export REPETITIONS="${repetitions}" ROWS="${rows}" SOURCE_PATH="${source_path}"
+export REPETITIONS="${repetitions}" FIXTURE_FILTER="${fixture_filter}"
+export ROWS="${rows}" SOURCE_PATH="${source_path}"
 export SOURCE_BYTES="${source_bytes}" SOURCE_SHA256="${source_sha256}"
 export GCP_BYTES_PER_EVENT="${gcp_bytes_per_event}" LOGICAL_INPUT_BYTES="${logical_input_bytes}"
 export START="${start}" END="${end}" SERVICE="${service}" SEVERITY="${severity}"
@@ -134,6 +148,7 @@ manifest = {
         "warm": "Run one unmeasured prewarm immediately before measured repetitions; no cache is explicitly dropped.",
     },
     "repetitions": int(os.environ["REPETITIONS"]),
+    "fixture_filter": os.environ["FIXTURE_FILTER"].split(",") if os.environ["FIXTURE_FILTER"] else None,
     "dataset": {
         "source_path": os.environ["SOURCE_PATH"],
         "source_physical_bytes": int(os.environ["SOURCE_BYTES"]) if os.environ["SOURCE_BYTES"] else None,
@@ -178,7 +193,7 @@ parts_query="SELECT table, partition, name, rows, bytes_on_disk, data_compressed
 merges_query="SELECT database, table, elapsed, progress, num_parts, total_size_bytes_compressed, memory_usage FROM system.merges WHERE database = 'benchmark' ORDER BY table FORMAT JSONEachRow"
 "${client[@]}" --query "${parts_query}" > "${run_dir}/evidence/parts-before.jsonl"
 "${client[@]}" --query "${merges_query}" > "${run_dir}/evidence/merges-before.jsonl"
-printf 'query_id\tcandidate\tcache_mode\tfixture\trepetition\twall_ms\tresult_file\n' > "${run_dir}/timings.tsv"
+printf 'query_id\tcandidate\tcache_mode\tfixture\trepetition\twall_ms\tresult_file\tresult_sha256\n' > "${run_dir}/timings.tsv"
 
 safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
 query_prefix="lighthouse_${safe_run_id}"
@@ -220,6 +235,18 @@ for mode in "${modes[@]}"; do
     mkdir -p "${run_dir}/queries/${candidate}"
     for source_query in "${repo_root}/benchmark/queries/common/"*.sql "${repo_root}/benchmark/queries/${candidate}/"*.sql; do
       fixture="$(basename "${source_query}" .sql)"
+      if [[ -n "${fixture_filter}" ]]; then
+        selected=0
+        for selected_fixture in "${selected_fixtures[@]}"; do
+          if [[ "${fixture}" == "${selected_fixture}" ]]; then
+            selected=1
+            break
+          fi
+        done
+        if [[ "${selected}" == "0" ]]; then
+          continue
+        fi
+      fi
       rendered_query="${run_dir}/queries/${candidate}/${fixture}.sql"
       sed "s|{{table}}|benchmark.events_${candidate}|g" "${source_query}" > "${rendered_query}"
 
@@ -247,8 +274,9 @@ for mode in "${modes[@]}"; do
         "${client[@]}" --query_id="${query_id}" "${query_args[@]}" --queries-file "${rendered_query}" > "${run_dir}/${result_file}"
         finished_ns="$(date +%s%N)"
         wall_ms="$(((finished_ns - started_ns) / 1000000))"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-          "${query_id}" "${candidate}" "${mode}" "${fixture}" "${repetition}" "${wall_ms}" "${result_file}" \
+        result_sha256="$(sha256sum "${run_dir}/${result_file}" | cut -d' ' -f1)"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "${query_id}" "${candidate}" "${mode}" "${fixture}" "${repetition}" "${wall_ms}" "${result_file}" "${result_sha256}" \
           >> "${run_dir}/timings.tsv"
       done
     done
