@@ -7,6 +7,7 @@ runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 run_id="${1:-}"
 repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-1}"
 min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+reuse_accelerations="${LIGHTHOUSE_BENCH_REUSE_ACCELERATIONS:-0}"
 
 if [[ -z "${run_id}" ]]; then
   echo "usage: $0 RUN_ID" >&2
@@ -16,7 +17,7 @@ if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
   exit 2
 fi
-for value in "${repetitions}" "${min_free_bytes}"; do
+for value in "${repetitions}" "${min_free_bytes}" "${reuse_accelerations}"; do
   if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
     echo "numeric benchmark settings must be non-negative integers" >&2
     exit 2
@@ -32,7 +33,11 @@ if [[ -e "${run_dir}" ]]; then
   echo "run directory already exists: ${run_dir}" >&2
   exit 1
 fi
-if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+if [[ "${reuse_accelerations}" != "0" && "${reuse_accelerations}" != "1" ]]; then
+  echo "LIGHTHOUSE_BENCH_REUSE_ACCELERATIONS must be 0 or 1" >&2
+  exit 2
+fi
+if [[ "${reuse_accelerations}" != "1" && "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
   echo "acceleration rebuild requires LIGHTHOUSE_BENCH_RESET=1" >&2
   exit 1
 fi
@@ -95,6 +100,7 @@ export RUN_ID="${run_id}" STARTED_AT="${started_at}" REVISION="${revision}"
 export CHANGE_ID="${change_id}" CLICKHOUSE_VERSION="${clickhouse_version}"
 export ROWS="${rows}" START="${start}" END="${end}" REPETITIONS="${repetitions}"
 export DYNAMIC_LOW_VALUE="${dynamic_low_value}" DYNAMIC_HIGH_VALUE="${dynamic_high_value}"
+export REUSE_ACCELERATIONS="${reuse_accelerations}"
 python3 - "${run_dir}/manifest.json" <<'PY'
 import json
 import os
@@ -125,6 +131,7 @@ manifest = {
     },
     "cache_modes": ["clickhouse-cold", "warm"],
     "repetitions": int(os.environ["REPETITIONS"]),
+    "reused_accelerations": os.environ["REUSE_ACCELERATIONS"] == "1",
 }
 with open(sys.argv[1], "w", encoding="utf-8") as output:
     json.dump(manifest, output, indent=2, sort_keys=True)
@@ -147,11 +154,6 @@ sha256sum "${repo_root}/flake.lock" > "${run_dir}/evidence/flake-lock.sha256"
 parts_query="SELECT table, partition, name, rows, bytes_on_disk, data_compressed_bytes, data_uncompressed_bytes, marks, level FROM system.parts WHERE active AND database = 'benchmark' ORDER BY table, partition, name FORMAT JSONEachRow"
 "${client[@]}" --query "${parts_query}" > "${run_dir}/evidence/parts-before.jsonl"
 
-for table in accel_attribute_string accel_event_count_5m accel_duration_5m; do
-  "${client[@]}" --query "DROP TABLE IF EXISTS benchmark.${table} SYNC"
-done
-"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/accelerations.sql"
-
 printf 'query_id\tphase\n' > "${run_dir}/builds.tsv"
 run_build() {
   local phase="$1"
@@ -162,11 +164,29 @@ run_build() {
   printf '%s\t%s\n' "${query_id}" "${phase}" >> "${run_dir}/builds.tsv"
 }
 
-echo "building" > "${run_dir}/status"
-run_build "attribute_type" "${repo_root}/benchmark/clickhouse/insert-attribute-index.sql" --param_field_name=type
-run_build "attribute_workspace_id" "${repo_root}/benchmark/clickhouse/insert-attribute-index.sql" --param_field_name=workspace_id
-run_build "event_count_service" "${repo_root}/benchmark/clickhouse/insert-event-count-rollup.sql"
-run_build "duration" "${repo_root}/benchmark/clickhouse/insert-duration-rollup.sql"
+if [[ "${reuse_accelerations}" == "1" ]]; then
+  table_state="$("${client[@]}" --query "
+    SELECT count(), countIf(total_rows > 0)
+    FROM system.tables
+    WHERE database = 'benchmark'
+      AND name IN ('accel_attribute_string', 'accel_event_count_5m', 'accel_duration_5m')
+    FORMAT TSVRaw")"
+  if [[ "${table_state}" != $'3\t3' ]]; then
+    echo "expected three populated acceleration tables; found: ${table_state}" >&2
+    exit 1
+  fi
+else
+  for table in accel_attribute_string accel_event_count_5m accel_duration_5m; do
+    "${client[@]}" --query "DROP TABLE IF EXISTS benchmark.${table} SYNC"
+  done
+  "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/accelerations.sql"
+
+  echo "building" > "${run_dir}/status"
+  run_build "attribute_type" "${repo_root}/benchmark/clickhouse/insert-attribute-index.sql" --param_field_name=type
+  run_build "attribute_workspace_id" "${repo_root}/benchmark/clickhouse/insert-attribute-index.sql" --param_field_name=workspace_id
+  run_build "event_count_service" "${repo_root}/benchmark/clickhouse/insert-event-count-rollup.sql"
+  run_build "duration" "${repo_root}/benchmark/clickhouse/insert-duration-rollup.sql"
+fi
 
 "${client[@]}" --query "${parts_query}" > "${run_dir}/evidence/parts-after-build.jsonl"
 "${client[@]}" --query "
@@ -220,6 +240,52 @@ for mode in clickhouse-cold warm; do
     done
   done
 done
+
+python3 - "${run_dir}" "${repetitions}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+run_dir = Path(sys.argv[1])
+repetitions = int(sys.argv[2])
+checks = []
+for mode in ("clickhouse-cold", "warm"):
+    for repetition in range(1, repetitions + 1):
+        for fixture in (
+            "01-dynamic-low-cardinality",
+            "02-dynamic-high-cardinality",
+            "03-rate-by-service",
+        ):
+            raw = run_dir / "results" / f"{mode}-raw-{fixture}-r{repetition}.jsonl"
+            accelerated = run_dir / "results" / f"{mode}-accelerated-{fixture}-r{repetition}.jsonl"
+            checks.append((mode, fixture, repetition, raw.read_bytes() == accelerated.read_bytes()))
+
+        fixture = "04-duration-heatmap"
+        raw = json.loads((run_dir / "results" / f"{mode}-raw-{fixture}-r{repetition}.jsonl").read_text())
+        accelerated = json.loads((run_dir / "results" / f"{mode}-accelerated-{fixture}-r{repetition}.jsonl").read_text())
+        checks.append((mode, fixture, repetition,
+                       (raw["samples"], raw["duration_sum"]) ==
+                       (accelerated["samples"], accelerated["duration_sum"])))
+
+        fixture = "05-percentiles-by-caller"
+        def anchors(path):
+            return {
+                row["caller"]: (row["samples"], row["duration_sum"])
+                for row in map(json.loads, path.read_text().splitlines())
+            }
+        raw_path = run_dir / "results" / f"{mode}-raw-{fixture}-r{repetition}.jsonl"
+        accelerated_path = run_dir / "results" / f"{mode}-accelerated-{fixture}-r{repetition}.jsonl"
+        checks.append((mode, fixture, repetition, anchors(raw_path) == anchors(accelerated_path)))
+
+with (run_dir / "correctness.tsv").open("w", encoding="utf-8") as output:
+    output.write("cache_mode\tfixture\trepetition\tpassed\n")
+    for mode, fixture, repetition, passed in checks:
+        output.write(f"{mode}\t{fixture}\t{repetition}\t{str(passed).lower()}\n")
+
+failed = [check for check in checks if not check[-1]]
+if failed:
+    raise SystemExit(f"acceleration correctness checks failed: {failed}")
+PY
 
 capture_logs
 "${client[@]}" --query "${parts_query}" > "${run_dir}/evidence/parts-after-query.jsonl"
