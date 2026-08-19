@@ -429,6 +429,8 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
   part-count, and inode exhaustion.
 - [X] Measure Map ingestion, merge behavior, base compression, and total
   storage, and record native JSON's operational failure bounds.
+- [X] Establish the full-day Map baseline for the current query fixtures and
+  record the query-condition cache's effect on repeated dynamic predicates.
 - [ ] Run the complete query inventory with cold and warm cache conditions.
 - [ ] Compare candidate sort keys and timestamp bucket widths.
 - [ ] Compare trace projection and derived trace-table approaches using a

@@ -1,6 +1,6 @@
 # Experiment 007: Full-Day Map Query Baseline
 
-- **Status:** In progress
+- **Status:** Completed
 - **Date:** 2026-08-19
 - **Source mutation:** None
 
@@ -93,4 +93,86 @@ parts, merge activity, settings, repository revision, and host/storage state.
 
 ## Results
 
-Pending.
+The following artifacts contain the complete evidence:
+
+- `experiment-007-warm-pilot-a`: bounded promoted-column pilot
+- `experiment-007-warm-pilot-b`: remaining non-expanding fixture pilot
+- `experiment-007-map-baseline`: valid warm repetitions and a superseded cold
+  run
+- `experiment-007-map-cold-corrected`: cold repetitions with all ClickHouse
+  caches, including the query-condition cache, reset before every query
+- `experiment-007-map-field-discovery`: independently bounded field discovery
+
+The first controlled cold run exposed a benchmark defect rather than a storage
+result. ClickHouse 26.3 enables the query-condition cache by default. Repeated
+dynamic predicates progressively selected fewer marks because the runner had
+not reset that cache. Those cold measurements are superseded by
+`experiment-007-map-cold-corrected`; the warm measurements intentionally retain
+the cache and remain valid.
+
+Values below are median ClickHouse duration across three repetitions. Read
+volume is the median for the same repetitions, and peak memory is the maximum
+across all six cold and warm measurements.
+
+| Fixture | ClickHouse-cold | Warm | Cold read | Warm read | Peak memory |
+|---|---:|---:|---:|---:|---:|
+| Recent tail | 5.03 s | 4.92 s | 21.12 GiB | 21.12 GiB | 0.18 GiB |
+| Service and severity | 1.62 s | 1.56 s | 6.21 GiB | 6.21 GiB | 0.02 GiB |
+| Body search | 6.93 s | 6.28 s | 26.15 GiB | 24.96 GiB | 0.11 GiB |
+| Rate by service | 5.19 s | 5.13 s | 9.18 GiB | 9.18 GiB | 0.09 GiB |
+| Dynamic low-cardinality filter | 86.69 s | 11.75 s | 4.94 GiB | 3.18 GiB | 1.05 GiB |
+| Dynamic high-cardinality filter | 83.75 s | 36.35 s | 10.24 GiB | 9.43 GiB | 1.26 GiB |
+| Dynamic conjunction | 87.91 s | 13.00 s | 9.36 GiB | 4.49 GiB | 1.15 GiB |
+| Duration heatmap | 84.19 s | 76.86 s | 5.57 GiB | 5.56 GiB | 1.38 GiB |
+| Percentiles by caller | 95.04 s | 66.07 s | 8.56 GiB | 7.51 GiB | 0.72 GiB |
+
+Field discovery completed in 28.19 seconds ClickHouse-cold and 27.81 seconds
+warm. It scanned all 547,356,173 events, read 19.90 GiB, returned the 100 most
+frequent keys, and used 0.26 GiB peak query memory. Its cold and warm results
+matched byte-for-byte.
+
+## Correctness
+
+Exact query outputs were byte-stable across repetitions and cache modes. The
+duration heatmap consistently selected 133,820,058 samples with a duration sum
+of 581,514,702,978,425. Caller sample counts and duration sums were also stable
+for grouped percentiles. Histogram boundaries and t-digest values varied
+across parallel runs as expected for approximate aggregate functions.
+
+## Interpretation
+
+Map is operationally viable at the one-day, approximately 1 TB logical scale,
+but raw Map extraction alone does not meet an interactive exploration goal for
+arbitrary full-day aggregations on this host.
+
+- Promoted-column filters and scans complete in 1.6–6.9 seconds serially. A
+  one-day rate dashboard is feasible, but concurrency and tighter dashboard
+  latency will require pre-aggregation.
+- The current sort key does not make a full-day recent-tail query cheap: it
+  reads 21.12 GiB to return 100 rows. Timestamp ordering is interrupted by the
+  hour bucket and service, making this a priority for the sort-key comparison.
+- Cold dynamic filters take 84–88 seconds. The query-condition cache reduces
+  repeated predicates to 12–36 seconds, but an ephemeral cache cannot provide
+  predictable latency for ad hoc values.
+- Full-day heatmaps and grouped approximate percentiles take 77–95 seconds.
+  They preserve full-resolution query semantics, but dashboards need aggregate
+  states and exploratory scans need asynchronous execution or explicit cost
+  guardrails.
+- Raw field discovery is technically possible in 28 seconds, but scanning
+  every event for autocomplete is unnecessary. A bounded, time-aware field and
+  value catalog remains the appropriate production path.
+
+This evidence supports continuing with Map as the base flexible representation
+while adding measured acceleration paths. It does not support promoting every
+dynamic key or replacing raw events with aggregates: raw Map events remain the
+full-resolution source of truth, and promoted columns, metadata catalogs,
+projections, and aggregate states are derived paths selected by workload.
+
+## Decision and Next Experiment
+
+Advance Map to sort-key and promoted-field testing. The next experiment should
+compare the current ordering with alternatives that improve latest-event access
+and representative dynamic filters without regressing tenant/time pruning or
+ingestion behavior. Before finalizing the schema decision, add bounded
+allowed-value discovery, exact-percentile, high-cardinality group-by, trace,
+and concurrency fixtures from the representative inventory.
