@@ -1,6 +1,6 @@
 # Experiment 009: Split Hot Events and Raw Payloads
 
-- **Status:** Planned
+- **Status:** Completed
 - **Date:** 2026-08-19
 - **Source mutation:** None
 
@@ -34,4 +34,57 @@ storage before recreating the SSD pool.
 
 ## Results
 
-Pending.
+The accepted run is `experiment-009-split-hot-payload-v5`. Both derived tables
+contain 547,356,173 rows. Full-table normalized and payload checksums match the
+source, and deterministic raw-payload lookup output matches byte-for-byte.
+
+| Path | Physical bytes | Active parts | Placement |
+|---|---:|---:|---|
+| Original combined Map | 172.45 GiB | 24 | SSD |
+| Normalized hot Map | 104.23 GiB | 24 | SSD |
+| Exact raw payload archive | 72.95 GiB | 30 | Bulk ZFS |
+| Existing acceleration | 3.06 GiB | 25 | SSD |
+
+The payload table is 4.73 GiB larger than the original `source_raw` column
+alone because it also carries the tenant, dataset, timestamp, service, and event
+identity needed for independently managed retention and exact lookup.
+
+Ten equivalent days project to approximately 1.05 TiB of normalized events and
+measured acceleration on SSD, plus approximately 730 GiB of raw payloads on
+bulk storage. A roughly 1.8 TiB striped SSD pool would therefore be about 58%
+full rather than 95% full.
+
+The deterministic payload lookup took 351 ms from bulk storage versus 12 ms
+from the combined SSD table. The archive lookup is not intended as the primary
+exploration path; this latency is acceptable for explicit raw reconstruction
+and should be measured again with ten days retained.
+
+### Build Cost and Iteration Evidence
+
+The accepted payload copy streamed 24 hourly windows in 4,604 seconds (76.7
+minutes), used approximately 1.02 GiB peak query memory, and consumed 6,381
+CPU-seconds. The normalized hot table was derived from existing same-disk parts
+for this migration validation, so its 125 ms attach time is not an ingestion
+measurement. Fresh multi-day ingestion must write hot and payload paths
+directly and measure their combined throughput.
+
+Earlier attempts are intentionally retained as failed run evidence:
+
+- `experiment-009-split-hot-payload` used an event-ID-leading payload sort. It
+  was stopped after the first window demonstrated an avoidable write
+  bottleneck.
+- `experiment-009-split-hot-payload-v2` aligned payload ordering but rewrote
+  both complete tables and was stopped after confirming similar copy cost.
+- `experiment-009-split-hot-payload-v3` cloned compact source parts and dropped
+  unwanted payload columns. ClickHouse had to rewrite compact parts repeatedly;
+  it was stopped as a poor migration strategy.
+- `experiment-009-split-hot-payload-v4` verified the large-table reset safety
+  guard and failed before mutation because the reset lacked the explicit
+  ClickHouse size override added in v5.
+
+### Decision
+
+Adopt separate normalized hot events and exact raw payload storage for the
+ten-day experiment. Preserve raw payloads for full-resolution reconstruction,
+but do not spend SSD capacity or normal exploration I/O on a column that the
+representative query suite never reads.

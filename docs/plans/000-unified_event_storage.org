@@ -431,7 +431,7 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
   storage, and record native JSON's operational failure bounds.
 - [X] Establish the full-day Map baseline for the current query fixtures and
   record the query-condition cache's effect on repeated dynamic predicates.
-- [ ] Measure splitting exact raw payloads onto bulk storage before the ten-day
+- [X] Measure splitting exact raw payloads onto bulk storage before the ten-day
   retained-data benchmark.
 - [ ] Run the complete query inventory with cold and warm cache conditions.
 - [ ] Compare candidate sort keys and timestamp bucket widths.
