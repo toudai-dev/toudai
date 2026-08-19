@@ -221,7 +221,7 @@ for day in "${days[@]}"; do
     # into the next source directory.
     staged_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
     if [[ "${staged_rows}" != "0" ]]; then
-      "${client[@]}" --query "TRUNCATE TABLE benchmark.gcp_source"
+      "${client[@]}" --max_table_size_to_drop=0 --query "TRUNCATE TABLE benchmark.gcp_source"
     fi
     continue
   fi
@@ -323,7 +323,7 @@ for day in "${days[@]}"; do
     GROUP BY table ORDER BY table FORMAT JSONEachRow" > "${day_dir}/table-storage.jsonl"
   printf '%s\n' "${completed_at}" > "${day_dir}/completed-at"
   rebuild_daily_summary
-  "${client[@]}" --query "TRUNCATE TABLE benchmark.gcp_source"
+  "${client[@]}" --max_table_size_to_drop=0 --query "TRUNCATE TABLE benchmark.gcp_source"
 done
 
 capture_logs
