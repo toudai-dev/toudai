@@ -467,6 +467,8 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 
 ** Phase 4: 10 TB validation
 
+- [ ] Load ten natural days with normalized events on striped SSD and exact raw
+  payloads on bulk storage.
 - [ ] Load a natural approximately 10 TB subset while sustaining representative
   ingestion.
 - [ ] Run the full inventory and mixed-concurrency workload.
