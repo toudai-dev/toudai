@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+run_id="${1:-}"
+repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-1}"
+min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+
+if [[ -z "${run_id}" ]]; then
+  echo "usage: $0 RUN_ID" >&2
+  exit 2
+fi
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+for value in "${repetitions}" "${min_free_bytes}"; do
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    echo "numeric benchmark settings must be non-negative integers" >&2
+    exit 2
+  fi
+done
+if [[ "${repetitions}" == "0" ]]; then
+  echo "LIGHTHOUSE_BENCH_REPETITIONS must be positive" >&2
+  exit 2
+fi
+
+run_dir="${runs_root}/${run_id}"
+if [[ -e "${run_dir}" ]]; then
+  echo "run directory already exists: ${run_dir}" >&2
+  exit 1
+fi
+if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+  echo "acceleration rebuild requires LIGHTHOUSE_BENCH_RESET=1" >&2
+  exit 1
+fi
+
+available="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+if [[ "${available}" -lt "${min_free_bytes}" ]]; then
+  echo "benchmark dataset has ${available} bytes free, below the ${min_free_bytes}-byte guardrail" >&2
+  exit 1
+fi
+
+mkdir -p "${run_dir}/evidence" "${run_dir}/queries" "${run_dir}/results"
+echo "initializing" > "${run_dir}/status"
+client=("${repo_root}/scripts/benchmark-clickhouse" client)
+"${client[@]}" --query "SELECT 1" >/dev/null
+
+rows="$("${client[@]}" --query "SELECT count() FROM benchmark.events_map FORMAT TSVRaw")"
+if [[ "${rows}" != "547356173" && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
+  echo "expected 547,356,173 Map rows; found ${rows}" >&2
+  exit 1
+fi
+start="$("${client[@]}" --query "SELECT min(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
+end="$("${client[@]}" --query "SELECT max(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
+dynamic_low_value="${LIGHTHOUSE_BENCH_DYNAMIC_LOW_VALUE:-event_lifecycle}"
+dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-306e56de-c041-4b4d-9a62-d59e742bf58b}"
+
+safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
+query_prefix="lighthouse_accel_${safe_run_id}"
+
+capture_logs() {
+  "${client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
+  "${client[@]}" --query "SELECT * FROM system.query_log WHERE startsWith(query_id, '${query_prefix}_') ORDER BY event_time_microseconds FORMAT JSONEachRow" > "${run_dir}/query-log.jsonl" 2>/dev/null || true
+  "${client[@]}" --query "
+    SELECT query_id, query_duration_ms, read_rows, read_bytes, written_rows,
+           written_bytes, result_rows, memory_usage,
+           ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us,
+           ProfileEvents['SelectedParts'] AS selected_parts,
+           ProfileEvents['SelectedMarks'] AS selected_marks
+    FROM system.query_log
+    WHERE type = 'QueryFinish' AND startsWith(query_id, '${query_prefix}_')
+    ORDER BY event_time_microseconds FORMAT TSVWithNames
+  " > "${run_dir}/query-metrics.tsv" 2>/dev/null || true
+}
+
+on_error() {
+  echo "failed" > "${run_dir}/status"
+  capture_logs
+}
+trap on_error ERR
+
+revision_rev="@"
+if [[ -z "$(jj diff --summary 2>/dev/null)" ]]; then
+  revision_rev="@-"
+fi
+revision="$(jj log -r "${revision_rev}" --no-graph -T 'commit_id' 2>/dev/null || true)"
+change_id="$(jj log -r "${revision_rev}" --no-graph -T 'change_id' 2>/dev/null || true)"
+clickhouse_version="$("${client[@]}" --query "SELECT version() FORMAT TSVRaw")"
+started_at="$(date -u +%FT%TZ)"
+
+export RUN_ID="${run_id}" STARTED_AT="${started_at}" REVISION="${revision}"
+export CHANGE_ID="${change_id}" CLICKHOUSE_VERSION="${clickhouse_version}"
+export ROWS="${rows}" START="${start}" END="${end}" REPETITIONS="${repetitions}"
+export DYNAMIC_LOW_VALUE="${dynamic_low_value}" DYNAMIC_HIGH_VALUE="${dynamic_high_value}"
+python3 - "${run_dir}/manifest.json" <<'PY'
+import json
+import os
+import sys
+
+manifest = {
+    "run_id": os.environ["RUN_ID"],
+    "started_at": os.environ["STARTED_AT"],
+    "repository": {
+        "commit_id": os.environ["REVISION"],
+        "change_id": os.environ["CHANGE_ID"],
+    },
+    "clickhouse_version": os.environ["CLICKHOUSE_VERSION"],
+    "dataset": {
+        "rows": int(os.environ["ROWS"]),
+        "event_time_start": os.environ["START"],
+        "event_time_end": os.environ["END"],
+    },
+    "selected_accelerations": {
+        "string_attributes": ["type", "workspace_id"],
+        "count_dimensions": ["service_name"],
+        "duration_dimensions": ["all", "caller"],
+        "bucket": "5 minutes",
+    },
+    "parameters": {
+        "dynamic_low_value": os.environ["DYNAMIC_LOW_VALUE"],
+        "dynamic_high_value": os.environ["DYNAMIC_HIGH_VALUE"],
+    },
+    "cache_modes": ["clickhouse-cold", "warm"],
+    "repetitions": int(os.environ["REPETITIONS"]),
+}
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump(manifest, output, indent=2, sort_keys=True)
+    output.write("\n")
+PY
+
+{
+  date -u +%FT%TZ
+  uname -a
+  lscpu
+  free -h
+  df -h "${benchmark_root}"
+  zfs list fast-storage/lighthouse
+  zfs get compression,recordsize,atime,refquota,mountpoint fast-storage/lighthouse
+} > "${run_dir}/evidence/host-storage.txt"
+jj status > "${run_dir}/evidence/jj-status.txt" 2>&1 || true
+sha256sum "${repo_root}/flake.lock" > "${run_dir}/evidence/flake-lock.sha256"
+"${client[@]}" --query "SELECT name, value, changed, description FROM system.settings WHERE changed OR name IN ('max_threads', 'max_memory_usage', 'use_query_cache', 'use_query_condition_cache') ORDER BY name FORMAT JSONEachRow" > "${run_dir}/evidence/settings.jsonl"
+
+parts_query="SELECT table, partition, name, rows, bytes_on_disk, data_compressed_bytes, data_uncompressed_bytes, marks, level FROM system.parts WHERE active AND database = 'benchmark' ORDER BY table, partition, name FORMAT JSONEachRow"
+"${client[@]}" --query "${parts_query}" > "${run_dir}/evidence/parts-before.jsonl"
+
+for table in accel_attribute_string accel_event_count_5m accel_duration_5m; do
+  "${client[@]}" --query "DROP TABLE IF EXISTS benchmark.${table} SYNC"
+done
+"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/accelerations.sql"
+
+printf 'query_id\tphase\n' > "${run_dir}/builds.tsv"
+run_build() {
+  local phase="$1"
+  local sql_file="$2"
+  shift 2
+  local query_id="${query_prefix}_build_${phase}"
+  "${client[@]}" --query_id="${query_id}" --receive_timeout=86400 --send_timeout=86400 "$@" --queries-file "${sql_file}"
+  printf '%s\t%s\n' "${query_id}" "${phase}" >> "${run_dir}/builds.tsv"
+}
+
+echo "building" > "${run_dir}/status"
+run_build "attribute_type" "${repo_root}/benchmark/clickhouse/insert-attribute-index.sql" --param_field_name=type
+run_build "attribute_workspace_id" "${repo_root}/benchmark/clickhouse/insert-attribute-index.sql" --param_field_name=workspace_id
+run_build "event_count_service" "${repo_root}/benchmark/clickhouse/insert-event-count-rollup.sql"
+run_build "duration" "${repo_root}/benchmark/clickhouse/insert-duration-rollup.sql"
+
+"${client[@]}" --query "${parts_query}" > "${run_dir}/evidence/parts-after-build.jsonl"
+"${client[@]}" --query "
+  SELECT table, sum(rows) AS rows, sum(bytes_on_disk) AS bytes_on_disk,
+         sum(data_uncompressed_bytes) AS data_uncompressed_bytes, count() AS active_parts
+  FROM system.parts WHERE active AND database = 'benchmark'
+  GROUP BY table ORDER BY table FORMAT JSONEachRow" > "${run_dir}/evidence/table-storage.jsonl"
+
+query_args=(
+  --param_start="${start}"
+  --param_end="${end}"
+  --param_dynamic_low_value="${dynamic_low_value}"
+  --param_dynamic_high_value="${dynamic_high_value}"
+)
+printf 'query_id\tpath\tcache_mode\tfixture\trepetition\twall_ms\tresult_file\tresult_sha256\n' > "${run_dir}/timings.tsv"
+echo "querying" > "${run_dir}/status"
+for mode in clickhouse-cold warm; do
+  for path in raw accelerated; do
+    mkdir -p "${run_dir}/queries/${path}"
+    for source_query in "${repo_root}/benchmark/queries/acceleration/${path}/"*.sql; do
+      fixture="$(basename "${source_query}" .sql)"
+      rendered_query="${run_dir}/queries/${path}/${fixture}.sql"
+      cp "${source_query}" "${rendered_query}"
+
+      if [[ "${mode}" == "warm" ]]; then
+        prewarm_id="${query_prefix}_prewarm_${path}_${fixture//-/_}"
+        "${client[@]}" --query_id="${prewarm_id}" "${query_args[@]}" --queries-file "${rendered_query}" >/dev/null
+      fi
+
+      for repetition in $(seq 1 "${repetitions}"); do
+        if [[ "${mode}" == "clickhouse-cold" ]]; then
+          "${client[@]}" --multiquery --query "
+            SYSTEM DROP MARK CACHE;
+            SYSTEM DROP UNCOMPRESSED CACHE;
+            SYSTEM DROP QUERY CACHE;
+            SYSTEM DROP QUERY CONDITION CACHE;
+            SYSTEM DROP FILESYSTEM CACHE;
+          " >/dev/null
+        fi
+        query_id="${query_prefix}_${mode//-/_}_${path}_${fixture//-/_}_${repetition}"
+        result_file="results/${mode}-${path}-${fixture}-r${repetition}.jsonl"
+        started_ns="$(date +%s%N)"
+        "${client[@]}" --query_id="${query_id}" "${query_args[@]}" --queries-file "${rendered_query}" > "${run_dir}/${result_file}"
+        finished_ns="$(date +%s%N)"
+        wall_ms="$(((finished_ns - started_ns) / 1000000))"
+        result_sha256="$(sha256sum "${run_dir}/${result_file}" | cut -d' ' -f1)"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "${query_id}" "${path}" "${mode}" "${fixture}" "${repetition}" "${wall_ms}" "${result_file}" "${result_sha256}" \
+          >> "${run_dir}/timings.tsv"
+      done
+    done
+  done
+done
+
+capture_logs
+"${client[@]}" --query "${parts_query}" > "${run_dir}/evidence/parts-after-query.jsonl"
+date -u +%FT%TZ > "${run_dir}/completed-at"
+echo "completed" > "${run_dir}/status"
+trap - ERR
+
+echo "acceleration benchmark completed: ${run_dir}"
