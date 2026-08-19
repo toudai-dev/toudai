@@ -49,8 +49,9 @@ time series, dynamic low- and high-cardinality filters, dynamic conjunctions,
 raw field discovery, duration heatmaps, and approximate percentiles by a
 dynamic field. Raw field discovery is excluded from the first pilot because it
 expands every event's Map keys; it will be measured independently with an
-explicit resource limit and used to size a bounded metadata catalog rather
-than treated as a production query path.
+explicit five-minute execution limit and 8 GB memory limit. The result is used
+to size a bounded metadata catalog rather than treated as a production query
+path.
 
 Parameters are fixed to values established by experiment 005 for the same GCP
 logging corpus. This avoids hiding unmeasured full-table group-bys in benchmark
