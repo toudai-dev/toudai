@@ -1,0 +1,346 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+archive_root="${LIGHTHOUSE_CLICKHOUSE_ARCHIVE_PATH:-/mnt/storage/lighthouse-bench/archive}"
+source_root="${1:-}"
+run_id="${2:-}"
+day_count="${LIGHTHOUSE_BENCH_DAY_COUNT:-10}"
+gcp_bytes_per_event="${LIGHTHOUSE_GCP_BYTES_PER_EVENT:-1900}"
+min_hot_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+min_archive_free_bytes="${LIGHTHOUSE_BENCH_MIN_ARCHIVE_FREE_BYTES:-214748364800}"
+
+if [[ -z "${source_root}" || -z "${run_id}" ]]; then
+  echo "usage: $0 PARQUET_ROOT RUN_ID" >&2
+  exit 2
+fi
+if [[ ! -d "${source_root}" ]]; then
+  echo "source root does not exist: ${source_root}" >&2
+  exit 1
+fi
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+for value in "${day_count}" "${gcp_bytes_per_event}" "${min_hot_free_bytes}" "${min_archive_free_bytes}"; do
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    echo "numeric benchmark settings must be non-negative integers" >&2
+    exit 2
+  fi
+done
+if [[ "${day_count}" == "0" ]]; then
+  echo "LIGHTHOUSE_BENCH_DAY_COUNT must be positive" >&2
+  exit 2
+fi
+
+run_dir="${runs_root}/${run_id}"
+client=("${repo_root}/scripts/benchmark-clickhouse" client)
+"${client[@]}" --query "SELECT 1" >/dev/null
+configured_archive="$("${client[@]}" --query "SELECT path FROM system.disks WHERE name = 'bulk_archive' FORMAT TSVRaw")"
+if [[ "$(realpath -m "${configured_archive}")" != "$(realpath -m "${archive_root}")" ]]; then
+  echo "bulk_archive uses ${configured_archive}, not ${archive_root}" >&2
+  exit 1
+fi
+
+mapfile -t days < <(find "${source_root}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | head -n "${day_count}")
+if [[ "${#days[@]}" != "${day_count}" ]]; then
+  echo "expected ${day_count} source day directories, found ${#days[@]}" >&2
+  exit 1
+fi
+days_csv="$(IFS=,; echo "${days[*]}")"
+config=$(printf 'source_root=%s\ndays=%s\ngcp_bytes_per_event=%s\n' \
+  "$(realpath "${source_root}")" "${days_csv}" "${gcp_bytes_per_event}")
+
+capture_logs() {
+  "${client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
+  "${client[@]}" --param_prefix="${query_prefix}" --query "
+    SELECT query_id, query_duration_ms, read_rows, read_bytes, written_rows,
+           written_bytes, memory_usage,
+           ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us
+    FROM system.query_log
+    WHERE type = 'QueryFinish' AND startsWith(query_id, {prefix:String})
+    ORDER BY event_time_microseconds FORMAT TSVWithNames
+  " > "${run_dir}/query-metrics.tsv" 2>/dev/null || true
+}
+on_exit() {
+  local status=$?
+  if [[ "${status}" != "0" && -d "${run_dir}" ]]; then
+    echo "failed" > "${run_dir}/status"
+    date -u +%FT%TZ > "${run_dir}/failed-at"
+    capture_logs
+  fi
+}
+trap on_exit EXIT
+
+safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
+query_prefix="lighthouse_split_days_${safe_run_id}_"
+if [[ ! -e "${run_dir}" ]]; then
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+    echo "a new split-day run requires LIGHTHOUSE_BENCH_RESET=1" >&2
+    exit 1
+  fi
+  mkdir -p "${run_dir}/days" "${run_dir}/evidence"
+  printf '%s' "${config}" > "${run_dir}/config.txt"
+  date -u +%FT%TZ > "${run_dir}/started-at"
+  echo "initializing" > "${run_dir}/status"
+
+  "${client[@]}" --max_table_size_to_drop=0 --query "DROP DATABASE IF EXISTS benchmark SYNC"
+  "${client[@]}" --query "CREATE DATABASE benchmark"
+  "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/gcp-source-archive.sql"
+  "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/candidates.sql"
+  "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/split-events.sql"
+  "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/event-payloads.sql"
+else
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" == "1" ]]; then
+    echo "refusing to reset existing resumable run: ${run_dir}" >&2
+    exit 1
+  fi
+  if [[ "$(cat "${run_dir}/config.txt")" != "${config}" ]]; then
+    echo "run configuration does not match ${run_dir}/config.txt" >&2
+    exit 1
+  fi
+  if [[ "$(cat "${run_dir}/status")" == "completed" ]]; then
+    echo "run is already complete: ${run_dir}"
+    exit 0
+  fi
+fi
+
+revision_rev="@"
+if [[ -z "$(jj diff --summary 2>/dev/null)" ]]; then
+  revision_rev="@-"
+fi
+{
+  printf 'commit_id=%s\n' "$(jj log -r "${revision_rev}" --no-graph -T 'commit_id' 2>/dev/null || true)"
+  printf 'change_id=%s\n' "$(jj log -r "${revision_rev}" --no-graph -T 'change_id' 2>/dev/null || true)"
+  printf 'clickhouse_version=%s\n' "$("${client[@]}" --query "SELECT version() FORMAT TSVRaw")"
+  printf 'days=%s\n' "${days_csv}"
+} > "${run_dir}/manifest.txt"
+
+rebuild_daily_summary() {
+  printf 'day\trows\tparquet_bytes\tlogical_bytes\thot_bytes\tpayload_bytes\thot_free\tarchive_free\tcompleted_at\n' > "${run_dir}/daily-summary.tsv.tmp"
+  for summary_day in "${days[@]}"; do
+    if [[ -f "${run_dir}/days/${summary_day}/completed-at" ]]; then
+      cat "${run_dir}/days/${summary_day}/summary.tsv" >> "${run_dir}/daily-summary.tsv.tmp"
+    fi
+  done
+  mv "${run_dir}/daily-summary.tsv.tmp" "${run_dir}/daily-summary.tsv"
+}
+rebuild_daily_summary
+
+structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
+
+check_free_space() {
+  local hot_free archive_free
+  hot_free="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+  archive_free="$(df -B1 --output=avail "${archive_root}" | tail -1 | tr -d ' ')"
+  if [[ "${hot_free}" -lt "${min_hot_free_bytes}" ]]; then
+    echo "hot storage has ${hot_free} bytes free, below the ${min_hot_free_bytes}-byte guardrail" >&2
+    return 1
+  fi
+  if [[ "${archive_free}" -lt "${min_archive_free_bytes}" ]]; then
+    echo "archive storage has ${archive_free} bytes free, below the ${min_archive_free_bytes}-byte guardrail" >&2
+    return 1
+  fi
+}
+
+table_state() {
+  local table="$1" start="$2" end="$3" checksum_expression="$4"
+  "${client[@]}" --param_start="${start}" --param_end="${end}" --query "
+    SELECT count(), sum(${checksum_expression})
+    FROM benchmark.${table}
+    WHERE tenant_id = 1 AND dataset = 'gcp-logging'
+      AND timestamp >= {start:DateTime64(6, 'UTC')}
+      AND timestamp < {end:DateTime64(6, 'UTC')}
+    FORMAT TSVRaw"
+}
+
+load_target_window() {
+  local day="$1" target="$2" start="$3" rows="$4" expected_checksum="$5"
+  local target_dir="${run_dir}/days/${day}/state/${target}"
+  local window_id end marker prestate checksum_expression insert_file
+  window_id="$(date -u -d "${start}" +%Y%m%dT%H)"
+  end="$(date -u -d "${start} UTC +1 hour" '+%F %T')"
+  marker="${target_dir}/${window_id}.done"
+  prestate="${target_dir}/${window_id}.before"
+  [[ -f "${marker}" ]] && return
+  mkdir -p "${target_dir}"
+
+  if [[ "${target}" == "hot" ]]; then
+    checksum_expression="sipHash64(event_id, timestamp, attributes, resource, body)"
+    table="events_map_hot"
+    insert_file="${repo_root}/benchmark/clickhouse/insert-hot-event-from-source-window.sql"
+  else
+    checksum_expression="sipHash64(event_id, timestamp, source_raw)"
+    table="event_payloads"
+    insert_file="${repo_root}/benchmark/clickhouse/insert-payload-from-source-window.sql"
+  fi
+
+  if [[ ! -f "${prestate}" ]]; then
+    table_state "${table}" "${start}" "${end}" "${checksum_expression}" > "${prestate}.tmp"
+    mv "${prestate}.tmp" "${prestate}"
+  fi
+  IFS=$'\t' read -r before_rows before_checksum < "${prestate}"
+  current_state="$(table_state "${table}" "${start}" "${end}" "${checksum_expression}")"
+  IFS=$'\t' read -r current_rows current_checksum <<< "${current_state}"
+  expected_rows=$((before_rows + rows))
+  expected_target_checksum="$(python3 - "${before_checksum}" "${expected_checksum}" <<'PY'
+import sys
+print((int(sys.argv[1]) + int(sys.argv[2])) % (1 << 64))
+PY
+)"
+  if [[ "${current_rows}" == "${expected_rows}" && "${current_checksum}" == "${expected_target_checksum}" ]]; then
+    printf 'recovered\t%s\t%s\n' "${current_rows}" "${current_checksum}" > "${marker}"
+    return
+  fi
+  if [[ "${current_rows}" != "${before_rows}" || "${current_checksum}" != "${before_checksum}" ]]; then
+    echo "partial or unexpected ${target} window ${start}: before ${before_rows}/${before_checksum}, now ${current_rows}/${current_checksum}" >&2
+    return 1
+  fi
+
+  check_free_space
+  query_id="${query_prefix}${day//-/}_${target}_${window_id}"
+  echo "${day}: loading ${target} ${start} (${rows} rows)"
+  "${client[@]}" --query_id="${query_id}" --receive_timeout=86400 --send_timeout=86400 \
+    --param_window_start="${start}" --param_window_end="${end}" --queries-file "${insert_file}"
+  current_state="$(table_state "${table}" "${start}" "${end}" "${checksum_expression}")"
+  IFS=$'\t' read -r current_rows current_checksum <<< "${current_state}"
+  if [[ "${current_rows}" != "${expected_rows}" || "${current_checksum}" != "${expected_target_checksum}" ]]; then
+    echo "${target} validation failed for ${start}: expected ${expected_rows}/${expected_target_checksum}, found ${current_rows}/${current_checksum}" >&2
+    return 1
+  fi
+  printf 'loaded\t%s\t%s\n' "${current_rows}" "${current_checksum}" > "${marker}"
+}
+
+for day in "${days[@]}"; do
+  day_dir="${run_dir}/days/${day}"
+  mkdir -p "${day_dir}/state/staged"
+  if [[ -f "${day_dir}/completed-at" ]]; then
+    # A crash after completion but before truncation must not leak a staged day
+    # into the next source directory.
+    staged_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+    if [[ "${staged_rows}" != "0" ]]; then
+      "${client[@]}" --query "TRUNCATE TABLE benchmark.gcp_source"
+    fi
+    continue
+  fi
+  echo "staging-${day}" > "${run_dir}/status"
+
+  if [[ ! -f "${day_dir}/files.tsv" ]]; then
+    staged_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+    if [[ "${staged_rows}" != "0" ]]; then
+      echo "cannot create ${day} inventory with ${staged_rows} untracked staged rows" >&2
+      exit 1
+    fi
+    printf 'source_file\tpath\tphysical_bytes\texpected_rows\n' > "${day_dir}/files.tsv.tmp"
+    while IFS= read -r source_file; do
+      rows="$(clickhouse local --param_source="${source_file}" --query "SELECT count() FROM file({source:String}, Parquet) FORMAT TSVRaw")"
+      printf '%s\t%s\t%s\t%s\n' "$(basename "${source_file}")" "${source_file}" "$(stat -c %s "${source_file}")" "${rows}" >> "${day_dir}/files.tsv.tmp"
+    done < <(find "${source_root}/${day}" -maxdepth 1 -type f -name '*.parquet' -print | sort)
+    if [[ "$(wc -l < "${day_dir}/files.tsv.tmp")" == "1" ]]; then
+      echo "no Parquet files found for ${day}" >&2
+      exit 1
+    fi
+    mv "${day_dir}/files.tsv.tmp" "${day_dir}/files.tsv"
+  fi
+
+  while IFS=$'\t' read -r source_name source_path _physical_bytes source_rows; do
+    [[ "${source_name}" == "source_file" ]] && continue
+    marker="${day_dir}/state/staged/${source_name}"
+    [[ -f "${marker}" ]] && continue
+    existing_rows="$("${client[@]}" --param_name="${source_name}" --query "SELECT count() FROM benchmark.gcp_source WHERE source_file = {name:String} FORMAT TSVRaw")"
+    if [[ "${existing_rows}" == "${source_rows}" ]]; then
+      printf 'recovered\t%s\n' "${source_rows}" > "${marker}"
+      continue
+    fi
+    if [[ "${existing_rows}" != "0" ]]; then
+      echo "partial staged file ${source_name}: expected ${source_rows}, found ${existing_rows}" >&2
+      exit 1
+    fi
+    check_free_space
+    query_id="${query_prefix}${day//-/}_stage_${source_name//[^A-Za-z0-9]/_}"
+    echo "${day}: staging ${source_name} (${source_rows} rows)"
+    clickhouse local --param_source="${source_path}" --param_source_name="${source_name}" \
+      --param_structure="${structure}" --query "
+        SELECT *, CAST({source_name:String} AS LowCardinality(String)) AS source_file
+        FROM file({source:String}, Parquet, {structure:String}) FORMAT Native" |
+      "${client[@]}" --query_id="${query_id}" --receive_timeout=3600 \
+        --query "INSERT INTO benchmark.gcp_source FORMAT Native"
+    existing_rows="$("${client[@]}" --param_name="${source_name}" --query "SELECT count() FROM benchmark.gcp_source WHERE source_file = {name:String} FORMAT TSVRaw")"
+    if [[ "${existing_rows}" != "${source_rows}" ]]; then
+      echo "staged row mismatch for ${source_name}: expected ${source_rows}, found ${existing_rows}" >&2
+      exit 1
+    fi
+    printf 'loaded\t%s\n' "${source_rows}" > "${marker}"
+  done < "${day_dir}/files.tsv"
+
+  source_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+  inventory_rows="$(awk -F '\t' 'NR > 1 { total += $4 } END { print total + 0 }' "${day_dir}/files.tsv")"
+  if [[ "${source_rows}" != "${inventory_rows}" ]]; then
+    echo "${day} staged row mismatch: inventory ${inventory_rows}, table ${source_rows}" >&2
+    exit 1
+  fi
+  missing_timestamps="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_events WHERE event_timestamp IS NULL FORMAT TSVRaw")"
+  if [[ "${missing_timestamps}" != "0" ]]; then
+    echo "${day} contains ${missing_timestamps} events without timestamps" >&2
+    exit 1
+  fi
+  "${client[@]}" --query "
+    SELECT toString(toStartOfHour(event_timestamp)), count(),
+           sum(sipHash64(
+             event_id, event_timestamp,
+             mapFromArrays(
+               arrayMap(entry -> entry.1, attribute_entries),
+               arrayMap(entry -> entry.3, attribute_entries)
+             ),
+             resource_map, body
+           )),
+           sum(sipHash64(event_id, event_timestamp, source_raw))
+    FROM benchmark.gcp_events GROUP BY toStartOfHour(event_timestamp)
+    ORDER BY toStartOfHour(event_timestamp) FORMAT TSVRaw" > "${day_dir}/windows.tsv"
+
+  echo "loading-${day}" > "${run_dir}/status"
+  while IFS=$'\t' read -r window_start window_rows hot_checksum payload_checksum; do
+    load_target_window "${day}" hot "${window_start}" "${window_rows}" "${hot_checksum}"
+    load_target_window "${day}" payload "${window_start}" "${window_rows}" "${payload_checksum}"
+  done < "${day_dir}/windows.tsv"
+
+  hot_bytes="$("${client[@]}" --query "SELECT coalesce(sum(bytes_on_disk), 0) FROM system.parts WHERE active AND database = 'benchmark' AND table = 'events_map_hot' FORMAT TSVRaw")"
+  payload_bytes="$("${client[@]}" --query "SELECT coalesce(sum(bytes_on_disk), 0) FROM system.parts WHERE active AND database = 'benchmark' AND table = 'event_payloads' FORMAT TSVRaw")"
+  parquet_bytes="$(awk -F '\t' 'NR > 1 { total += $3 } END { printf "%.0f", total }' "${day_dir}/files.tsv")"
+  logical_bytes="$((source_rows * gcp_bytes_per_event))"
+  hot_free="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+  archive_free="$(df -B1 --output=avail "${archive_root}" | tail -1 | tr -d ' ')"
+  completed_at="$(date -u +%FT%TZ)"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "${day}" "${source_rows}" "${parquet_bytes}" "${logical_bytes}" "${hot_bytes}" \
+    "${payload_bytes}" "${hot_free}" "${archive_free}" "${completed_at}" > "${day_dir}/summary.tsv"
+  "${client[@]}" --query "
+    SELECT now64(3) AS captured_at, table, sum(rows) AS rows,
+           sum(bytes_on_disk) AS bytes_on_disk, count() AS active_parts
+    FROM system.parts WHERE active AND database = 'benchmark'
+    GROUP BY table ORDER BY table FORMAT JSONEachRow" > "${day_dir}/table-storage.jsonl"
+  printf '%s\n' "${completed_at}" > "${day_dir}/completed-at"
+  rebuild_daily_summary
+  "${client[@]}" --query "TRUNCATE TABLE benchmark.gcp_source"
+done
+
+capture_logs
+"${client[@]}" --query "
+  SELECT table, partition, name, rows, bytes_on_disk, data_compressed_bytes,
+         data_uncompressed_bytes, marks, level, disk_name
+  FROM system.parts WHERE active AND database = 'benchmark'
+  ORDER BY table, partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/parts-after-load.jsonl"
+{
+  date -u +%FT%TZ
+  uname -a
+  free -h
+  df -h "${benchmark_root}" "${archive_root}"
+  zpool status -P fast-storage storage
+  zfs list fast-storage/lighthouse storage/lighthouse-bench
+} > "${run_dir}/evidence/host-storage-after.txt"
+date -u +%FT%TZ > "${run_dir}/completed-at"
+echo "completed" > "${run_dir}/status"
+trap - EXIT
+echo "split-day load completed: ${run_dir}"
