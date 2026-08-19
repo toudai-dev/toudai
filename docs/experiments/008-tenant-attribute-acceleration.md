@@ -1,6 +1,6 @@
 # Experiment 008: Tenant Attribute Acceleration
 
-- **Status:** Planned
+- **Status:** Completed
 - **Date:** 2026-08-19
 - **Source mutation:** None
 
@@ -36,9 +36,8 @@ assume that every Map key should be indexed or aggregated.
 - Equal sample counts and sums for approximate heatmaps and percentiles.
 - The effect of low versus high cardinality on index storage and lookup cost.
 
-The experiment initially runs one cold and one warm repetition as a safety
-pilot. Controlled repetitions follow only after build size and query resource
-use are reviewed.
+The experiment ran one cold and one warm repetition as a safety pilot, followed
+by three controlled query-only repetitions against the same derived data.
 
 ## Guardrails
 
@@ -51,4 +50,116 @@ use are reviewed.
 
 ## Results
 
-Pending.
+Complete evidence is stored in:
+
+- `experiment-008-tenant-acceleration-pilot`: derived-table build, storage
+  evidence, and one-repetition safety query run.
+- `experiment-008-tenant-acceleration-controlled`: three cold and three warm
+  repetitions with automated correctness checks.
+
+### Build and Storage
+
+The attribute names do not divide cleanly into low and high cardinality in this
+natural dataset. `type` occurs on 170,143,336 events with 66,101 distinct
+values, while `workspace_id` occurs with a non-empty value on 152,817,265
+events and has approximately 42,919 distinct values. The fixture names are
+retained for continuity, but both indexes represent moderately high-cardinality
+fields with very frequent selected values.
+
+| Derived path | Build wall time | Rows written | Peak memory | CPU time |
+|---|---:|---:|---:|---:|
+| `type` string index | 165.20 s | 170,143,336 | 0.70 GiB | 802.53 s |
+| `workspace_id` string index | 199.01 s | 152,817,265 | 0.79 GiB | 858.98 s |
+| Service five-minute counts | 6.84 s | 7,983 | 0.09 GiB | 68.61 s |
+| Duration states | 176.01 s | 2,341 | 1.63 GiB | 1,466.54 s |
+
+The two string fields share one generic table with 322,960,601 rows and 3.06
+GiB physical storage. The service count rollup uses 31.96 KiB, and duration
+count, sum, histogram, and t-digest states use 4.34 MiB. Total acceleration
+storage is 3,287,866,502 bytes, or 1.78% of the 185,165,918,470-byte Map table.
+Overall Map-plus-acceleration amplification is 1.0178×.
+
+The batch build completed in approximately 9.1 minutes of summed query wall
+time and consumed approximately 3,197 CPU-seconds. That is acceptable for an
+asynchronous one-day backfill, but it does not establish sustainable
+ingestion-time maintenance cost.
+
+### Controlled Query Performance
+
+Values are median ClickHouse duration across three repetitions. Speedup compares
+the raw Map query with the derived path in the same cache mode.
+
+| Fixture | Cold raw | Cold accelerated | Speedup | Warm raw | Warm accelerated | Speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| Dynamic `type` filter | 84.50 s | 447 ms | 189× | 15.42 s | 423 ms | 36× |
+| Dynamic `workspace_id` filter | 82.96 s | 205 ms | 405× | 44.96 s | 198 ms | 227× |
+| Rate by service | 5.06 s | 14 ms | 362× | 5.16 s | 6 ms | 860× |
+| Duration heatmap | 80.71 s | 8 ms | 10,088× | 80.83 s | 7 ms | 11,548× |
+| Percentiles by caller | 92.58 s | 33 ms | 2,806× | 68.60 s | 31 ms | 2,213× |
+
+The selected `type` value matches 59,213,972 events and the selected
+`workspace_id` matches 16,538,385 events. These are intentionally demanding
+lookups rather than selective point queries. The accelerated queries still
+read 2.89 GiB and 1.14 GiB respectively to compute checksums over every matching
+event ID, but narrow ordered rows reduce CPU from hundreds of seconds to about
+3.7 and 1.7 seconds. More selective values should read fewer granules and rows;
+that remains to be measured directly.
+
+The count rollup reads 0.28 MiB. Duration heatmaps read 1.64 MiB, and caller
+percentiles read 0.43 MiB. Peak accelerated-query memory is approximately 64.5
+MiB for the indexes and 12.1 MiB for the aggregate paths.
+
+### Correctness
+
+All 30 controlled checks passed:
+
+- attribute-filter counts and event-ID checksums matched byte-for-byte;
+- all 7,983 rate buckets matched byte-for-byte;
+- heatmap sample count and duration sum matched raw execution; and
+- every caller's percentile sample count and duration sum matched raw
+  execution.
+
+Histogram boundaries and t-digest estimates differ slightly because merging
+stored approximate states changes aggregation order. This is acceptable only
+for an explicitly identified approximate or automatic execution mode. Exact
+mode continues to use raw Map values.
+
+## Interpretation
+
+Schema-stable tenant acceleration works extremely well for this dataset. It
+does not require tenant-specific columns: `tenant_id`, `field_name`, and
+`field_value` rows allow tenants to select different indexed fields in one
+physical schema, and generic dimension columns do the same for rollups.
+
+The data also argues against indexing every attribute automatically. Two fields
+already add 323 million derived rows, even though compression keeps their
+physical cost modest. Build CPU is substantial, field prevalence varies, and a
+tenant can create unbounded field names or dimensions. Automation should
+therefore operate on a bounded acceleration registry, not on schema discovery
+alone.
+
+The recommended control model is:
+
+1. Dashboard definitions explicitly create their required aggregate states.
+2. Workload observation recommends equality indexes for expensive, repeated
+   tenant-field predicates and estimates bytes from prevalence and value size.
+3. Automatic activation is allowed only within per-tenant field-count, storage,
+   cardinality, and backfill-CPU budgets.
+4. The planner activates a path only for its complete time-coverage watermark
+   and retains raw fallback for uncovered, unsupported, or exact queries.
+5. Unused accelerations expire after measured inactivity; raw events remain
+   unchanged.
+
+## Decision and Follow-ups
+
+Advance the generic attribute-index and aggregate-state approach. Before
+choosing automation thresholds or a production ingestion design:
+
+- measure selective, absent, range, and multi-field index predicates;
+- measure index-assisted raw event retrieval rather than aggregate checksums;
+- simulate tenants with different indexed fields and one high-volume noisy
+  tenant;
+- maintain the derived paths during representative ingestion and quantify
+  throughput, merge load, and lag;
+- test asynchronous backfill while dashboards and raw exploration run; and
+- define per-tenant storage and CPU budgets from those results.

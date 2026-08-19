@@ -452,7 +452,7 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 
 ** Phase 3: dashboard and metadata acceleration
 
-- [ ] Measure schema-stable tenant attribute indexes and configured aggregate
+- [X] Measure schema-stable tenant attribute indexes and configured aggregate
   states against the full-day Map baseline.
 - [ ] Implement bounded field-name and field-value catalogs.
 - [ ] Implement the minimum measured aggregate states needed by the dashboard
