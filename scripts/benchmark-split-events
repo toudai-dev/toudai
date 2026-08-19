@@ -100,7 +100,7 @@ PY
 jj status > "${run_dir}/evidence/jj-status.txt" 2>&1 || true
 
 for table in events_map_hot event_payloads; do
-  "${client[@]}" --query "DROP TABLE IF EXISTS benchmark.${table} SYNC"
+  "${client[@]}" --max_table_size_to_drop=0 --query "DROP TABLE IF EXISTS benchmark.${table} SYNC"
 done
 "${client[@]}" --multiquery --query "
   CREATE TABLE benchmark.events_map_hot AS benchmark.events_map
