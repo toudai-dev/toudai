@@ -144,7 +144,7 @@ manifest = {
     "candidate_order": os.environ["CANDIDATE_ORDER"].split(","),
     "cache_modes": os.environ["CACHE_MODES"].split(","),
     "cache_policy": {
-        "clickhouse-cold": "Drop ClickHouse mark, uncompressed, query, and filesystem caches before each measured query; OS and ZFS ARC remain uncontrolled.",
+        "clickhouse-cold": "Drop ClickHouse mark, uncompressed, query, query-condition, and filesystem caches before each measured query; OS and ZFS ARC remain uncontrolled.",
         "warm": "Run one unmeasured prewarm immediately before measured repetitions; no cache is explicitly dropped.",
     },
     "repetitions": int(os.environ["REPETITIONS"]),
@@ -187,7 +187,7 @@ PY
 } > "${run_dir}/evidence/host-storage.txt"
 jj status > "${run_dir}/evidence/jj-status.txt" 2>&1 || true
 sha256sum "${repo_root}/flake.lock" > "${run_dir}/evidence/flake-lock.sha256"
-"${client[@]}" --query "SELECT name, value, changed, description FROM system.settings WHERE changed OR name IN ('max_threads', 'max_memory_usage', 'use_query_cache') ORDER BY name FORMAT JSONEachRow" > "${run_dir}/evidence/settings.jsonl"
+"${client[@]}" --query "SELECT name, value, changed, description FROM system.settings WHERE changed OR name IN ('max_threads', 'max_memory_usage', 'use_query_cache', 'use_query_condition_cache') ORDER BY name FORMAT JSONEachRow" > "${run_dir}/evidence/settings.jsonl"
 "${client[@]}" --query "SELECT name, value FROM system.merge_tree_settings WHERE name LIKE 'object_%' OR name IN ('index_granularity', 'max_bytes_to_merge_at_max_space_in_pool') ORDER BY name FORMAT JSONEachRow" > "${run_dir}/evidence/merge-tree-settings.jsonl"
 parts_query="SELECT table, partition, name, rows, bytes_on_disk, data_compressed_bytes, data_uncompressed_bytes, marks, level FROM system.parts WHERE active AND database = 'benchmark' ORDER BY table, partition, name FORMAT JSONEachRow"
 merges_query="SELECT database, table, elapsed, progress, num_parts, total_size_bytes_compressed, memory_usage FROM system.merges WHERE database = 'benchmark' ORDER BY table FORMAT JSONEachRow"
@@ -263,6 +263,7 @@ for mode in "${modes[@]}"; do
             SYSTEM DROP MARK CACHE;
             SYSTEM DROP UNCOMPRESSED CACHE;
             SYSTEM DROP QUERY CACHE;
+            SYSTEM DROP QUERY CONDITION CACHE;
             SYSTEM DROP FILESYSTEM CACHE;
           " >/dev/null
         fi

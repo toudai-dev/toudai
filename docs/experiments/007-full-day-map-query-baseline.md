@@ -37,9 +37,11 @@ hashes before expanding the workload.
 
 The controlled baseline then measures both modes used in experiment 005:
 
-- `clickhouse-cold` drops ClickHouse mark, uncompressed, query, and filesystem
-  caches before each query. Linux page cache and ZFS ARC remain uncontrolled,
-  so this is not a host-cold measurement.
+- `clickhouse-cold` drops ClickHouse mark, uncompressed, query,
+  query-condition, and filesystem caches before each query. The pilot found
+  that ClickHouse 26.3's query-condition cache remembers granules rejected by
+  prior predicates. Linux page cache and ZFS ARC remain uncontrolled, so this
+  is not a host-cold measurement.
 - `warm` runs one unmeasured prewarm immediately before measured repetitions.
 
 The existing fixtures cover recent tail, promoted filters, body search, rate
