@@ -43,6 +43,9 @@
                     <overflow>
                         <disk>os_overflow</disk>
                     </overflow>
+                    <archive>
+                        <disk>bulk_archive</disk>
+                    </archive>
                 </volumes>
             </benchmark_overflow>
             <benchmark_archive>

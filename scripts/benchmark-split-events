@@ -102,34 +102,68 @@ jj status > "${run_dir}/evidence/jj-status.txt" 2>&1 || true
 for table in events_map_hot event_payloads; do
   "${client[@]}" --query "DROP TABLE IF EXISTS benchmark.${table} SYNC"
 done
-"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/split-events.sql"
+"${client[@]}" --multiquery --query "
+  CREATE TABLE benchmark.events_map_hot AS benchmark.events_map
+  ENGINE = MergeTree
+  PARTITION BY toDate(timestamp)
+  ORDER BY (tenant_id, dataset, toStartOfHour(timestamp), service_name, timestamp, event_id)
+  SETTINGS storage_policy = 'benchmark_overflow';
+
+  CREATE TABLE benchmark.event_payloads AS benchmark.events_map
+  ENGINE = MergeTree
+  PARTITION BY toDate(timestamp)
+  ORDER BY (tenant_id, dataset, toStartOfHour(timestamp), service_name, timestamp, event_id)
+  SETTINGS storage_policy = 'benchmark_overflow';
+"
 
 "${client[@]}" --query "
-  SELECT toString(toStartOfHour(timestamp)), count()
-  FROM benchmark.events_map
-  GROUP BY toStartOfHour(timestamp)
-  ORDER BY toStartOfHour(timestamp)
-  FORMAT TSVRaw" > "${run_dir}/windows.tsv"
-printf 'path\twindow_start\texpected_rows\n' > "${run_dir}/builds.tsv"
+  SELECT DISTINCT partition_id
+  FROM system.parts
+  WHERE active AND database = 'benchmark' AND table = 'events_map'
+  ORDER BY partition_id FORMAT TSVRaw" > "${run_dir}/partitions.tsv"
+printf 'path\tpartition_id\n' > "${run_dir}/builds.tsv"
 
 echo "building" > "${run_dir}/status"
-while IFS=$'\t' read -r window_start window_rows; do
-  window_id="$(date -u -d "${window_start}" +%Y%m%dT%H)"
-  window_end="$(date -u -d "${window_start} UTC +1 hour" '+%F %T')"
+while read -r partition_id; do
   for path in hot payload; do
     if [[ "${path}" == "hot" ]]; then
-      sql_file="${repo_root}/benchmark/clickhouse/insert-hot-event-window.sql"
+      table="events_map_hot"
     else
-      sql_file="${repo_root}/benchmark/clickhouse/insert-payload-window.sql"
+      table="event_payloads"
     fi
-    query_id="${query_prefix}_build_${path}_${window_id}"
-    "${client[@]}" --query_id="${query_id}" \
-      --receive_timeout=86400 --send_timeout=86400 \
-      --param_window_start="${window_start}" --param_window_end="${window_end}" \
-      --queries-file "${sql_file}"
-    printf '%s\t%s\t%s\n' "${path}" "${window_start}" "${window_rows}" >> "${run_dir}/builds.tsv"
+    query_id="${query_prefix}_attach_${path}_${partition_id}"
+    "${client[@]}" --query_id="${query_id}" --query "
+      ALTER TABLE benchmark.${table}
+      ATTACH PARTITION ID '${partition_id}' FROM benchmark.events_map"
+    printf '%s\t%s\n' "${path}" "${partition_id}" >> "${run_dir}/builds.tsv"
   done
-done < "${run_dir}/windows.tsv"
+done < "${run_dir}/partitions.tsv"
+
+"${client[@]}" --query_id="${query_prefix}_drop_hot_payload" --query "
+  ALTER TABLE benchmark.events_map_hot DROP COLUMN source_raw"
+"${client[@]}" --query_id="${query_prefix}_drop_payload_normalized" --query "
+  ALTER TABLE benchmark.event_payloads
+    DROP COLUMN observed_at,
+    DROP COLUMN event_kind,
+    DROP COLUMN event_name,
+    DROP COLUMN body,
+    DROP COLUMN environment,
+    DROP COLUMN severity,
+    DROP COLUMN status_code,
+    DROP COLUMN trace_id,
+    DROP COLUMN span_id,
+    DROP COLUMN parent_span_id,
+    DROP COLUMN span_kind,
+    DROP COLUMN duration_ns,
+    DROP COLUMN resource,
+    DROP COLUMN scope,
+    DROP COLUMN attributes"
+
+while read -r partition_id; do
+  "${client[@]}" --query_id="${query_prefix}_move_payload_${partition_id}" --query "
+    ALTER TABLE benchmark.event_payloads
+    MOVE PARTITION ID '${partition_id}' TO DISK 'bulk_archive'"
+done < "${run_dir}/partitions.tsv"
 
 echo "validating" > "${run_dir}/status"
 "${client[@]}" --query "
