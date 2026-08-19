@@ -38,6 +38,7 @@ Environment:
   LIGHTHOUSE_CLICKHOUSE_HTTP_PORT   HTTP port (default: 18123)
   LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH
                                       Optional local overflow disk path
+  LIGHTHOUSE_CLICKHOUSE_ARCHIVE_PATH  Optional bulk archive disk path
 EOF
 }
 
