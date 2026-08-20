@@ -91,6 +91,15 @@ using an unmaterialized field falls back to raw events rather than becoming
 invalid. Query responses must disclose whether an aggregate is exact or
 approximate.
 
+** Standard distributed data plane
+
+Scale beyond one node with local =ReplicatedMergeTree= tables behind a
+=Distributed= table. Initially shard by a stable hash of =tenant_id=, =dataset=,
+and =event_id= so high-volume tenants use the whole cluster. Accept broad query
+fanout until measurements show that its fixed cost or network use justifies a
+Kraken-style virtual-partition placement layer. See
+=../decisions/001-distributed-event-sharding.md=.
+
 ** Bounded derived storage
 
 Do not expand every attribute of every event into inverted index rows. Derived
@@ -114,6 +123,49 @@ Relevant references:
 - https://www.honeycomb.io/blog/introducing-honeycomb-telemetry-pipeline
 - =../experiments/000-gcp-parquet-corpus-profile.md=
 - =../decisions/000-unified-events-separate-metrics.md=
+
+** Scuba and Kraken model
+
+Facebook's original Scuba system established the product and query model that
+Lighthouse is targeting: self-describing structured events, arbitrary
+slice-and-dice exploration, time series, histograms, percentiles, comparisons,
+and drill-down to individual events. Its shared-nothing query path scanned all
+time-relevant leaves, computed partial aggregates locally, and merged them
+through a fanout tree. It intentionally used no general index beyond batch time
+ranges and accepted sampling, short retention, and incomplete results to reach
+sub-second latency.
+
+Meta's successor architecture, Kraken, retained that query model while moving
+to flash-backed columnar blocks, RAM caches, deterministic dataset partitions,
+a durable remote source of truth, and storage management separated from query
+serving. Its published production study ranged from 50 GB datasets with 1B
+records to a 150 TB dataset with 1.27T records, more than 3,500 columns, and
+8,192 shards. Kraken demonstrates the value of virtual partitions at Meta's
+scale, but does not establish that their control-plane cost is necessary before
+standard ClickHouse distributed fanout is measured.
+
+Lighthouse adopts Scuba's flexible event exploration and Kraken's separation
+of durable and query-serving concerns, but not their ingestion sampling or
+best-effort permanent data loss. Accepted events remain available at full
+resolution through a complete execution path.
+
+Relevant references:
+
+- https://www.vldb.org/pvldb/vol6/p1057-wiener.pdf
+- https://www.vldb.org/pvldb/vol15/p3522-mo.pdf
+- =../decisions/001-distributed-event-sharding.md=
+
+The Kraken evidence adds four architecture directions that require explicit
+validation rather than being assumed from the single-node schema experiments:
+
+- accepted events should enter a durable replay path before ClickHouse serving
+  state, so serving tables can be reconstructed;
+- immutable archived batches should contain enough canonical event and exact
+  payload data to rebuild normalized tables;
+- hot and archived data may need separate physical query paths behind one
+  logical query contract rather than transparent part movement alone; and
+- query diagnostics need independent aggregation-accuracy, input-completeness,
+  and ingestion-freshness signals.
 
 ** Proof-of-concept findings
 
@@ -254,10 +306,40 @@ This is a benchmark candidate, not final DDL. Tests must determine:
 
 * Query and Storage Architecture
 
+** Durable ingestion and rebuild
+
+Treat ClickHouse as the query-serving copy rather than assuming its local parts
+are the only source of truth. The production design should acknowledge accepted
+events through a durable replay boundary, assign immutable event and batch
+identities, and persist canonical batches to an economical archive. ClickHouse
+and optional accelerators consume this stream and must be reconstructable from
+the archive plus replay position.
+
+The ten-day benchmark's bulk =event_payloads= table measures the immediate
+storage and lookup tradeoff; it is not by itself a final durable log or object
+archive design. Record the acknowledgement, retry, deduplication, replay, and
+archive-format contracts in a separate decision before production ingestion is
+implemented.
+
 ** Primary raw path
 
 The raw table optimizes tenant, dataset, time, and common service-scoped reads.
 It is the exact fallback for every supported event query.
+
+** Distributed execution path
+
+Use a local MergeTree table per shard and expose one ClickHouse =Distributed=
+table as the initial cluster-wide query path. A stable hash over tenant,
+dataset, and event identity spreads large tenants across all shards. Local
+servers scan and compute mergeable partial aggregates; the initiating server
+merges those states.
+
+The initial design deliberately sends tenant/dataset/time queries to every
+shard. Adding shards does not require immediate historical redistribution:
+queries remain correct across all shards, new events use the expanded topology,
+and old placement converges through retention. Measure fanout latency and
+network traffic before adding virtual partitions, targeted routing, or a custom
+placement service.
 
 ** Trace path
 
@@ -306,9 +388,17 @@ query diagnostics.
 
 ** Storage tiers
 
-Retain one logical raw table while allowing ClickHouse storage policies to move
-older parts from local NVMe to object storage. Measure cold-query latency rather
-than assuming object-backed parts satisfy interactive exploration.
+Retain one logical raw query contract while comparing two physical designs:
+
+- ClickHouse storage policies transparently move older parts from local NVMe to
+  object storage; or
+- a query router splits time ranges between hot ClickHouse and a canonical
+  Parquet/object archive, then merges partial results and reports their source.
+
+Kraken's Nessie interface is evidence for the explicit split, while ClickHouse
+storage policies offer a much simpler implementation. Measure cold-query
+latency, result merging, and operational recovery rather than assuming either
+design satisfies interactive exploration.
 
 * Benchmark Volume Definition
 
@@ -449,6 +539,8 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 - [ ] Implement and expose exact, approximate, and raw execution modes.
 - [ ] Return plan diagnostics including selected storage path and approximation
   mode.
+- [ ] Define ingestion watermarks, expected shard coverage, and complete versus
+  bounded-latency execution independently of exact versus approximate math.
 - [ ] Prove logs, spans, and application events can be queried together.
 - [ ] Prove trace rendering includes span events and correlated logs.
 
@@ -475,6 +567,8 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 - [ ] Validate dashboard isolation from exploratory scans.
 - [ ] Measure query performance during merges and after restart.
 - [ ] Validate object-storage or cold-tier behavior on selected partitions.
+- [ ] Compare transparent ClickHouse tiering with an explicit hot/archive query
+  split for selected aggregate and raw-event fixtures.
 - [ ] Confirm storage ratio and capacity assumptions for the 100 TB run.
 - [ ] Record any schema or planner changes required before scaling further.
 
@@ -484,8 +578,10 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 - [ ] Load it at the 1B-events/day rate and then at the 3B-events/day rate.
 - [ ] Run hot, mixed-age, and cold query workloads during sustained ingestion.
 - [ ] Validate merge capacity, part counts, retention movement, and recovery.
-- [ ] Determine whether the target requires sharding and measure the chosen
-  shard key if it does.
+- [ ] Validate standard ClickHouse =Distributed= fanout using a stable hash of
+  tenant, dataset, and event identity.
+- [ ] Measure whether small-dataset fanout latency or network use justifies a
+  virtual-partition placement layer.
 - [ ] Measure replica rebuild and failure-recovery behavior.
 - [ ] Produce a cost and capacity model per retained logical TB.
 - [ ] Decide whether the design is ready for a later 1 PB clustered benchmark.
@@ -519,7 +615,13 @@ not a linear extrapolation.
 - What dashboard and exploratory concurrency must one deployment support?
 - Is exact aggregation required synchronously above a bounded scan cost, or may
   it run as an asynchronous query job?
-- Which tenancy boundary must lead the physical sort and sharding keys?
+- Which tenancy boundary must lead the physical sort key?
+- At what shard count or workload mix does broad =Distributed= fanout justify
+  targeted virtual partitions?
 - Which fields must be searchable as text versus exact structured values?
 - Should raw source JSON be retained indefinitely after normalized typed fields
   are stored?
+- What durable log, immutable batch format, acknowledgement boundary, and replay
+  contract make ClickHouse serving state safely reconstructable?
+- Should archived canonical events be queried through ClickHouse object-backed
+  parts or through a separate archive execution path?

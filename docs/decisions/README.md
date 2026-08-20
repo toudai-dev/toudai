@@ -23,3 +23,4 @@ record and link both directions.
 | ID | Status | Decision |
 |---|---|---|
 | 000 | Accepted | [Unify event storage and separate native metrics](000-unified-events-separate-metrics.md) |
+| 001 | Accepted | [Start with hash-distributed event sharding](001-distributed-event-sharding.md) |
