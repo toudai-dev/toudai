@@ -6,11 +6,18 @@
 
 * Context
 
-Lighthouse is being redesigned as a ClickHouse-backed telemetry system. The
-initial proof of concept lives at =~/workspace/inngest/lighthouse= and provides
-useful ingestion, query-planning, Prometheus compatibility, schema, and staging
-performance evidence. The new repository is greenfield and is not required to
-preserve the proof of concept's physical schema.
+Lighthouse is being designed as a ClickHouse-backed, Scuba-style telemetry
+system for recent-data exploration. The initial proof of concept lives at
+=~/workspace/inngest/lighthouse= and provides useful ingestion, query-planning,
+Prometheus compatibility, schema, and staging performance evidence. This
+repository is not required to preserve the proof of concept's physical schema.
+
+The product workload, rather than Scuba's exact implementation, is the north
+star: an engineer should be able to move from an alert to a time comparison,
+group by any useful field, identify an outlier, and inspect representative exact
+events without first predicting that query at ingestion time. The MVP contract
+is intentionally not final until freshness, query-latency, concurrency, and
+retention targets are agreed and the current multi-day benchmark is complete.
 
 The product should provide a high-level event model rather than force users to
 choose between logs and traces:
@@ -30,16 +37,19 @@ as JSON log entries retrieved from GCP Logging and was compacted into Parquet.
 
 * Goals
 
-- Store logs, spans, and arbitrary structured events in one physical raw event
-  table with a common envelope.
+- Store logs, spans, and arbitrary structured events through one logical event
+  medium with a common envelope. The query-serving columns and exact payload
+  may use separate physical tables or tiers.
 - Retain every accepted event and its queryable context at full resolution.
 - Support exact raw queries and approximate or exact aggregate execution.
 - Make interactive, arbitrary exploration possible without predeclaring every
   future query dimension.
-- Accelerate known dashboard and incident workflows with projections,
-  materialized aggregate states, metadata catalogs, caching, and query routing.
-- Preserve typed dynamic attributes and promote frequently queried fields into
-  physical columns only when measurement justifies it.
+- Accelerate known dashboard and incident workflows with bounded attribute
+  indexes, materialized aggregate states, metadata catalogs, caching, and query
+  routing while preserving raw fallback.
+- Preserve field-type information in the logical contract and canonical event;
+  use the benchmark-selected =Map= serving representation plus typed promoted
+  columns or aggregate inputs only when measurement justifies them.
 - Validate behavior at 1 TB, 10 TB, and 100 TB of GCP-equivalent uncompressed
   event data before considering a 1 PB clustered test.
 - Measure storage amplification across the complete schema, not only base-table
@@ -52,16 +62,20 @@ as JSON log entries retrieved from GCP Logging and was compacted into Parquet.
 - Native metrics do not need to share the physical event table.
 - Every arbitrary query is not required to have dashboard-class latency.
 - Rollups do not replace or expire the full-resolution source events.
-- The initial implementation will not automatically create schema objects from
-  observed query traffic. Field promotion can start as an explicit operation.
+- Fully automatic physical-schema mutation is not an MVP requirement.
+  Dashboards may request accelerations explicitly, and workload observation may
+  recommend them; automatic activation requires per-tenant storage, field,
+  cardinality, and backfill-CPU budgets.
 
 * Settled Design Principles
 
 ** Unified events
 
-One raw =events= table stores logs, spans, and application events. An
-=event_kind= discriminator affects ingestion validation and rendering, not the
-event's queryability. Common queries can aggregate all event kinds together.
+One logical =events= medium stores logs, spans, and application events. Its
+normalized query-serving table and exact canonical payload may be physically
+separate. An =event_kind= discriminator affects ingestion validation and
+rendering, not the event's queryability. Common queries can aggregate all event
+kinds together.
 
 Trace-specific fields such as trace ID, span ID, parent span ID, span kind, and
 duration are nullable or have empty defaults for non-span events. Logs carrying
@@ -77,19 +91,23 @@ Event-derived counts, rates, histograms, heatmaps, and percentiles are computed
 from raw events or event aggregate states. They do not require conversion into
 native metric samples unless a later interoperability feature needs it.
 
-** Full-resolution retention
+** Full-resolution acceptance and retention
 
-Ingestion does not sample accepted events. Raw events remain the source of truth
-across storage tiers. Approximate percentile and histogram functions may be used
-for interactive execution, but this changes the aggregation algorithm rather
-than the retained data. Exact execution remains available with cost guardrails.
+Lighthouse does not silently sample accepted events. An event is accepted only
+after a durable replay boundary, and accepted events remain reconstructable at
+full resolution from immutable batches or their canonical archive. Producer
+drops or upstream sampling must be reported; sampled events carry an explicit
+sampling probability or weight. Approximate percentile, distinct-count, top-K,
+or histogram functions may be used for interactive execution, but this changes
+the aggregation algorithm rather than the retained data. Exact execution
+remains available with cost guardrails or as an asynchronous job.
 
 ** Raw fallback
 
-Materialized views and projections accelerate supported query shapes. A query
-using an unmaterialized field falls back to raw events rather than becoming
-invalid. Query responses must disclose whether an aggregate is exact or
-approximate.
+Attribute indexes, materialized aggregate states, and projections accelerate
+supported query shapes. A query using an unmaterialized field falls back to raw
+events rather than becoming invalid. Query responses must disclose whether an
+aggregate is exact or approximate.
 
 ** Standard distributed data plane
 
@@ -97,7 +115,7 @@ Scale beyond one node with local =ReplicatedMergeTree= tables behind a
 =Distributed= table. Initially shard by a stable hash of =tenant_id=, =dataset=,
 and =event_id= so high-volume tenants use the whole cluster. Accept broad query
 fanout until measurements show that its fixed cost or network use justifies a
-Kraken-style virtual-partition placement layer. See
+virtual-partition placement layer. See
 =../decisions/001-distributed-event-sharding.md=.
 
 ** Bounded derived storage
@@ -124,7 +142,7 @@ Relevant references:
 - =../experiments/000-gcp-parquet-corpus-profile.md=
 - =../decisions/000-unified-events-separate-metrics.md=
 
-** Scuba and Kraken model
+** Scuba product model
 
 Facebook's original Scuba system established the product and query model that
 Lighthouse is targeting: self-describing structured events, arbitrary
@@ -135,28 +153,35 @@ through a fanout tree. It intentionally used no general index beyond batch time
 ranges and accepted sampling, short retention, and incomplete results to reach
 sub-second latency.
 
-Meta's successor architecture, Kraken, retained that query model while moving
-to flash-backed columnar blocks, RAM caches, deterministic dataset partitions,
-a durable remote source of truth, and storage management separated from query
-serving. Its published production study ranged from 50 GB datasets with 1B
-records to a 150 TB dataset with 1.27T records, more than 3,500 columns, and
-8,192 shards. Kraken demonstrates the value of virtual partitions at Meta's
-scale, but does not establish that their control-plane cost is necessary before
-standard ClickHouse distributed fanout is measured.
-
-Lighthouse adopts Scuba's flexible event exploration and Kraken's separation
-of durable and query-serving concerns, but not their ingestion sampling or
-best-effort permanent data loss. Accepted events remain available at full
-resolution through a complete execution path.
+Lighthouse adopts Scuba's flexible event exploration and storage-node partial
+aggregation, but not Scuba's requirement choices around ingestion sampling,
+memory-primary serving, short retention, or best-effort incomplete results.
+Accepted events remain available at full resolution. If a bounded-latency query
+omits unavailable data, the response must report freshness and coverage rather
+than presenting the result as complete.
 
 Relevant references:
 
 - https://www.vldb.org/pvldb/vol6/p1057-wiener.pdf
-- https://www.vldb.org/pvldb/vol15/p3522-mo.pdf
 - =../decisions/001-distributed-event-sharding.md=
 
-The Kraken evidence adds four architecture directions that require explicit
-validation rather than being assumed from the single-node schema experiments:
+** Supporting Meta-scale evidence
+
+Kraken is not the Lighthouse product model; it is supporting evidence about
+operating a later-generation analytics data plane at Meta scale. Its published
+study ranged from 50 GB datasets with 1B records to a 150 TB dataset with 1.27T
+records, more than 3,500 columns, and 8,192 shards. Flash-backed columnar blocks,
+RAM caches, deterministic dataset partitions, and separation of storage
+management from query serving show plausible later optimizations, but do not
+establish that Lighthouse needs a custom virtual-partition control plane before
+standard ClickHouse distributed fanout is measured.
+
+Relevant reference:
+
+- https://www.vldb.org/pvldb/vol15/p3522-mo.pdf
+
+This evidence adds four architecture directions that require explicit
+validation rather than being assumed from the single-node experiments:
 
 - accepted events should enter a durable replay path before ClickHouse serving
   state, so serving tables can be reconstructed;
@@ -222,89 +247,148 @@ The current 12-day corpus represents approximately 12.8 TB on this calibrated
 scale. It can supply natural subsets for the 1 TB and 10 TB tests. A 100 TB test
 will require roughly eight time-shifted passes over the corpus.
 
-* Proposed Logical Event Schema
+** Lighthouse benchmark results to date
 
-The first schema candidate should preserve this common envelope:
+The architecture in this plan is grounded in the completed experiments, not
+only in the Scuba workload model:
 
-#+BEGIN_SRC sql
-CREATE TABLE events
-(
-    tenant_id       UInt64,
-    dataset         LowCardinality(String),
-    timestamp       DateTime64(9),
-    observed_at     DateTime64(9),
-    event_id        UUID,
+- Experiment 006 loaded all 547,356,173 rows (approximately 1.04 TB logical) to
+  =Map= in 4.67 hours with 1.42 GiB peak insert memory and a 172.45 GiB table.
+  Native =JSON= stopped at 63.2% after file-descriptor, part-count, inode, and
+  free-space failures; a complete day projected to 206.2 GiB, 19.6% larger than
+  =Map=. =Map= is therefore the selected long-tail serving representation for
+  the MVP, rather than an open candidate among =JSON= and typed arrays.
+- Experiment 007 showed why the raw representation cannot be the only
+  interactive path. Promoted-column queries over the same day took 1.6-6.9
+  seconds cold, while dynamic filters took 84-88 seconds and full-day heatmap
+  and percentile queries took 77-95 seconds. Raw field discovery took 28
+  seconds. These results require bounded catalogs, asynchronous exact scans,
+  and derived dashboard paths rather than pretending every arbitrary query is
+  instant.
+- Experiment 008 added two configured dynamic-field indexes and aggregate
+  states. The indexes occupied 3.06 GiB and all rollups about 4.4 MiB, for 1.78%
+  derived-storage amplification. Dynamic filters improved from 83-85 seconds
+  cold to 205-447 ms; rate, heatmap, and percentile fixtures improved from
+  5-93 seconds to 6-33 ms. All 30 correctness checks passed. This supports a
+  schema-stable, tenant-scoped acceleration registry, not indexing every field.
+- Experiment 009 split one 547,356,173-row day into 104.23 GiB of normalized
+  hot =Map= events and 72.95 GiB of exact payload on bulk storage, with matching
+  row counts and checksums. Exact source lookup took about 12 ms on SSD and 351
+  ms from bulk storage. This supports separate query-serving and exact-payload
+  paths behind one logical event contract.
+- Experiment 010 is still in progress and must not be treated as a ten-day
+  result. Five natural days have been loaded and validated: 3,071,211,748 rows,
+  approximately 5.84 TB logical, 525.46 GiB of normalized hot events, and
+  374.30 GiB of exact payloads. The run is currently stopped after Day 5 and
+  marked failed; its cause and restart must be documented before it resumes.
+  Concurrent external writes to the bulk ZFS pool make elapsed throughput a
+  host-specific observation, while per-day checksums remain valid.
 
-    event_kind      Enum8('event' = 1, 'log' = 2, 'span' = 3),
-    event_name      LowCardinality(String),
-    body            String,
+Relevant experiment records:
 
-    service_name    LowCardinality(String),
-    environment     LowCardinality(String),
-    severity        LowCardinality(String),
-    status_code     LowCardinality(String),
+- =../experiments/006-one-day-map-json-scale-load.md=
+- =../experiments/007-full-day-map-query-baseline.md=
+- =../experiments/008-tenant-attribute-acceleration.md=
+- =../experiments/009-split-hot-events-payload.md=
+- =../experiments/010-ten-day-split-storage-load.md=
 
-    trace_id        FixedString(16),
-    span_id         FixedString(8),
-    parent_span_id  FixedString(8),
-    span_kind       LowCardinality(String),
-    duration_ns     UInt64,
+* Draft MVP Event Contract
 
-    resource        JSON,
-    scope           JSON,
-    attributes      JSON
-)
-ENGINE = MergeTree
-PARTITION BY toDate(timestamp)
-ORDER BY
-(
-    tenant_id,
-    dataset,
-    toStartOfHour(timestamp),
-    service_name,
-    timestamp,
-    event_id
-);
+Instrumentation emits a versioned common envelope. Logs, spans, and application
+events use the same acceptance and query path; =event_kind= controls validation
+and rendering rather than selecting a separate store. The logical contract
+contains at least:
+
+#+BEGIN_SRC text
+identity       tenant_id, dataset, event_id, immutable ingest_batch_id
+time           source timestamp, observed timestamp
+kind           event, log, or span
+common fields  event name, service, environment, region, host, build, severity
+trace context  trace ID, span ID, parent span ID, span kind, duration
+dimensions     sparse string, boolean, and integer fields
+measures       sparse integer and floating-point fields
+sampling       sampling probability or weight when sampling occurred upstream
+payload        exact canonical source event or immutable payload reference
+schema         envelope and field-policy versions
 #+END_SRC
 
-This is a benchmark candidate, not final DDL. Tests must determine:
+The producer SDK and gateway contract is part of the data model. Producers must
+batch and compress asynchronously, never block the application indefinitely,
+report dropped events and backpressure, set source timestamps and stable event
+IDs, and avoid sending known secrets or unrestricted request bodies. OpenTelemetry
+is the default transport vocabulary, with a custom wide-event API where OTel's
+signal APIs do not express the event cleanly.
 
-- whether native =JSON=, =Map=, or typed key/value arrays provide the best
-  long-tail attribute representation;
+The MVP ClickHouse serving table uses fixed columns for the routing and commonly
+queried envelope plus =Map=-based long-tail attributes. Exact payload is kept in
+the immutable archive and may also be retained in a separately ordered bulk
+ClickHouse table for recent reconstruction. This is a physical implementation
+of one logical event medium, not separate log and trace products.
+
+The final DDL remains open only where the benchmarks have not decided it. Tests
+must still determine:
+
 - the number and boundaries of attribute namespaces;
 - the correct timestamp bucket in the sorting key;
 - whether =service_name= belongs before or after the time bucket;
 - the best ClickHouse representation for event and trace identifiers;
 - which GCP and OpenTelemetry fields deserve fixed or materialized columns;
-- whether raw source JSON is retained in addition to normalized fields;
-- appropriate partition granularity and retention behavior.
+- how logical dimension and measure types are preserved alongside the selected
+  =Map= serving representation;
+- appropriate partition granularity, retention behavior, and archive format;
+  and
+- whether payload lookup remains a ClickHouse bulk table, moves to direct object
+  retrieval, or uses both by retention window.
 
-* Attribute Storage Candidates
-
-** Candidate A: native JSON with promoted columns
-
-- Preserve dynamic value types and nested paths.
-- Materialize common routing and grouping fields.
-- Test =advanced= shared-data serialization and dynamic-path limits available in
-  the selected ClickHouse version.
-- Measure inserts, merges, uncommon-path filters, full-object reads, and schema
-  evolution.
-
-** Candidate B: Map-based attributes with promoted columns
-
-- Use ClickStack's established =Map(LowCardinality(String), String)= approach as
-  a baseline.
-- Preserve separate resource, scope, and event attribute namespaces.
-- Measure the cost of string conversion and typed numeric aggregation.
-
-** Candidate C: typed key/value arrays
-
-- Use the proof of concept's separate string, integer, float, and boolean arrays
-  as a comparison.
-- Do not reproduce its unbounded per-attribute materialized index tables.
-- Measure type preservation, compression, filtering syntax, and scan cost.
+Multi-tenancy does not imply one promoted column per tenant field. Fixed or
+materialized columns are reserved for common envelope fields or fields with
+exceptionally broad, measured benefit. Tenant-specific equality acceleration
+uses the schema-stable =(tenant_id, dataset, field_name, field_value, timestamp,
+event_id)= shape validated in Experiment 008; tenant-specific dashboard
+rollups likewise store configured dimensions as data. This allows different
+tenants to accelerate different fields without divergent ClickHouse DDL.
 
 * Query and Storage Architecture
+
+This architecture is a proposed MVP, not an accepted final design. It separates
+three concerns so that the interactive ClickHouse copy can be rebuilt and
+tenant policy can evolve without placing a metadata lookup on every event:
+
+#+BEGIN_SRC text
+OTel / wide-event SDKs
+          |
+          v
+stateless ingestion gateways <----- cached, versioned tenant policy
+          |
+          v
+durable Kafka/Redpanda acceptance boundary
+          |---------------------> immutable canonical batch archive
+          |
+          v
+normalization consumers -------> ClickHouse local ReplicatedMergeTree tables
+                                  behind a Distributed table
+                                             |
+                                             v
+                                  query planner and Scuba-style UI
+
+stream copy ---> field/cardinality sketches ---> metadata and policy registry
+query history ---------------------------------> acceleration recommendations
+#+END_SRC
+
+** Ingestion plane
+
+Stateless Lighthouse gateways authenticate tenant and dataset, validate the
+versioned envelope and field types, enforce event/string/field-count limits,
+redact or reject classified data, and apply tenant byte/event quotas. Gateways
+use cached, versioned policy snapshots so control-plane unavailability does not
+turn into a per-event database dependency. Policy versions are recorded with
+accepted batches.
+
+The durable transport is the acceptance boundary. Acknowledgement, retry, and
+duplicate semantics must be explicit; stable event IDs and immutable batch IDs
+make idempotent consumers and replay possible. ClickHouse serving consumers and
+the canonical archive consumer advance independently. Queue lag and archive
+lag are visible separately from ClickHouse query freshness.
 
 ** Durable ingestion and rebuild
 
@@ -323,8 +407,11 @@ implemented.
 
 ** Primary raw path
 
-The raw table optimizes tenant, dataset, time, and common service-scoped reads.
-It is the exact fallback for every supported event query.
+The normalized hot table optimizes tenant, dataset, time, and common
+service-scoped reads. Its dynamic attributes are the exact normalized fallback
+for every supported event query. Exact source reconstruction joins or fetches
+the separately retained canonical payload only when requested; normal filters
+and aggregations do not pay payload I/O.
 
 ** Distributed execution path
 
@@ -350,15 +437,27 @@ and trace-fetch latency before choosing projection versus table.
 
 ** Metadata catalogs
 
-Maintain bounded, time-aware catalogs for:
+Maintain a small versioned registry for datasets, field definitions, privacy
+classification, retention, quotas, and accelerations. A stream consumer, not
+the ingestion gateway, maintains bounded time-aware observations for:
 
 - known field names and observed types;
-- promoted fields;
-- bounded values for explicitly discoverable low-cardinality fields;
-- approximate cardinality and last-seen metadata used by query planning.
+- field presence and last-seen time;
+- approximate distinct counts using mergeable sketches;
+- bounded top-K values and value-size distributions;
+- type conflicts and cardinality growth rates; and
+- promoted, indexed, and aggregated fields with coverage watermarks.
 
 High-cardinality values such as event, trace, span, request, account, or run IDs
-must not be enumerated for broad autocomplete.
+must not be enumerated for broad autocomplete. Their events are still retained
+and exact filtering remains possible; cardinality governance limits metadata,
+group result size, and acceleration cost rather than deleting accepted data.
+
+Per-tenant and per-dataset policies bound event bytes, field count, field-name
+growth, string length, indexed fields, derived bytes, groups returned, scan
+bytes, query memory, and concurrent work. A cardinality spike creates a visible
+policy event and may stop new acceleration or expensive grouping, but must not
+silently sample already accepted events.
 
 ** Dashboard aggregate states
 
@@ -372,9 +471,22 @@ maxState(duration_ns)
 quantilesTDigestState(0.5, 0.9, 0.95, 0.99)(duration_ns)
 #+END_SRC
 
-Initial rollups should cover only measured common dimensions and time buckets.
-Do not construct a cube over every dynamic attribute. Unsupported groupings use
-the raw table.
+Initial rollups cover only saved dashboards and measured repeated workflows.
+Experiment 008 shows that this can reduce 5-93 second raw aggregate fixtures to
+6-33 ms with only about 4.4 MiB of aggregate states on the measured day. Do not
+construct a cube over every dynamic attribute. Unsupported groupings use the
+normalized raw table.
+
+Acceleration creation is asynchronous and disposable:
+
+1. A dashboard explicitly requests required aggregate states.
+2. Query history may recommend an equality index or aggregate for an expensive,
+   repeated tenant-field shape and estimate its build and storage cost.
+3. Activation is manual initially; later automatic activation is permitted only
+   within tenant field-count, cardinality, storage, and backfill-CPU budgets.
+4. The planner uses an acceleration only inside its complete coverage watermark
+   and falls back to raw execution elsewhere.
+5. Unused accelerations expire without changing or expiring accepted events.
 
 ** Exact and approximate modes
 
@@ -386,19 +498,61 @@ the raw table.
 Exact and approximate results must be clearly identified in API responses and
 query diagnostics.
 
+Mathematical accuracy, input completeness, and freshness are independent. Every
+response reports the execution mode, data watermark, expected and participating
+shards or partitions, scanned events/bytes, and whether upstream sampling
+weights were applied. Alerts, billing, security, or compliance workflows may
+require complete execution even when an interactive exploration permits a
+clearly labeled bounded-latency partial result.
+
 ** Storage tiers
 
-Retain one logical raw query contract while comparing two physical designs:
+The MVP uses normalized events on ClickHouse's fast serving tier and immutable
+canonical batches on economical bulk or object storage. Experiment 009 validates
+the immediate physical split and exact lookup, but its bulk ClickHouse payload
+table is not itself the final durability design. Querying archived normalized
+events through ClickHouse object-backed parts versus a distinct archive executor
+remains an experiment; either path must preserve one logical query contract and
+report its source, freshness, and completeness.
 
-- ClickHouse storage policies transparently move older parts from local NVMe to
-  object storage; or
-- a query router splits time ranges between hot ClickHouse and a canonical
-  Parquet/object archive, then merges partial results and reports their source.
+** Query and exploration plane
 
-Kraken's Nessie interface is evidence for the explicit split, while ClickHouse
-storage policies offer a much simpler implementation. Measure cold-query
-latency, result merging, and operational recovery rather than assuming either
-design satisfies interactive exploration.
+The planner requires tenant, dataset, and bounded time range, then chooses raw,
+trace, metadata, attribute-index, aggregate-state, or archive execution. It
+pushes mergeable partial aggregation to ClickHouse shards and returns raw rows
+only for a bounded event sample or explicit reconstruction request. Deadlines,
+cancellation, concurrency limits, maximum scans/groups/result rows, and workload
+priority protect dashboards and tenants from one another.
+
+The MVP user workflow is Scuba-style rather than SQL-first: compare periods,
+add or remove filters, group by a field, view top values/cardinality before an
+expensive grouping, inspect time series/heatmaps/percentiles, and drill into
+representative exact events. Saved queries and dashboard panels use the same
+query contract and expose approximation, freshness, coverage, and upstream
+sampling indicators.
+
+** Privacy and operational instrumentation
+
+Field classification, secret/token detection, PII redaction or hashing,
+tenant isolation, field-level access, query audit logs, and deletion workflows
+must be designed before broad producer adoption. Arbitrary headers, request
+bodies, SQL parameters, and authentication material are rejected or redacted by
+default rather than relying on short retention after collection.
+
+Lighthouse must expose telemetry outside its own serving path for at least:
+
+- events received, accepted, rejected, dropped, and upstream-sampled;
+- bytes and field counts by tenant and dataset;
+- producer-to-durable, durable-to-archive, and durable-to-query lag;
+- malformed events, type conflicts, policy versions, and replay backlog;
+- cardinality, field-name growth, value sizes, and top-K churn;
+- hot and archive bytes, parts, merges, retention, and acceleration coverage;
+- query queue and execution latency, scans, groups, memory, cancellation, and
+  timeouts; and
+- response freshness, shard coverage, accuracy mode, and partial-result rate.
+
+The telemetry system will become production-critical, so its minimum health,
+durability, and alerting signals cannot depend exclusively on Lighthouse.
 
 * Benchmark Volume Definition
 
@@ -442,14 +596,14 @@ Provisional daily-rate targets at 1.9 KB/event are:
 - Rotate or regenerate selected naturally changing high-cardinality dimensions,
   such as pod, task, and instance IDs, so long-retention cardinality does not
   remain artificially fixed.
-- Keep the same transformed corpus for every schema candidate.
+- Keep the same transformed corpus for every physical design under comparison.
 - Record that repeated body distributions remain a limitation of the synthetic
   100 TB corpus.
 - Do not benchmark with exact duplicate inserts in the same time partition.
 
 * Representative Query Inventory
 
-Every schema must run the same parameterized inventory:
+Every physical design must run the same parameterized inventory:
 
 1. Recent unscoped tail by dataset and time.
 2. Recent tail scoped by service and severity.
@@ -483,8 +637,10 @@ Each run records:
 - background merges, pending parts, and ingest lag;
 - physical bytes for every supporting schema object.
 
-Initial latency and concurrency acceptance thresholds must be agreed before the
-1 TB bakeoff. Relative improvement alone is not a product acceptance criterion.
+Latency, concurrency, freshness, retention, and ingestion acceptance thresholds
+must be agreed before this draft becomes the MVP contract and before the 10 TB
+query validation. Relative improvement alone is not a product acceptance
+criterion.
 
 * Implementation Phases
 
@@ -523,15 +679,28 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
   record the query-condition cache's effect on repeated dynamic predicates.
 - [X] Measure splitting exact raw payloads onto bulk storage before the ten-day
   retained-data benchmark.
+- [X] Select =Map= as the MVP long-tail serving representation based on the
+  completed scale load and raw query baseline; do not carry native =JSON= or
+  typed arrays into the 10 TB load.
 - [ ] Run the complete query inventory with cold and warm cache conditions.
 - [ ] Compare candidate sort keys and timestamp bucket widths.
 - [ ] Compare trace projection and derived trace-table approaches using a
   deterministic correlated-event fixture.
-- [ ] Select the base attribute representation, sort key, identifier types, and
+- [ ] Record the =Map= representation, final sort key, identifier types, and
   promoted-column baseline in a written decision record.
 
 ** Phase 2: unified query semantics
 
+- [ ] Define and version the common event envelope, dimension/measure typing,
+  upstream sampling metadata, and stable event and batch identities.
+- [ ] Implement a stateless ingestion gateway with authentication, validation,
+  redaction, quotas, and cached versioned tenant policy.
+- [ ] Establish the durable acceptance boundary, canonical immutable batch
+  archive, idempotent ClickHouse consumer, and replay validation.
+- [ ] Implement the dataset and field-policy registry.
+- [ ] Implement stream-derived field presence, type, cardinality, top-K,
+  value-size, and growth-rate observations without enumerating high-cardinality
+  values.
 - [ ] Define the event filter, grouping, time-series, heatmap, percentile, and
   raw-result query contract.
 - [ ] Implement a planner that chooses raw, projection, metadata, or aggregate
@@ -555,14 +724,20 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 - [ ] Add normalized query-result caching and measure hit behavior.
 - [ ] Add query cost estimation and guardrails for raw exact and
   high-cardinality operations.
+- [ ] Implement dashboard-requested acceleration and workload recommendations;
+  keep activation manual until tenant budgets and maintenance cost are proven.
 - [ ] Verify derived storage remains within the agreed amplification budget.
 
 ** Phase 4: 10 TB validation
 
-- [ ] Load ten natural days with normalized events on striped SSD and exact raw
+- [X] Load and checksum-validate the first five natural days: 3.07B rows and
+  approximately 5.84 TB logical, with normalized events on striped SSD and exact
   payloads on bulk storage.
-- [ ] Load a natural approximately 10 TB subset while sustaining representative
-  ingestion.
+- [ ] Diagnose the current post-Day-5 stop, resume, and complete ten natural
+  days without discarding the five validated days.
+- [ ] Measure a representative sustained ingestion rate separately from the
+  backfill load; concurrent external bulk-pool writes make current elapsed
+  backfill throughput unsuitable as a production SLO.
 - [ ] Run the full inventory and mixed-concurrency workload.
 - [ ] Validate dashboard isolation from exploratory scans.
 - [ ] Measure query performance during merges and after restart.
@@ -590,9 +765,10 @@ Initial latency and concurrency acceptance thresholds must be agreed before the
 
 ** After 1 TB
 
-Choose the event attribute representation, base sort key, partitioning,
-identifier representation, trace access path, and initial promoted columns. Do
-not proceed with all candidates to 10 TB.
+The benchmark-selected event attribute representation is =Map=. Record its base
+sort key, partitioning, identifier representation, trace access path, and
+initial promoted columns. Do not proceed with the rejected native =JSON= or
+typed-array candidates at 10 TB.
 
 ** After 10 TB
 
@@ -606,6 +782,25 @@ Decide the production sharding, replication, storage-tier, workload-isolation,
 and recovery architecture. Treat 1 PB as a separate distributed-systems test,
 not a linear extrapolation.
 
+* Draft MVP Exit Criteria
+
+This plan remains =Draft=. It is ready to become a finalized MVP plan only when:
+
+- Experiment 010 reaches a documented terminal result and its multi-day storage,
+  ingestion, restart, and query evidence is incorporated;
+- the user workflow and p50/p95 latency, freshness, retention, concurrency, and
+  cost targets are explicit;
+- acceptance, retry, deduplication, archive, and replay semantics are decided;
+- cardinality and privacy defaults have concrete per-tenant budgets and
+  observable rejection behavior;
+- one service can emit the versioned envelope, replay into a clean serving
+  table, and prove event/payload checksums;
+- raw, accelerated, approximate, and incomplete responses expose consistent
+  diagnostics; and
+- the comparison, group-by, histogram, percentile, and exact-event drill-down
+  workflow has been tested with an operator rather than inferred from SQL
+  benchmarks alone.
+
 * Open Questions
 
 - What exact GCP metric and bucket scope produced the 32 TB monthly figure?
@@ -613,15 +808,26 @@ not a linear extrapolation.
 - What are the interactive p50/p95 latency targets by query class and time
   range?
 - What dashboard and exploratory concurrency must one deployment support?
+- What maximum producer-to-query and producer-to-archive lag defines healthy
+  ingestion?
+- Is the acceptance contract at-least-once with query-time duplicates,
+  idempotent insertion by stable event ID, or bounded deduplication by immutable
+  batch ID?
 - Is exact aggregation required synchronously above a bounded scan cost, or may
   it run as an asynchronous query job?
-- Which tenancy boundary must lead the physical sort key?
+- Which common envelope fields justify physical columns across tenants, and
+  what evidence threshold permits adding one?
+- What initial per-tenant event-size, field-count, field-name-growth,
+  cardinality, scan, group, and derived-storage budgets are safe?
 - At what shard count or workload mix does broad =Distributed= fanout justify
   targeted virtual partitions?
 - Which fields must be searchable as text versus exact structured values?
-- Should raw source JSON be retained indefinitely after normalized typed fields
-  are stored?
+- How long must exact canonical payload remain online, and when may it move from
+  recent bulk lookup to archival retrieval?
 - What durable log, immutable batch format, acknowledgement boundary, and replay
   contract make ClickHouse serving state safely reconstructable?
 - Should archived canonical events be queried through ClickHouse object-backed
   parts or through a separate archive execution path?
+- Which registry technology should own dataset, field, privacy, quota, and
+  acceleration policy, and what degraded behavior is allowed when it is
+  unavailable?
