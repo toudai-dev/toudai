@@ -279,10 +279,12 @@ only in the Scuba workload model:
 - Experiment 010 is still in progress and must not be treated as a ten-day
   result. Five natural days have been loaded and validated: 3,071,211,748 rows,
   approximately 5.84 TB logical, 525.46 GiB of normalized hot events, and
-  374.30 GiB of exact payloads. The run is currently stopped after Day 5 and
-  marked failed; its cause and restart must be documented before it resumes.
-  Concurrent external writes to the bulk ZFS pool make elapsed throughput a
-  host-specific observation, while per-day checksums remain valid.
+  374.30 GiB of exact payloads. The first process stopped after its post-Day-5
+  staging-table truncation completed server-side; the harness had not retained
+  the client exit reason. Failure metadata and loader output are now durable,
+  and the run resumed from the validated boundary on 2026-08-22. Concurrent
+  external writes to the bulk ZFS pool make elapsed throughput a host-specific
+  observation, while per-day checksums remain valid.
 
 Relevant experiment records:
 
@@ -733,8 +735,9 @@ criterion.
 - [X] Load and checksum-validate the first five natural days: 3.07B rows and
   approximately 5.84 TB logical, with normalized events on striped SSD and exact
   payloads on bulk storage.
-- [ ] Diagnose the current post-Day-5 stop, resume, and complete ten natural
-  days without discarding the five validated days.
+- [X] Preserve the loader's phase, command, line, exit code, and combined output
+  on failure, then resume without discarding the five validated days.
+- [ ] Complete and checksum-validate the remaining five natural days.
 - [ ] Measure a representative sustained ingestion rate separately from the
   backfill load; concurrent external bulk-pool writes make current elapsed
   backfill throughput unsuitable as a production SLO.
