@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
@@ -64,14 +64,30 @@ capture_logs() {
     ORDER BY event_time_microseconds FORMAT TSVWithNames
   " > "${run_dir}/query-metrics.tsv" 2>/dev/null || true
 }
+failure_line=""
+failure_command=""
+record_error() {
+  # Preserve the client-side failure even when ClickHouse later finishes the query.
+  failure_line="$2"
+  failure_command="$3"
+}
 on_exit() {
   local status=$?
   if [[ "${status}" != "0" && -d "${run_dir}" ]]; then
     echo "failed" > "${run_dir}/status"
     date -u +%FT%TZ > "${run_dir}/failed-at"
+    {
+      printf 'exit_code=%s\n' "${status}"
+      printf 'phase=%s\n' "${current_phase:-unknown}"
+      printf 'line=%s\n' "${failure_line:-unknown}"
+      printf 'command='
+      printf '%q' "${failure_command:-unknown}"
+      printf '\n'
+    } > "${run_dir}/failure.txt"
     capture_logs
   fi
 }
+trap 'record_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 trap on_exit EXIT
 
 safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
@@ -82,9 +98,11 @@ if [[ ! -e "${run_dir}" ]]; then
     exit 1
   fi
   mkdir -p "${run_dir}/days" "${run_dir}/evidence"
+  exec > >(tee -a "${run_dir}/loader.log") 2>&1
   printf '%s' "${config}" > "${run_dir}/config.txt"
   date -u +%FT%TZ > "${run_dir}/started-at"
-  echo "initializing" > "${run_dir}/status"
+  current_phase="initializing"
+  echo "${current_phase}" > "${run_dir}/status"
 
   "${client[@]}" --max_table_size_to_drop=0 --query "DROP DATABASE IF EXISTS benchmark SYNC"
   "${client[@]}" --query "CREATE DATABASE benchmark"
@@ -93,6 +111,7 @@ if [[ ! -e "${run_dir}" ]]; then
   "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/split-events.sql"
   "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/event-payloads.sql"
 else
+  exec > >(tee -a "${run_dir}/loader.log") 2>&1
   if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" == "1" ]]; then
     echo "refusing to reset existing resumable run: ${run_dir}" >&2
     exit 1
@@ -225,7 +244,8 @@ for day in "${days[@]}"; do
     fi
     continue
   fi
-  echo "staging-${day}" > "${run_dir}/status"
+  current_phase="staging-${day}"
+  echo "${current_phase}" > "${run_dir}/status"
 
   if [[ ! -f "${day_dir}/files.tsv" ]]; then
     staged_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
@@ -300,7 +320,8 @@ for day in "${days[@]}"; do
     FROM benchmark.gcp_events GROUP BY toStartOfHour(event_timestamp)
     ORDER BY toStartOfHour(event_timestamp) FORMAT TSVRaw" > "${day_dir}/windows.tsv"
 
-  echo "loading-${day}" > "${run_dir}/status"
+  current_phase="loading-${day}"
+  echo "${current_phase}" > "${run_dir}/status"
   while IFS=$'\t' read -r window_start window_rows hot_checksum payload_checksum; do
     load_target_window "${day}" hot "${window_start}" "${window_rows}" "${hot_checksum}"
     load_target_window "${day}" payload "${window_start}" "${window_rows}" "${payload_checksum}"
@@ -323,9 +344,13 @@ for day in "${days[@]}"; do
     GROUP BY table ORDER BY table FORMAT JSONEachRow" > "${day_dir}/table-storage.jsonl"
   printf '%s\n' "${completed_at}" > "${day_dir}/completed-at"
   rebuild_daily_summary
+  current_phase="truncating-${day}"
+  echo "${current_phase}" > "${run_dir}/status"
   "${client[@]}" --max_table_size_to_drop=0 --query "TRUNCATE TABLE benchmark.gcp_source"
 done
 
+current_phase="capturing-final-evidence"
+echo "${current_phase}" > "${run_dir}/status"
 capture_logs
 "${client[@]}" --query "
   SELECT table, partition, name, rows, bytes_on_disk, data_compressed_bytes,
