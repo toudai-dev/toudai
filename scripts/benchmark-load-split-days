@@ -44,7 +44,18 @@ if [[ "$(realpath -m "${configured_archive}")" != "$(realpath -m "${archive_root
   exit 1
 fi
 
-mapfile -t days < <(find "${source_root}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | head -n "${day_count}")
+if [[ -f "${run_dir}/config.txt" ]]; then
+  # Resume the immutable run selection even if new source days sort before it.
+  persisted_source_root="$(sed -n 's/^source_root=//p' "${run_dir}/config.txt")"
+  persisted_days="$(sed -n 's/^days=//p' "${run_dir}/config.txt")"
+  if [[ "$(realpath "${source_root}")" != "${persisted_source_root}" ]]; then
+    echo "source root does not match ${run_dir}/config.txt" >&2
+    exit 1
+  fi
+  IFS=',' read -r -a days <<< "${persisted_days}"
+else
+  mapfile -t days < <(find "${source_root}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | head -n "${day_count}")
+fi
 if [[ "${#days[@]}" != "${day_count}" ]]; then
   echo "expected ${day_count} source day directories, found ${#days[@]}" >&2
   exit 1
