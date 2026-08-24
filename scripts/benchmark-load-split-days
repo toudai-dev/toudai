@@ -247,16 +247,20 @@ for day in "${days[@]}"; do
   day_dir="${run_dir}/days/${day}"
   mkdir -p "${day_dir}/state/staged"
   if [[ -f "${day_dir}/completed-at" ]]; then
-    # A crash after completion but before truncation must not leak a staged day
-    # into the next source directory.
-    staged_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
-    if [[ "${staged_rows}" != "0" ]]; then
-      "${client[@]}" --max_table_size_to_drop=0 --query "TRUNCATE TABLE benchmark.gcp_source"
-    fi
     continue
   fi
   current_phase="staging-${day}"
   echo "${current_phase}" > "${run_dir}/status"
+
+  staged_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+  staged_markers="$(find "${day_dir}/state/staged" -type f | wc -l)"
+  if [[ "${staged_rows}" == "0" && "${staged_markers}" != "0" ]]; then
+    # Rebuild a lost staging table; validated target-window markers remain intact.
+    find "${day_dir}/state/staged" -type f -delete
+  elif [[ "${staged_rows}" != "0" && "${staged_markers}" == "0" ]]; then
+    # The previous completed day crashed before its staging table was cleared.
+    "${client[@]}" --max_table_size_to_drop=0 --query "TRUNCATE TABLE benchmark.gcp_source"
+  fi
 
   if [[ ! -f "${day_dir}/files.tsv" ]]; then
     staged_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
