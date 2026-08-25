@@ -1,7 +1,8 @@
 # Experiment 010: Ten-Day Split-Storage Load
 
-- **Status:** In progress
-- **Date:** 2026-08-19
+- **Status:** Completed
+- **Started:** 2026-08-19T10:32:50Z
+- **Completed:** 2026-08-25T11:49:20Z
 
 ## Question
 
@@ -43,18 +44,33 @@ the decoded source stage after both targets for a day are complete.
 
 ## Results
 
-In progress. Seven natural days are complete and checksum-validated:
+All ten natural days completed. Each of the 240 hourly windows has a durable
+row-count and checksum validation marker for both the normalized hot table and
+the exact payload table.
 
-| Measurement | Current result |
+| Measurement | Final result |
 |---|---:|
-| Completed source rows | 4,221,491,105 |
-| GCP-equivalent logical bytes | 8,020,515,756,500 (~8.02 TB) |
-| Normalized hot bytes | 786,923,624,252 (732.88 GiB) |
-| Exact payload bytes | 559,292,133,452 (520.88 GiB) |
+| Source rows | 5,689,254,359 |
+| Source Parquet bytes | 1,116,601,405,252 (1,039.92 GiB) |
+| GCP-equivalent logical bytes | 10,809,583,282,100 (~10.81 TB) |
+| Normalized hot bytes | 1,074,656,521,772 (1,000.85 GiB) |
+| Exact payload bytes | 760,722,901,112 (708.48 GiB) |
+| Combined serving and payload bytes | 1,835,379,422,884 (1,709.33 GiB) |
+| Active hot parts | 114 |
+| Active payload parts | 106 |
 
-The byte measurements are cumulative after Day 7 and may decrease as background
-merges finish. Day 8 is not included until both target tables pass every window
-check and the daily summary is durable.
+The normalized hot table occupies 9.94% of calibrated logical input, or 10.06×
+logical-to-physical compression. Exact payload occupies 7.04%, or 14.21×
+compression. Together they occupy 16.98% of logical input for a 5.89× effective
+ratio. The split representation is 1.64× the already compressed source Parquet
+size because it retains both normalized query-serving fields and independently
+addressable exact payloads.
+
+At final evidence capture, the hot ZFS dataset was 57% used with 785 GiB
+available, and the bulk benchmark dataset was 28% used with 2.42 TiB available.
+Both pools were online with no read, write, checksum, or known data errors. The
+single node therefore retained the target corpus while preserving substantial
+SSD headroom for the next acceleration experiment.
 
 ### Recovery evidence
 
@@ -81,8 +97,45 @@ that rebuildable staging copy. Completed days now skip cleanup, and the first
 incomplete day distinguishes missing active staging from a previous day's
 untruncated stage using its file markers.
 
-Day 8 source staging is currently being rebuilt. Its validated hot and payload
-windows remain intact and will be rechecked before loading continues. The
-original process used ClickHouse 26.3.15.4; recovery after the executor
-replacement uses the Nix-updated 26.3.17.110. Query and throughput comparisons
-must therefore identify the patch-version boundary.
+Day 8 was restaged, its preserved windows were rechecked, and loading continued
+through Day 10 without another correctness failure. The original process used
+ClickHouse 26.3.15.4; recovery after the executor replacement used the
+Nix-updated 26.3.17.110. Query and throughput comparisons must therefore
+identify the patch-version boundary.
+
+The six-day wall duration is not a sustained-ingestion result. It includes
+operator pauses, executor replacement, staging reconstruction, failure
+diagnosis, a ClickHouse patch change, and concurrent external writes to the bulk
+pool. Per-window query-log data remains useful, but production ingestion capacity
+requires a separate controlled measurement.
+
+## Interpretation
+
+The split physical design passes the retained-capacity and full-resolution
+correctness gate on this host. Approximately 10.81 TB of calibrated logical
+input fits in 1.67 TiB of active ClickHouse parts while preserving every accepted
+normalized event and exact source payload. Moving payloads off SSD avoids making
+normal exploration pay their 708 GiB footprint.
+
+This experiment does not establish interactive query latency, acceleration
+maintenance cost, workload concurrency, or production ingestion throughput.
+Those are the next gates. It also does not prove object storage or durable replay:
+the bulk payload table is a useful physical boundary, not the final archive
+contract.
+
+## Artifacts and Follow-ups
+
+The completed run is:
+
+```text
+/mnt/fast-storage/lighthouse/runs/experiment-010-ten-day-split-storage-v1
+```
+
+It contains the day manifests, validation markers, query metrics, final active
+parts, and host-storage evidence. Next:
+
+- run the representative ten-day raw query and exact payload lookup suite;
+- build tenant attribute indexes and dashboard aggregate states over all ten
+  days, recording storage, backfill CPU, and coverage;
+- measure concurrent dashboard and exploratory execution separately; and
+- retain the current tables unchanged until those read-only baselines complete.

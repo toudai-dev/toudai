@@ -276,15 +276,14 @@ only in the Scuba workload model:
   row counts and checksums. Exact source lookup took about 12 ms on SSD and 351
   ms from bulk storage. This supports separate query-serving and exact-payload
   paths behind one logical event contract.
-- Experiment 010 is still in progress and must not be treated as a ten-day
-  result. Five natural days have been loaded and validated: 3,071,211,748 rows,
-  approximately 5.84 TB logical, 525.46 GiB of normalized hot events, and
-  374.30 GiB of exact payloads. The first process stopped after its post-Day-5
-  staging-table truncation completed server-side; the harness had not retained
-  the client exit reason. Failure metadata and loader output are now durable,
-  and the run resumed from the validated boundary on 2026-08-22. Concurrent
-  external writes to the bulk ZFS pool make elapsed throughput a host-specific
-  observation, while per-day checksums remain valid.
+- Experiment 010 loaded and checksum-validated 5,689,254,359 rows across ten
+  natural days and 240 hourly windows: approximately 10.81 TB logical input,
+  1,000.85 GiB of normalized hot events, and 708.48 GiB of exact payloads. The
+  combined physical representation is 16.98% of logical input, or 5.89×
+  effective compression. At final capture the hot dataset retained 785 GiB of
+  headroom. The run also validated resumability across truncation failures and
+  an executor replacement, but its interrupted wall duration and concurrent
+  bulk-pool writes are not production ingestion-throughput evidence.
 
 Relevant experiment records:
 
@@ -737,7 +736,8 @@ criterion.
   payloads on bulk storage.
 - [X] Preserve the loader's phase, command, line, exit code, and combined output
   on failure, then resume without discarding the five validated days.
-- [ ] Complete and checksum-validate the remaining five natural days.
+- [X] Complete and checksum-validate all ten natural days: 5.69B rows and
+  approximately 10.81 TB logical input.
 - [ ] Measure a representative sustained ingestion rate separately from the
   backfill load; concurrent external bulk-pool writes make current elapsed
   backfill throughput unsuitable as a production SLO.
@@ -747,7 +747,8 @@ criterion.
 - [ ] Validate object-storage or cold-tier behavior on selected partitions.
 - [ ] Compare transparent ClickHouse tiering with an explicit hot/archive query
   split for selected aggregate and raw-event fixtures.
-- [ ] Confirm storage ratio and capacity assumptions for the 100 TB run.
+- [X] Confirm the single-node retained-capacity assumption: normalized hot plus
+  exact payload uses 1,709.33 GiB, with 785 GiB hot-tier headroom at capture.
 - [ ] Record any schema or planner changes required before scaling further.
 
 ** Phase 5: 100 TB architectural validation

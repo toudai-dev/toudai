@@ -35,3 +35,7 @@ conditions. Add a new run or record and link the relationship.
 | 004 | Completed | [ClickHouse 26.3.17 patch comparison](004-clickhouse-26-3-17-comparison.md) |
 | 005 | Completed | [Representative query calibration](005-representative-query-calibration.md) |
 | 006 | Completed | [One-day Map versus JSON scale load](006-one-day-map-json-scale-load.md) |
+| 007 | Completed | [Full-day Map query baseline](007-full-day-map-query-baseline.md) |
+| 008 | Completed | [Tenant attribute acceleration](008-tenant-attribute-acceleration.md) |
+| 009 | Completed | [Split hot events and raw payloads](009-split-hot-events-payload.md) |
+| 010 | Completed | [Ten-day split-storage load](010-ten-day-split-storage-load.md) |
