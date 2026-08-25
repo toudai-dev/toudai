@@ -87,12 +87,12 @@ normalization time in candidate insertion latency.
 ## Command
 
 ```bash
-nix develop --command scripts/benchmark-clickhouse start
+nix develop --command benchmark/scripts/benchmark-clickhouse start
 
 LIGHTHOUSE_BENCH_EXPECTED_ROWS=547356173 \
 LIGHTHOUSE_BENCH_CANDIDATES=map,json \
 LIGHTHOUSE_BENCH_RESET=1 \
-nix develop --command scripts/benchmark-load-day \
+nix develop --command benchmark/scripts/benchmark-load-day \
   /mnt/storage/lighthouse/2026-08-05 \
   experiment-006-2026-08-05-map-json
 ```

@@ -18,7 +18,7 @@ stop cleanly?
 - Native TCP port: 19000
 - HTTP port: 18123
 - Configuration: `benchmark/clickhouse/config.xml` and `users.xml`
-- Lifecycle script: `scripts/benchmark-clickhouse`
+- Lifecycle script: `benchmark/scripts/benchmark-clickhouse`
 
 The final quota-limited child dataset was not available because ZFS
 administration requires an interactive `sudo` password on this host. The smoke
@@ -49,13 +49,13 @@ The lifecycle was then repeated with separate `start`, `status`, `client`, and
 
 ```bash
 export LIGHTHOUSE_BENCH_ROOT=/mnt/fast-storage/lighthouse-smoke
-scripts/benchmark-clickhouse smoke
+benchmark/scripts/benchmark-clickhouse smoke
 
-scripts/benchmark-clickhouse start
-scripts/benchmark-clickhouse status
-scripts/benchmark-clickhouse client \
+benchmark/scripts/benchmark-clickhouse start
+benchmark/scripts/benchmark-clickhouse status
+benchmark/scripts/benchmark-clickhouse client \
   --query "SELECT version(), getSetting('max_threads'), getSetting('max_memory_usage')"
-scripts/benchmark-clickhouse stop
+benchmark/scripts/benchmark-clickhouse stop
 ```
 
 ## Results

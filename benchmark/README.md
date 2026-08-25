@@ -9,7 +9,7 @@ runtime state below `LIGHTHOUSE_BENCH_ROOT`.
 Create quota-limited ZFS child datasets:
 
 ```bash
-scripts/benchmark-storage-setup
+benchmark/scripts/benchmark-storage-setup
 ```
 
 The command requires `sudo` because it creates and configures ZFS datasets. It
@@ -26,11 +26,11 @@ initial baseline. The setup script is idempotent and reasserts these properties.
 ## Server lifecycle
 
 ```bash
-scripts/benchmark-clickhouse prepare
-scripts/benchmark-clickhouse start
-scripts/benchmark-clickhouse status
-scripts/benchmark-clickhouse client --query 'SELECT version()'
-scripts/benchmark-clickhouse stop
+benchmark/scripts/benchmark-clickhouse prepare
+benchmark/scripts/benchmark-clickhouse start
+benchmark/scripts/benchmark-clickhouse status
+benchmark/scripts/benchmark-clickhouse client --query 'SELECT version()'
+benchmark/scripts/benchmark-clickhouse stop
 ```
 
 Set `LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH` when a capacity experiment needs a
@@ -41,7 +41,7 @@ moved to `os_overflow`.
 Run the lifecycle and write smoke test with:
 
 ```bash
-scripts/benchmark-clickhouse smoke
+benchmark/scripts/benchmark-clickhouse smoke
 ```
 
 ## GCP Parquet calibration load
@@ -49,8 +49,8 @@ scripts/benchmark-clickhouse smoke
 With the server running, load a bounded sample into the three schema candidates:
 
 ```bash
-scripts/benchmark-clickhouse start
-scripts/benchmark-load-gcp \
+benchmark/scripts/benchmark-clickhouse start
+benchmark/scripts/benchmark-load-gcp \
   /mnt/storage/lighthouse/2026-08-01/compact-0000.parquet 10000
 ```
 
@@ -59,7 +59,7 @@ attribute keys are not interpreted as nested JSON paths. It refuses to append
 to non-empty calibration tables. To deliberately replace a prior run:
 
 ```bash
-LIGHTHOUSE_BENCH_RESET=1 scripts/benchmark-load-gcp \
+LIGHTHOUSE_BENCH_RESET=1 benchmark/scripts/benchmark-load-gcp \
   /mnt/storage/lighthouse/2026-08-01/compact-0000.parquet 10000
 ```
 
@@ -73,9 +73,9 @@ pending.
 Run the versioned query fixtures against all populated candidates:
 
 ```bash
-nix develop --command scripts/benchmark-clickhouse start
-nix develop --command scripts/benchmark-run-queries experiment-005-smoke
-nix develop --command scripts/benchmark-clickhouse stop
+nix develop --command benchmark/scripts/benchmark-clickhouse start
+nix develop --command benchmark/scripts/benchmark-run-queries experiment-005-smoke
+nix develop --command benchmark/scripts/benchmark-clickhouse stop
 ```
 
 By default, each fixture runs three times in both `clickhouse-cold` and `warm`
@@ -89,7 +89,7 @@ Useful overrides:
 LIGHTHOUSE_BENCH_REPETITIONS=1 \
 LIGHTHOUSE_BENCH_CACHE_MODES=warm \
 LIGHTHOUSE_BENCH_CANDIDATES=map,typed,json \
-nix develop --command scripts/benchmark-run-queries experiment-005-order-b
+nix develop --command benchmark/scripts/benchmark-run-queries experiment-005-order-b
 ```
 
 Run artifacts are immutable directories below
@@ -103,11 +103,11 @@ parts, hardware details, and ZFS properties. Set
 Stage one natural Parquet day and load Map and native JSON in hourly windows:
 
 ```bash
-nix develop --command scripts/benchmark-clickhouse start
+nix develop --command benchmark/scripts/benchmark-clickhouse start
 
 LIGHTHOUSE_BENCH_RESET=1 \
 LIGHTHOUSE_BENCH_EXPECTED_ROWS=547356173 \
-nix develop --command scripts/benchmark-load-day \
+nix develop --command benchmark/scripts/benchmark-load-day \
   /mnt/storage/lighthouse/2026-08-05 \
   experiment-006-1tb
 ```
@@ -128,7 +128,7 @@ input without changing production defaults:
 LIGHTHOUSE_BENCH_MAX_FILES=1 \
 LIGHTHOUSE_BENCH_ROW_LIMIT_PER_FILE=10000 \
 LIGHTHOUSE_BENCH_RESET=1 \
-nix develop --command scripts/benchmark-load-day \
+nix develop --command benchmark/scripts/benchmark-load-day \
   /mnt/storage/lighthouse/2026-08-05 \
   day-loader-smoke
 ```
@@ -139,7 +139,7 @@ Override the root or ports for an isolated run:
 LIGHTHOUSE_BENCH_ROOT=/mnt/fast-storage/lighthouse/run-001 \
 LIGHTHOUSE_CLICKHOUSE_TCP_PORT=19001 \
 LIGHTHOUSE_CLICKHOUSE_HTTP_PORT=18124 \
-scripts/benchmark-clickhouse smoke
+benchmark/scripts/benchmark-clickhouse smoke
 ```
 
 Do not point `LIGHTHOUSE_BENCH_ROOT` at the Parquet source directory. Benchmark

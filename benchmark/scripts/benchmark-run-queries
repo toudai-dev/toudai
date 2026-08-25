@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 source_path="${LIGHTHOUSE_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet}"
@@ -44,7 +44,7 @@ fi
 mkdir -p "${run_dir}/evidence" "${run_dir}/queries" "${run_dir}/results"
 echo "running" > "${run_dir}/status"
 
-client=("${repo_root}/scripts/benchmark-clickhouse" client)
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 "${client[@]}" --query "SELECT 1" >/dev/null
 
 IFS=',' read -r -a candidates <<< "${candidate_order}"

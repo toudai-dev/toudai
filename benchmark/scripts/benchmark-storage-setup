@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# Keep benchmark data isolated from the source corpus and operating-system disk.
+
 fast_dataset="${LIGHTHOUSE_FAST_DATASET:-fast-storage/lighthouse}"
 fast_mount="${LIGHTHOUSE_FAST_MOUNT:-/mnt/fast-storage/lighthouse}"
 fast_refquota="${LIGHTHOUSE_FAST_REFQUOTA:-750G}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 source_path="${1:-}"
 row_limit="${2:-0}"
 
@@ -20,7 +20,7 @@ if [[ ! "${row_limit}" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-client=("${repo_root}/scripts/benchmark-clickhouse" client)
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 "${client[@]}" --query "SELECT 1" >/dev/null
 "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/candidates.sql"
 

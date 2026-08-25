@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
 clickhouse_root="${benchmark_root}/clickhouse"
 config_file="${repo_root}/benchmark/clickhouse/config.xml"
@@ -22,7 +22,7 @@ http_port="${LIGHTHOUSE_CLICKHOUSE_HTTP_PORT:-18123}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/benchmark-clickhouse <command> [client arguments]
+Usage: benchmark/scripts/benchmark-clickhouse <command> [client arguments]
 
 Commands:
   prepare  Create benchmark server directories.

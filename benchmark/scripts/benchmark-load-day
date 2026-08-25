@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 source_dir="${1:-}"
@@ -52,7 +52,7 @@ done
 
 run_dir="${runs_root}/${run_id}"
 staged_dir="${run_dir}/state/staged"
-client=("${repo_root}/scripts/benchmark-clickhouse" client)
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 "${client[@]}" --query "SELECT 1" >/dev/null
 "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/candidates.sql"
 

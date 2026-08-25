@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 archive_root="${LIGHTHOUSE_CLICKHOUSE_ARCHIVE_PATH:-/mnt/storage/lighthouse-bench/archive}"
@@ -36,7 +36,7 @@ if [[ "${day_count}" == "0" ]]; then
 fi
 
 run_dir="${runs_root}/${run_id}"
-client=("${repo_root}/scripts/benchmark-clickhouse" client)
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 "${client[@]}" --query "SELECT 1" >/dev/null
 configured_archive="$("${client[@]}" --query "SELECT path FROM system.disks WHERE name = 'bulk_archive' FORMAT TSVRaw")"
 if [[ "$(realpath -m "${configured_archive}")" != "$(realpath -m "${archive_root}")" ]]; then
