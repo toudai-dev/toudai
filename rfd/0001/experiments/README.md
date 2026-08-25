@@ -1,5 +1,7 @@
 # Experiment Records
 
+[RFD 0001](../README.adoc)
+
 Experiment records preserve enough context to reproduce and interpret a result.
 Use a zero-padded sequence and descriptive name, for example
 `001-json-vs-map-1tb.md`.

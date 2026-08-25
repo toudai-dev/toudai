@@ -1,5 +1,7 @@
 # Experiment 005: Representative Query Calibration
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Date:** 2026-08-17
 - **Source mutation:** None

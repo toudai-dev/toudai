@@ -61,18 +61,23 @@ This is a ClickHouse-backed telemetry service designed to be compatible with the
 - Do not introduce a second commit-title convention; keep commit types aligned with `cliff.toml` and `.github/workflows/commits.yml`.
 - Commit in small logical chunks. This is a hard requirement when creating commits.
 - Each commit must be self-reviewable: it should contain one coherent change, include its relevant tests/docs, and avoid mixing unrelated cleanup or follow-up work.
-- If working with a plan, update the plan checklist incrementally as part of implementation, not only at the end.
+- If working from an RFD, update its implementation checklist incrementally as part of implementation, not only at the end.
 - Prefer writing table tests over individual tests whenever possible
 - Add comments that describe intent for non-obvious logic. This is required when code encodes a production constraint, workaround, performance tradeoff, safety guardrail, or surprising behavior.
 - Keep comments succinct and useful for review. Avoid comments that merely restate what the next line of code does.
 
-### Working From Plans
+### Working From RFDs
 
-When implementing a plan in `docs/plans/`:
+When implementing an RFD in `rfd/NNNN/`:
 
-- Treat the plan checklist as the source of truth for progress.
+- Keep stable design and decision context in `README.adoc`; keep checkboxes out
+  of the proposal.
+- Treat `IMPLEMENTATION.org` or `IMPLEMENTATION.md` as the source of truth for
+  progress.
 - Before code changes, identify the phase/checklist items being worked.
-- Update checklist items incrementally in the plan file as work completes.
+- Update checklist items incrementally as work completes.
 - Do not mark an item complete unless the named code/test/docs work is actually done.
 - If implementation differs from the checklist wording, update the wording instead of marking an inaccurate item complete.
+- Store experiments that inform an RFD under that RFD's `experiments/`
+  directory and reference their measured results from the proposal.
 - In the final response, summarize which checklist items changed and which remain open.

@@ -1,5 +1,7 @@
 # Experiment 011: Ten-Day Query Baseline
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Running
 - **Date:** 2026-08-25
 - **Source mutation:** None

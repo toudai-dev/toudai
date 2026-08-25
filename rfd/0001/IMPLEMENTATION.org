@@ -1,8 +1,9 @@
-#+TITLE: Unified Event Storage and Scale Validation
+#+TITLE: RFD 0001 implementation checklist
 #+AUTHOR: Darwin D. Wu
 #+DATE: 2026-08-16
-#+STATUS: Draft
 #+STARTUP: showall
+
+[[file:README.adoc][Back to RFD 0001: Unified event storage for interactive telemetry]]
 
 * Context
 
@@ -116,7 +117,7 @@ Scale beyond one node with local =ReplicatedMergeTree= tables behind a
 and =event_id= so high-volume tenants use the whole cluster. Accept broad query
 fanout until measurements show that its fixed cost or network use justifies a
 virtual-partition placement layer. See
-=../decisions/001-distributed-event-sharding.md=.
+[[file:README.adoc][RFD 0001]].
 
 ** Bounded derived storage
 
@@ -139,8 +140,8 @@ Relevant references:
 
 - https://docs.honeycomb.io/get-started/honeycomb/traces-metrics-logs
 - https://www.honeycomb.io/blog/introducing-honeycomb-telemetry-pipeline
-- =../experiments/000-gcp-parquet-corpus-profile.md=
-- =../decisions/000-unified-events-separate-metrics.md=
+- =experiments/000-gcp-parquet-corpus-profile.md=
+- [[file:README.adoc][RFD 0001]]
 
 ** Scuba product model
 
@@ -163,7 +164,7 @@ than presenting the result as complete.
 Relevant references:
 
 - https://www.vldb.org/pvldb/vol6/p1057-wiener.pdf
-- =../decisions/001-distributed-event-sharding.md=
+- [[file:README.adoc][RFD 0001]]
 
 ** Supporting Meta-scale evidence
 
@@ -287,11 +288,11 @@ only in the Scuba workload model:
 
 Relevant experiment records:
 
-- =../experiments/006-one-day-map-json-scale-load.md=
-- =../experiments/007-full-day-map-query-baseline.md=
-- =../experiments/008-tenant-attribute-acceleration.md=
-- =../experiments/009-split-hot-events-payload.md=
-- =../experiments/010-ten-day-split-storage-load.md=
+- =experiments/006-one-day-map-json-scale-load.md=
+- =experiments/007-full-day-map-query-baseline.md=
+- =experiments/008-tenant-attribute-acceleration.md=
+- =experiments/009-split-hot-events-payload.md=
+- =experiments/010-ten-day-split-storage-load.md=
 
 * Draft MVP Event Contract
 
@@ -788,10 +789,10 @@ not a linear extrapolation.
 
 * Draft MVP Exit Criteria
 
-This plan remains =Draft=. It is ready to become a finalized MVP plan only when:
+RFD 0001 remains in discussion. The MVP contract is ready to commit only when:
 
-- Experiment 010 reaches a documented terminal result and its multi-day storage,
-  ingestion, restart, and query evidence is incorporated;
+- Experiment 011 reaches a documented terminal result and its multi-day query,
+  restart, and workload-isolation evidence is incorporated;
 - the user workflow and p50/p95 latency, freshness, retention, concurrency, and
   cost targets are explicit;
 - acceptance, retry, deduplication, archive, and replay semantics are decided;

@@ -1,5 +1,7 @@
 # Experiment 002: Native ClickHouse Harness Smoke Test
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Date:** 2026-08-16
 - **Data mutation:** Created and removed a temporary smoke directory on

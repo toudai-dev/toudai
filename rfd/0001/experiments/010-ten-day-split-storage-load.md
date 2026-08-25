@@ -1,5 +1,7 @@
 # Experiment 010: Ten-Day Split-Storage Load
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Started:** 2026-08-19T10:32:50Z
 - **Completed:** 2026-08-25T11:49:20Z

@@ -1,5 +1,7 @@
 # Experiment 007: Full-Day Map Query Baseline
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Date:** 2026-08-19
 - **Source mutation:** None

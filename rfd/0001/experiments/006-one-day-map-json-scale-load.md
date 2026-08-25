@@ -1,5 +1,7 @@
 # Experiment 006: One-day Map versus JSON scale load
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed — native JSON terminated after operational failure
 - **Started:** 2026-08-17T01:54:44Z
 - **Completed:** 2026-08-18T19:43:56Z

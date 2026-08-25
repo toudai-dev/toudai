@@ -1,5 +1,7 @@
 # Experiment 009: Split Hot Events and Raw Payloads
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Date:** 2026-08-19
 - **Source mutation:** None

@@ -1,5 +1,7 @@
 # Experiment 000: GCP Parquet Corpus Profile
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Date:** 2026-08-16
 - **Data mutation:** None; all commands were read-only

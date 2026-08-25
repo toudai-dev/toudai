@@ -1,5 +1,7 @@
 # Experiment 003: GCP Parquet Source Adapter Calibration
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** In progress
 - **Started:** 2026-08-16
 - **Source mutation:** None

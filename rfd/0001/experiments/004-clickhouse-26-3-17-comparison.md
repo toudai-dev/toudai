@@ -1,5 +1,7 @@
 # Experiment 004: ClickHouse 26.3.17 Patch Comparison
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Date:** 2026-08-16
 - **Source mutation:** None

@@ -108,6 +108,11 @@ smoke-metrics:
 lint:
 	golangci-lint run --verbose
 
+.PHONY: check-rfds
+check-rfds:
+	scripts/check-rfd-status.sh
+	scripts/check-rfd-status-test.sh
+
 .PHONY: up
 up:
 	docker-compose up -d --remove-orphans

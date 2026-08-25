@@ -1,5 +1,7 @@
 # Experiment 001: Local Benchmark Host Profile
 
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
 - **Status:** Completed
 - **Date:** 2026-08-16
 - **Data mutation:** Removed abandoned DuckDB spill files created during corpus
