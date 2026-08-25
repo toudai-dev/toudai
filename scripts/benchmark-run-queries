@@ -6,6 +6,8 @@ benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 source_path="${LIGHTHOUSE_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet}"
 candidate_order="${LIGHTHOUSE_BENCH_CANDIDATES:-json,map,typed}"
+target_table="${LIGHTHOUSE_BENCH_TARGET_TABLE:-}"
+expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-3629077}"
 cache_modes="${LIGHTHOUSE_BENCH_CACHE_MODES:-clickhouse-cold,warm}"
 repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-3}"
 fixture_filter="${LIGHTHOUSE_BENCH_FIXTURES:-}"
@@ -22,6 +24,14 @@ if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if [[ ! "${gcp_bytes_per_event}" =~ ^[1-9][0-9]*$ ]]; then
   echo "LIGHTHOUSE_GCP_BYTES_PER_EVENT must be a positive integer" >&2
+  exit 2
+fi
+if [[ -n "${target_table}" && ! "${target_table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+  echo "LIGHTHOUSE_BENCH_TARGET_TABLE must be an unqualified table name" >&2
+  exit 2
+fi
+if [[ ! "${expected_rows}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LIGHTHOUSE_BENCH_EXPECTED_ROWS must be a positive integer" >&2
   exit 2
 fi
 
@@ -53,27 +63,44 @@ for mode in "${modes[@]}"; do
   esac
 done
 
-table_state="$("${client[@]}" --query "
-  SELECT count(), uniqExact(total_rows), min(total_rows)
-  FROM system.tables
-  WHERE database = 'benchmark'
-    AND name IN ('events_json', 'events_map', 'events_typed')
-  FORMAT TSVRaw")"
-if [[ "${table_state}" != $'3\t1\t3629077' && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
-  echo "expected three candidate tables with 3,629,077 rows; found: ${table_state}" >&2
-  echo "set LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS=1 for an intentional alternate dataset" >&2
-  exit 1
+if [[ -n "${target_table}" ]]; then
+  if [[ "${#candidates[@]}" != "1" ]]; then
+    echo "a target table requires exactly one logical candidate" >&2
+    exit 2
+  fi
+  reference_table="benchmark.${target_table}"
+  table_rows="$("${client[@]}" --param_table="${target_table}" --query "
+    SELECT total_rows FROM system.tables
+    WHERE database = 'benchmark' AND name = {table:String}
+    FORMAT TSVRaw")"
+  if [[ "${table_rows}" != "${expected_rows}" ]]; then
+    echo "expected ${reference_table} to contain ${expected_rows} rows; found ${table_rows:-no table}" >&2
+    exit 1
+  fi
+else
+  reference_table="benchmark.events_map"
+  table_state="$("${client[@]}" --query "
+    SELECT count(), uniqExact(total_rows), min(total_rows)
+    FROM system.tables
+    WHERE database = 'benchmark'
+      AND name IN ('events_json', 'events_map', 'events_typed')
+    FORMAT TSVRaw")"
+  if [[ "${table_state}" != $'3\t1\t3629077' && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
+    echo "expected three candidate tables with 3,629,077 rows; found: ${table_state}" >&2
+    echo "set LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS=1 for an intentional alternate dataset" >&2
+    exit 1
+  fi
 fi
 
-rows="$("${client[@]}" --query "SELECT count() FROM benchmark.events_map FORMAT TSVRaw")"
-start="$("${client[@]}" --query "SELECT min(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
-end="$("${client[@]}" --query "SELECT max(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
+rows="$("${client[@]}" --query "SELECT count() FROM ${reference_table} FORMAT TSVRaw")"
+start="$("${client[@]}" --query "SELECT min(timestamp) FROM ${reference_table} FORMAT TSVRaw")"
+end="$("${client[@]}" --query "SELECT max(timestamp) FROM ${reference_table} FORMAT TSVRaw")"
 service="${LIGHTHOUSE_BENCH_SERVICE:-}"
 severity="${LIGHTHOUSE_BENCH_SEVERITY:-}"
 if [[ -z "${service}" || -z "${severity}" ]]; then
   IFS=$'\t' read -r service severity < <("${client[@]}" --query "
     SELECT service_name, severity
-    FROM benchmark.events_map
+    FROM ${reference_table}
     WHERE notEmpty(service_name) AND notEmpty(severity)
     GROUP BY service_name, severity
     ORDER BY count() DESC, service_name, severity
@@ -84,7 +111,7 @@ caller="${LIGHTHOUSE_BENCH_CALLER:-}"
 if [[ -z "${dynamic_low_value}" || -z "${caller}" ]]; then
   IFS=$'\t' read -r dynamic_low_value caller < <("${client[@]}" --query "
     SELECT attributes['type'], attributes['caller']
-    FROM benchmark.events_map
+    FROM ${reference_table}
     WHERE notEmpty(attributes['type']) AND notEmpty(attributes['caller'])
     GROUP BY attributes['type'], attributes['caller']
     ORDER BY count() DESC, attributes['type'], attributes['caller']
@@ -94,7 +121,7 @@ dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-}"
 if [[ -z "${dynamic_high_value}" ]]; then
   dynamic_high_value="$("${client[@]}" --query "
     SELECT attributes['workspace_id']
-    FROM benchmark.events_map
+    FROM ${reference_table}
     WHERE notEmpty(attributes['workspace_id'])
     GROUP BY attributes['workspace_id']
     ORDER BY count() DESC, attributes['workspace_id']
@@ -121,6 +148,7 @@ fi
 export RUN_ID="${run_id}" STARTED_AT="${started_at}" REVISION="${revision}"
 export CHANGE_ID="${change_id}" CLICKHOUSE_VERSION="${clickhouse_version}"
 export CANDIDATE_ORDER="${candidate_order}" CACHE_MODES="${cache_modes}"
+export TARGET_TABLE="${target_table}"
 export REPETITIONS="${repetitions}" FIXTURE_FILTER="${fixture_filter}"
 export ROWS="${rows}" SOURCE_PATH="${source_path}"
 export SOURCE_BYTES="${source_bytes}" SOURCE_SHA256="${source_sha256}"
@@ -142,6 +170,7 @@ manifest = {
     },
     "clickhouse_version": os.environ["CLICKHOUSE_VERSION"],
     "candidate_order": os.environ["CANDIDATE_ORDER"].split(","),
+    "target_table": os.environ["TARGET_TABLE"] or None,
     "cache_modes": os.environ["CACHE_MODES"].split(","),
     "cache_policy": {
         "clickhouse-cold": "Drop ClickHouse mark, uncompressed, query, query-condition, and filesystem caches before each measured query; OS and ZFS ARC remain uncontrolled.",
@@ -248,7 +277,12 @@ for mode in "${modes[@]}"; do
         fi
       fi
       rendered_query="${run_dir}/queries/${candidate}/${fixture}.sql"
-      sed "s|{{table}}|benchmark.events_${candidate}|g" "${source_query}" > "${rendered_query}"
+      if [[ -n "${target_table}" ]]; then
+        rendered_table="benchmark.${target_table}"
+      else
+        rendered_table="benchmark.events_${candidate}"
+      fi
+      sed "s|{{table}}|${rendered_table}|g" "${source_query}" > "${rendered_query}"
 
       if [[ "${mode}" == "warm" ]]; then
         prewarm_id="${query_prefix}_prewarm_${candidate}_${fixture//-/_}"
