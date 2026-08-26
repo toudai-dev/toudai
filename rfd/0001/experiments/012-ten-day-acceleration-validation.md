@@ -2,8 +2,8 @@
 
 [RFD 0001](../README.adoc) · [Experiment index](README.md)
 
-- **Status:** Planned
-- **Date:** 2026-08-26
+- **Status:** Running
+- **Started:** 2026-08-26T03:48:03Z
 - **Source mutation:** None; the experiment creates disposable derived tables
 
 ## Question
@@ -83,4 +83,5 @@ The selected fixture values match Experiment 011:
 
 ## Results
 
-Pending.
+The controlled run is active at
+`/mnt/fast-storage/lighthouse/runs/experiment-012-ten-day-acceleration-v1`.
