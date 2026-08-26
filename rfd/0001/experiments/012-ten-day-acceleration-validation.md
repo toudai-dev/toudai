@@ -2,8 +2,9 @@
 
 [RFD 0001](../README.adoc) · [Experiment index](README.md)
 
-- **Status:** Running
+- **Status:** Completed
 - **Started:** 2026-08-26T03:48:03Z
+- **Completed:** 2026-08-26T11:56:06Z
 - **Source mutation:** None; the experiment creates disposable derived tables
 
 ## Question
@@ -83,5 +84,107 @@ The selected fixture values match Experiment 011:
 
 ## Results
 
-The controlled run is active at
-`/mnt/fast-storage/lighthouse/runs/experiment-012-ten-day-acceleration-v1`.
+The controlled run `experiment-012-ten-day-acceleration-v1` completed all four
+builds and 60 measured queries in 8 hours 8 minutes. The artifact is preserved
+at `/mnt/fast-storage/lighthouse/runs/experiment-012-ten-day-acceleration-v1`.
+It used ClickHouse 26.3.17.110 and repository revision `57be8c591d1e`.
+
+### Build cost and storage
+
+All builds scanned the complete 5,689,254,359-row hot table serially.
+
+| Path | Build time | Rows written | Peak memory | CPU time |
+|---|---:|---:|---:|---:|
+| `type` attribute index | 29m 57s | 2.084B | 3.71 GiB | 2.12 CPU-h |
+| `workspace_id` attribute index | 29m 7s | 1.337B | 3.70 GiB | 2.20 CPU-h |
+| Service five-minute counts | 1m 11s | 79,599 | 0.23 GiB | 0.20 CPU-h |
+| Duration states | 27m 35s | 23,487 | 13.53 GiB | 3.75 CPU-h |
+
+The four serial builds consumed 87.8 minutes of query wall time and 8.27 CPU
+hours. This is asynchronous backfill evidence, not ingestion-time maintenance
+cost. The duration build's 13.53 GiB peak also requires an explicit memory
+budget before concurrent tenant backfills are allowed.
+
+| Derived object | Rows | Physical bytes |
+|---|---:|---:|
+| Shared configured attribute index | 3,421,500,542 | 31.76 GiB |
+| Duration aggregate states | 23,487 | 42.25 MiB |
+| Service count rollup | 79,599 | 299.11 KiB |
+| **Total** | — | **31.80 GiB** |
+
+The derived objects add 3.18% to the 1,000.85 GiB normalized hot table, or
+0.32% of the provisional 10.81 TB logical input. The attribute index accounts
+for effectively all derived storage; the two dashboard aggregate paths are
+negligible. Free SSD capacity remained 765 GiB after the build.
+
+### Controlled query performance
+
+Values are median client wall time across three repetitions. Speedup compares
+raw and accelerated execution in the same cache mode.
+
+| Fixture | Cold raw | Cold accelerated | Speedup | Warm raw | Warm accelerated | Speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| Dynamic `type` filter | 942.2 s | 9.29 s | 102× | 414.2 s | 8.49 s | 49× |
+| Dynamic `workspace_id` filter | 1005.4 s | 3.83 s | 263× | 485.5 s | 3.75 s | 130× |
+| Rate by service | 57.87 s | 124 ms | 467× | 55.09 s | 123 ms | 448× |
+| Duration heatmap | 998.65 s | 75 ms | 13,315× | 991.85 s | 76 ms | 13,051× |
+| Percentiles by caller | 967.62 s | 119 ms | 8,131× | 726.78 s | 116 ms | 6,265× |
+
+The two selected index values are highly prevalent: `type = event_lifecycle`
+matches 1,019,093,824 events and the selected `workspace_id` matches
+296,875,155. The benchmark computes an exact checksum over every matching event
+identity, so its 3.7-to-9.3-second accelerated latency is a demanding full-match
+aggregate rather than bounded raw-event retrieval. It is a major improvement
+but still not a two-second interactive path for these values. Selective values,
+top-K counts, and bounded event retrieval require separate fixtures.
+
+The aggregate states meet an interactive dashboard envelope on this host at
+75-to-124 ms. Cache mode has no material effect because they read tiny derived
+tables rather than the raw corpus.
+
+### Correctness
+
+All 30 raw-versus-accelerated checks passed:
+
+- exact filter counts and event-ID checksums matched;
+- all rate buckets matched;
+- heatmap sample count and duration sum matched; and
+- every returned caller's percentile sample count and duration sum matched.
+
+The stored heatmap and t-digest states returned stable bytes across measured
+queries because their expensive merge order was fixed during the build. They
+remain approximate and may differ after a rebuild or different ingestion merge
+order. The product still needs fixed compatible heatmap buckets or another
+explicit sketch contract, numeric tolerance for approximate percentiles, and
+exact raw fallback.
+
+## Interpretation
+
+Bounded, schema-stable acceleration remains viable at ten days without
+tenant-specific ClickHouse columns. Dashboard aggregate states are the strongest
+result: they add about 42.5 MiB and turn 12-to-17-minute raw queries into roughly
+0.1-second queries.
+
+Configured attribute indexes also scale physically: two extremely prevalent
+fields add 31.76 GiB, or 3.18% of normalized storage, and improve exact
+full-match aggregates by 49× to 263×. However, 3.42B derived rows, approximately
+1.5 hours of serial backfill, and multi-second queries for prevalent values
+confirm that indexes must be budgeted per tenant and field. They should support
+selective filters and bounded drill-down, not replace aggregate states or raw
+storage.
+
+This result supports manual and dashboard-requested activation with raw
+fallback. It does not yet justify automatic activation because sustainable
+ingestion maintenance, per-tenant skew, selective and absent values, expiration,
+backfill isolation, and mixed concurrency remain unmeasured.
+
+## Follow-ups
+
+- Measure selective, absent, range, conjunction, and bounded event-retrieval
+  index queries.
+- Maintain the derived paths during representative ingestion and measure lag,
+  merge load, and write amplification.
+- Run asynchronous tenant backfill beside dashboard and exploratory workloads.
+- Simulate multiple tenants selecting different fields and one noisy tenant.
+- Replace the adaptive heatmap contract with fixed buckets or a measured
+  mergeable sketch before defining dashboard API semantics.

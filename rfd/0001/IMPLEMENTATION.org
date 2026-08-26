@@ -744,7 +744,7 @@ criterion.
   backfill throughput unsuitable as a production SLO.
 - [X] Run the full ten-day raw query inventory under ClickHouse-cold and warm
   conditions and validate deterministic exact payload lookup.
-- [ ] Build the selected tenant indexes and dashboard aggregate states over ten
+- [X] Build the selected tenant indexes and dashboard aggregate states over ten
   days, then measure storage, maintenance cost, correctness, and query speedup.
 - [ ] Run the mixed-concurrency workload.
 - [ ] Validate dashboard isolation from exploratory scans.

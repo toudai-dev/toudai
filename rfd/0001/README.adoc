@@ -180,6 +180,14 @@ remain to be verified.
   minutes cold and 6.9 to 8.1 minutes warm; heatmap and percentile scans took
   12.1 to 16.8 minutes. Deterministic exact payload lookup took 919 ms on its
   first ClickHouse-cold access and 62 to 73 ms thereafter.
+* link:experiments/012-ten-day-acceleration-validation.md[Experiment 012]
+  rebuilt two configured attribute indexes and two dashboard aggregate paths
+  over all ten days. Derived storage was 31.80 GiB, or 3.18% of normalized hot
+  storage. Attribute indexes improved demanding exact full-match aggregates by
+  49x to 263x but still took 3.7 to 9.3 seconds for highly prevalent values.
+  Dashboard aggregate states answered rate, heatmap, and percentile fixtures in
+  75 to 124 ms, improving raw execution by 448x to 13,315x. All 30 correctness
+  anchor checks passed.
 
 These results support the split `Map`-based serving baseline and demonstrate
 that ten-day retained capacity fits the current host. They also reject broad raw
