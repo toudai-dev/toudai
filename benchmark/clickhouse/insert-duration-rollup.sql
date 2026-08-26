@@ -12,7 +12,7 @@ SELECT
     sumState(assumeNotNull(duration)) AS duration_sum,
     quantilesTDigestState(0.5, 0.9, 0.95, 0.99)(assumeNotNull(duration)) AS duration_quantiles,
     histogramState(20)(assumeNotNull(duration)) AS duration_histogram
-FROM benchmark.events_map
+FROM {{table}}
 ARRAY JOIN if(notEmpty(caller), [('all', ''), ('caller', caller)], [('all', '')]) AS dimension
 WHERE duration IS NOT NULL
 GROUP BY tenant_id, dataset, bucket, dimension_name, dimension_value

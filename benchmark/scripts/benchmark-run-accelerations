@@ -8,6 +8,8 @@ run_id="${1:-}"
 repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-1}"
 min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
 reuse_accelerations="${LIGHTHOUSE_BENCH_REUSE_ACCELERATIONS:-0}"
+target_table="${LIGHTHOUSE_BENCH_TARGET_TABLE:-events_map}"
+expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
 
 if [[ -z "${run_id}" ]]; then
   echo "usage: $0 RUN_ID" >&2
@@ -25,6 +27,14 @@ for value in "${repetitions}" "${min_free_bytes}" "${reuse_accelerations}"; do
 done
 if [[ "${repetitions}" == "0" ]]; then
   echo "LIGHTHOUSE_BENCH_REPETITIONS must be positive" >&2
+  exit 2
+fi
+if [[ ! "${target_table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+  echo "LIGHTHOUSE_BENCH_TARGET_TABLE must be an unqualified table name" >&2
+  exit 2
+fi
+if [[ ! "${expected_rows}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LIGHTHOUSE_BENCH_EXPECTED_ROWS must be a positive integer" >&2
   exit 2
 fi
 
@@ -53,13 +63,14 @@ echo "initializing" > "${run_dir}/status"
 client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 "${client[@]}" --query "SELECT 1" >/dev/null
 
-rows="$("${client[@]}" --query "SELECT count() FROM benchmark.events_map FORMAT TSVRaw")"
-if [[ "${rows}" != "547356173" && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
-  echo "expected 547,356,173 Map rows; found ${rows}" >&2
+source_table="benchmark.${target_table}"
+rows="$("${client[@]}" --query "SELECT count() FROM ${source_table} FORMAT TSVRaw")"
+if [[ "${rows}" != "${expected_rows}" && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
+  echo "expected ${source_table} to contain ${expected_rows} rows; found ${rows}" >&2
   exit 1
 fi
-start="$("${client[@]}" --query "SELECT min(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
-end="$("${client[@]}" --query "SELECT max(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
+start="$("${client[@]}" --query "SELECT min(timestamp) FROM ${source_table} FORMAT TSVRaw")"
+end="$("${client[@]}" --query "SELECT max(timestamp) FROM ${source_table} FORMAT TSVRaw")"
 dynamic_low_value="${LIGHTHOUSE_BENCH_DYNAMIC_LOW_VALUE:-event_lifecycle}"
 dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-306e56de-c041-4b4d-9a62-d59e742bf58b}"
 
@@ -100,7 +111,7 @@ export RUN_ID="${run_id}" STARTED_AT="${started_at}" REVISION="${revision}"
 export CHANGE_ID="${change_id}" CLICKHOUSE_VERSION="${clickhouse_version}"
 export ROWS="${rows}" START="${start}" END="${end}" REPETITIONS="${repetitions}"
 export DYNAMIC_LOW_VALUE="${dynamic_low_value}" DYNAMIC_HIGH_VALUE="${dynamic_high_value}"
-export REUSE_ACCELERATIONS="${reuse_accelerations}"
+export REUSE_ACCELERATIONS="${reuse_accelerations}" TARGET_TABLE="${target_table}"
 python3 - "${run_dir}/manifest.json" <<'PY'
 import json
 import os
@@ -115,6 +126,7 @@ manifest = {
     },
     "clickhouse_version": os.environ["CLICKHOUSE_VERSION"],
     "dataset": {
+        "target_table": os.environ["TARGET_TABLE"],
         "rows": int(os.environ["ROWS"]),
         "event_time_start": os.environ["START"],
         "event_time_end": os.environ["END"],
@@ -157,10 +169,12 @@ parts_query="SELECT table, partition, name, rows, bytes_on_disk, data_compressed
 printf 'query_id\tphase\n' > "${run_dir}/builds.tsv"
 run_build() {
   local phase="$1"
-  local sql_file="$2"
+  local source_sql="$2"
   shift 2
   local query_id="${query_prefix}_build_${phase}"
-  "${client[@]}" --query_id="${query_id}" --receive_timeout=86400 --send_timeout=86400 "$@" --queries-file "${sql_file}"
+  local rendered_sql="${run_dir}/queries/build-${phase}.sql"
+  sed "s|{{table}}|${source_table}|g" "${source_sql}" > "${rendered_sql}"
+  "${client[@]}" --query_id="${query_id}" --receive_timeout=86400 --send_timeout=86400 "$@" --queries-file "${rendered_sql}"
   printf '%s\t%s\n' "${query_id}" "${phase}" >> "${run_dir}/builds.tsv"
 }
 
@@ -209,7 +223,7 @@ for mode in clickhouse-cold warm; do
     for source_query in "${repo_root}/benchmark/queries/acceleration/${path}/"*.sql; do
       fixture="$(basename "${source_query}" .sql)"
       rendered_query="${run_dir}/queries/${path}/${fixture}.sql"
-      cp "${source_query}" "${rendered_query}"
+      sed "s|{{table}}|${source_table}|g" "${source_query}" > "${rendered_query}"
 
       if [[ "${mode}" == "warm" ]]; then
         prewarm_id="${query_prefix}_prewarm_${path}_${fixture//-/_}"

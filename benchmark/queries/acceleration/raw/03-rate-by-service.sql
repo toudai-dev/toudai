@@ -2,7 +2,7 @@ SELECT
     toStartOfFiveMinutes(timestamp) AS bucket,
     service_name,
     count() AS events
-FROM benchmark.events_map
+FROM {{table}}
 WHERE tenant_id = 1
   AND dataset = 'gcp-logging'
   AND timestamp BETWEEN {start:DateTime64(6, 'UTC')} AND {end:DateTime64(6, 'UTC')}

@@ -6,6 +6,6 @@ SELECT
     attributes[{field_name:String}] AS field_value,
     timestamp,
     event_id
-FROM benchmark.events_map
+FROM {{table}}
 WHERE notEmpty(field_value)
 SETTINGS max_memory_usage = 16000000000;

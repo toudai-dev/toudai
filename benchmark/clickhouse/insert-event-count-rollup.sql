@@ -6,6 +6,6 @@ SELECT
     'service_name' AS dimension_name,
     service_name AS dimension_value,
     count() AS events
-FROM benchmark.events_map
+FROM {{table}}
 GROUP BY tenant_id, dataset, bucket, dimension_value
 SETTINGS max_memory_usage = 16000000000;
