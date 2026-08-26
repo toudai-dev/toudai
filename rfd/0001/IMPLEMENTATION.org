@@ -742,7 +742,9 @@ criterion.
 - [ ] Measure a representative sustained ingestion rate separately from the
   backfill load; concurrent external bulk-pool writes make current elapsed
   backfill throughput unsuitable as a production SLO.
-- [ ] Run the full inventory and mixed-concurrency workload.
+- [X] Run the full ten-day raw query inventory under ClickHouse-cold and warm
+  conditions and validate deterministic exact payload lookup.
+- [ ] Run the mixed-concurrency workload.
 - [ ] Validate dashboard isolation from exploratory scans.
 - [ ] Measure query performance during merges and after restart.
 - [ ] Validate object-storage or cold-tier behavior on selected partitions.

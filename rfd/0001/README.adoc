@@ -174,15 +174,19 @@ remain to be verified.
   checksum-validated 5,689,254,359 rows across 240 hourly windows: 10.81 TB of
   logical input became 1,000.85 GiB of normalized hot data and 708.48 GiB of
   exact payload, 16.98% of logical input in total.
-* link:experiments/011-ten-day-query-baseline.md[Experiment 011] is measuring
-  controlled ten-day query behavior. Its completed warm pilot ranged from 27.2
-  seconds for service/severity filtering to 74.3 seconds for body search; these
-  pilot timings are diagnostic, not accepted product performance.
+* link:experiments/011-ten-day-query-baseline.md[Experiment 011] completed 60
+  controlled ten-day raw measurements. Schema-stable service/severity filtering
+  was fastest at about 12 seconds. Dynamic `Map` predicates took 15.5 to 16.3
+  minutes cold and 6.9 to 8.1 minutes warm; heatmap and percentile scans took
+  12.1 to 16.8 minutes. Deterministic exact payload lookup took 919 ms on its
+  first ClickHouse-cold access and 62 to 73 ms thereafter.
 
 These results support the split `Map`-based serving baseline and demonstrate
-that ten-day retained capacity fits the current host. They do not yet prove the
-interactive query SLO, sustained production ingestion, mixed concurrency,
-cluster fanout, cold-tier performance, or 100 TB architecture.
+that ten-day retained capacity fits the current host. They also reject broad raw
+`Map` scans as an interactive path and require bounded indexes, metadata
+catalogs, and mergeable aggregate states with raw fallback. They do not yet
+prove sustained production ingestion, mixed concurrency, cluster fanout,
+cold-tier aggregate routing, or the 100 TB architecture.
 
 == Privacy and operations
 
