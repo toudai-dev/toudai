@@ -43,4 +43,4 @@ conditions. Add a new run or record and link the relationship.
 | 010 | Completed | [Ten-day split-storage load](010-ten-day-split-storage-load.md) |
 | 011 | Completed | [Ten-day query baseline](011-ten-day-query-baseline.md) |
 | 012 | Completed | [Ten-day acceleration validation](012-ten-day-acceleration-validation.md) |
-| 013 | Planned | [Event sort-key comparison](013-event-sort-key-comparison.md) |
+| 013 | Running | [Event sort-key comparison](013-event-sort-key-comparison.md) |

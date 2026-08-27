@@ -2,8 +2,8 @@
 
 [RFD 0001](../README.adoc) · [Experiment index](README.md)
 
-- **Status:** Planned
-- **Date:** 2026-08-26
+- **Status:** Running
+- **Started:** 2026-08-27T07:28:00Z
 - **Source mutation:** None; the experiment creates disposable candidate tables
 
 ## Question
@@ -88,4 +88,5 @@ cache or ZFS ARC, so it is not a host-cold measurement.
 
 ## Results
 
-Pending.
+The controlled run is active at
+`/mnt/fast-storage/lighthouse/runs/experiment-013-sort-keys-v1`.
