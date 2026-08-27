@@ -159,9 +159,9 @@ LIGHTHOUSE_BENCH_EXPECTED_ROWS=548954103 \
 benchmark/scripts/benchmark-run-sort-keys experiment-013-sort-keys-v1
 ```
 
-The resumable loader creates three disposable candidate tables using 24 equal
-hourly level-zero parts and stops their background merges during measured
-queries. It validates row counts and content checksums for every window, rotates
-candidate execution order, and compares 5-minute, 1-hour, 6-hour, and full-day
-latest-event, time-range, service/severity, and dynamic-field fixtures. The
-ClickHouse-cold policy does not clear the OS page cache or ZFS ARC.
+The resumable loader creates three disposable candidate tables through 24
+checksum-validated hourly inserts, then runs `OPTIMIZE FINAL` so every candidate
+has one compacted part before measurement. It rotates candidate execution order
+and compares 5-minute, 1-hour, 6-hour, and full-day latest-event, time-range,
+service/severity, and dynamic-field fixtures. The ClickHouse-cold policy does
+not clear the OS page cache or ZFS ARC.

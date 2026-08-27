@@ -15,7 +15,7 @@ after tenant and dataset instead of placing hour and service before timestamp?
 ## Candidates
 
 All candidates retain daily partitions and identical columns, codecs, storage,
-index granularity, source rows, and hourly part boundaries.
+index granularity, source rows, and final compacted part count.
 
 1. **Hour/service baseline:** `(tenant_id, dataset,
    toStartOfHour(timestamp), service_name, timestamp, event_id)`.
@@ -46,9 +46,9 @@ alone prove ten-day part counts, cluster fanout, or long-retention merge cost.
 
 1. Copy the same source day into each candidate through 24 serial hourly
    inserts.
-2. Stop candidate-table merges before the first insert and require all 24
-   active parts to remain level zero. This prevents merge timing or part layout
-   from confounding the sort-order comparison.
+2. Load through 24 checksum-validated hourly inserts, then run `OPTIMIZE FINAL`
+   and require one active part per candidate before measurement. This prevents
+   merge timing or part layout from confounding the sort-order comparison.
 3. Validate each candidate window against source row counts and a checksum over
    event identity, timestamp, service, severity, and body.
 4. Test 5-minute, 1-hour, 6-hour, and full-day ranges for:
@@ -82,11 +82,19 @@ cache or ZFS ARC, so it is not a host-cold measurement.
 - Preserve `events_map_hot`, `event_payloads`, and Experiment 012 acceleration
   tables unchanged.
 - Preserve at least 100 GiB free on the benchmark SSD.
-- Stop on a partial window, checksum mismatch, merged candidate part, or source
-  row-count mismatch.
-- Resume candidate merges on every normal or failed harness exit.
+- Stop on a partial window, checksum mismatch, final part-count mismatch, or
+  source row-count mismatch.
 
 ## Results
 
 The controlled run is active at
 `/mnt/fast-storage/lighthouse/runs/experiment-013-sort-keys-v1`.
+
+The first attempt stopped safely at hour 20 of the hour/service candidate after
+ClickHouse rejected a new insert with `TOO_MANY_PARTS`. Holding background
+merges while parallel `INSERT SELECT` blocks accumulated created 3,041 parts,
+crossing the 3,000-part guardrail. The source was unchanged and all 20 completed
+windows retained row-count and checksum markers. The harness now allows normal
+build merges and normalizes every completed candidate with `OPTIMIZE FINAL`
+before measured queries; the same immutable run selection resumes from its
+validated markers.

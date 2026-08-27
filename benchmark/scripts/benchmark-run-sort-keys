@@ -46,7 +46,6 @@ safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
 query_prefix="lighthouse_sort_${safe_run_id}"
 day_start="${source_day} 00:00:00"
 day_end="$(date -u -d "${source_day} +1 day" '+%F %T')"
-merges_stopped=0
 
 check_free_space() {
   local available
@@ -72,14 +71,6 @@ capture_logs() {
   " > "${run_dir}/query-metrics.tsv" 2>/dev/null || true
 }
 
-resume_merges() {
-  if [[ "${merges_stopped}" == "1" ]]; then
-    for candidate in "${candidates[@]}"; do
-      "${client[@]}" --query "SYSTEM START MERGES benchmark.sort_${candidate}" >/dev/null 2>&1 || true
-    done
-  fi
-}
-
 on_exit() {
   local exit_status=$?
   if [[ "${exit_status}" != "0" && -d "${run_dir}" ]]; then
@@ -87,7 +78,6 @@ on_exit() {
     date -u +%FT%TZ > "${run_dir}/failed-at"
     capture_logs
   fi
-  resume_merges
 }
 trap on_exit EXIT
 
@@ -129,17 +119,6 @@ else
   echo "resuming" > "${run_dir}/status"
 fi
 
-# Equal level-zero hourly parts isolate ordering from background merge layout.
-for candidate in "${candidates[@]}"; do
-  merged_parts="$("${client[@]}" --query "SELECT countIf(level > 0) FROM system.parts WHERE active AND database = 'benchmark' AND table = 'sort_${candidate}' FORMAT TSVRaw")"
-  if [[ "${merged_parts}" != "0" ]]; then
-    echo "sort_${candidate} contains ${merged_parts} merged parts; the controlled layout is invalid" >&2
-    exit 1
-  fi
-  "${client[@]}" --query "SYSTEM STOP MERGES benchmark.sort_${candidate}"
-done
-merges_stopped=1
-
 revision_rev="@"
 if [[ -z "$(jj diff --summary 2>/dev/null)" ]]; then revision_rev="@-"; fi
 revision="$(jj log -r "${revision_rev}" --no-graph -T 'commit_id' 2>/dev/null || true)"
@@ -160,7 +139,7 @@ manifest = {
     "ranges": ["5m", "1h", "6h", "24h"],
     "cache_modes": ["clickhouse-cold", "warm"],
     "repetitions": int(os.environ["REPETITIONS"]),
-    "part_policy": "24 equal level-zero hourly inserts with merges stopped during measured queries",
+    "part_policy": "24 checksum-validated hourly inserts, then OPTIMIZE FINAL to one active part per candidate before measured queries",
 }
 with open(sys.argv[1], "w", encoding="utf-8") as output:
     json.dump(manifest, output, indent=2, sort_keys=True)
@@ -227,11 +206,22 @@ for candidate in "${candidates[@]}"; do
     printf '%s\n' "${actual}" > "${marker}"
     printf '%s\t%s\t%s\t%s\n' "${query_id}" "${candidate}" "${window_start}" "${window_rows}" >> "${run_dir}/builds.tsv"
   done < "${run_dir}/windows.tsv"
-done
-
-for candidate in "${candidates[@]}"; do
   candidate_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.sort_${candidate} FORMAT TSVRaw")"
   [[ "${candidate_rows}" == "${source_rows}" ]] || { echo "sort_${candidate} row mismatch" >&2; exit 1; }
+
+  optimized_marker="${state_dir}/optimized-${candidate}"
+  if [[ ! -f "${optimized_marker}" ]]; then
+    check_free_space
+    optimize_id="${query_prefix}_optimize_${candidate}"
+    "${client[@]}" --query_id="${optimize_id}" --receive_timeout=86400 --send_timeout=86400 \
+      --query "OPTIMIZE TABLE benchmark.sort_${candidate} FINAL"
+    active_parts="$("${client[@]}" --query "SELECT count() FROM system.parts WHERE active AND database='benchmark' AND table='sort_${candidate}' FORMAT TSVRaw")"
+    if [[ "${active_parts}" != "1" ]]; then
+      echo "sort_${candidate} expected one active part after OPTIMIZE FINAL; found ${active_parts}" >&2
+      exit 1
+    fi
+    printf 'completed\n' > "${optimized_marker}"
+  fi
 done
 "${client[@]}" --query "SELECT table, sum(rows) rows, sum(bytes_on_disk) bytes_on_disk, count() active_parts, max(level) max_level FROM system.parts WHERE active AND database='benchmark' AND startsWith(table, 'sort_') GROUP BY table ORDER BY table FORMAT JSONEachRow" > "${run_dir}/evidence/table-storage.jsonl"
 
@@ -297,5 +287,4 @@ capture_logs
 date -u +%FT%TZ > "${run_dir}/completed-at"
 echo "completed" > "${run_dir}/status"
 trap - EXIT
-resume_merges
 echo "sort-key benchmark completed: ${run_dir}"
