@@ -44,3 +44,4 @@ conditions. Add a new run or record and link the relationship.
 | 011 | Completed | [Ten-day query baseline](011-ten-day-query-baseline.md) |
 | 012 | Completed | [Ten-day acceleration validation](012-ten-day-acceleration-validation.md) |
 | 013 | Running | [Event sort-key comparison](013-event-sort-key-comparison.md) |
+| 014 | Planned | [Local distributed-cluster simulation](014-local-distributed-cluster-simulation.md) |

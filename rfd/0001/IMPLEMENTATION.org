@@ -749,6 +749,10 @@ criterion.
 - [ ] Run the mixed-concurrency workload.
 - [ ] Validate dashboard isolation from exploratory scans.
 - [ ] Measure query performance during merges and after restart.
+- [ ] Build a local native multi-instance ClickHouse harness and compare
+  single-node, two-shard, and four-shard fanout, skew, coordinator work,
+  concurrency, cancellation, and unavailable-shard semantics over one natural
+  day before the real 100 TB cluster validation.
 - [ ] Validate object-storage or cold-tier behavior on selected partitions.
 - [ ] Compare transparent ClickHouse tiering with an explicit hot/archive query
   split for selected aggregate and raw-event fixtures.

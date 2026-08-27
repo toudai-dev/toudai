@@ -147,6 +147,13 @@ before measurements show that fixed per-shard latency, fanout traffic, dataset
 placement requirements, or topology churn justify its versioned metadata and
 recovery complexity. Stable identities preserve that future option.
 
+Before a real multi-machine capacity test, a local native multi-instance
+ClickHouse harness will compare one, two, and four shards using actual
+`Distributed` protocol fanout and leaf-local aggregation. This simulation can
+validate sharding correctness, coordinator overhead, skew, cancellation, and
+partial-result metadata, but shared CPU, memory, storage, and loopback networking
+mean it cannot establish scale-out throughput or production recovery capacity.
+
 == Measured evidence
 
 The benchmark corpus is GCP Logging data originally represented as JSON and

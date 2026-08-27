@@ -1,0 +1,142 @@
+# Experiment 014: Local Distributed-Cluster Simulation
+
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
+- **Status:** Planned
+- **Date:** 2026-08-27
+- **Source mutation:** None; the experiment creates disposable shard copies
+
+## Question
+
+Can Lighthouse use ClickHouse's standard `Distributed` engine with stable
+event-hash sharding while keeping fanout latency, coordinator work, shard skew,
+query correctness, and failure semantics observable and bounded?
+
+## Scope
+
+Run one coordinator and multiple native ClickHouse leaf processes on this host,
+each with isolated ports, data, temporary, user-file, log, and run directories.
+Use the same Nix-pinned ClickHouse binary, user settings, table schema, and local
+MergeTree configuration as the single-node experiments.
+
+Test 1-, 2-, and 4-shard topologies sequentially. Each topology stores one total
+copy of the selected source corpus divided by:
+
+```text
+cityHash64(tenant_id, dataset, event_id) % shard_count
+```
+
+The exact production hash remains a schema decision; the experiment requires
+only one recorded stable expression for all compared topologies.
+
+Do not add replicas initially. Sharding/fanout and replication/recovery are
+different questions and should not be confounded in the first simulation.
+
+## Why native multi-instance processes
+
+Separate server processes exercise actual ClickHouse network protocol,
+`Distributed` query planning, leaf-local partial aggregation, coordinator
+merging, timeout, and unavailable-shard behavior. Multiple databases or tables
+inside one server would not reproduce those boundaries. Containers add image,
+overlay, mount, and ownership differences without making the shared hardware a
+real cluster, so the first harness should extend the existing native benchmark
+server pattern.
+
+Each leaf will receive explicit CPU affinity and memory limits where the host
+supports them. All leaves still share one CPU socket, memory subsystem, ZFS ARC,
+and striped SSD pool; those limitations must remain visible in every result.
+
+## Dataset profiles
+
+Start with one natural approximately 1 TB logical day using the sort key
+selected by Experiment 013. One distributed physical copy should require about
+the same total bytes as the existing one-day table, regardless of shard count.
+
+The natural corpus contains one benchmark tenant and dataset, which represents
+an elephant tenant spread across all shards by event identity. Add a
+deterministic synthetic tenant mapping in a separate load to model:
+
+- one dominant tenant plus several medium tenants;
+- many small tenants;
+- a highly skewed tenant/dataset distribution; and
+- a small tenant whose ordinary query still fans out to every shard.
+
+The mapping must preserve event values and identity checksums within each
+logical tenant assignment and remain reproducible from source event identity.
+
+## Query workloads
+
+For every topology, run matching single-node and `Distributed` queries over:
+
+1. latest-event retrieval over narrow and full-day ranges;
+2. raw time-range counts and rates;
+3. selective and prevalent configured attribute predicates;
+4. dashboard count, heatmap, and percentile aggregate states;
+5. bounded raw-event retrieval from an attribute index;
+6. one large tenant and one small tenant; and
+7. serial, dashboard-concurrent, raw-concurrent, and mixed workloads.
+
+The coordinator must receive aggregate states or bounded event rows, not all
+matching raw rows. Record normalized SQL, result hashes or approximation
+anchors, participating shards, leaf and coordinator query IDs, and execution
+settings.
+
+## Measurements
+
+- End-to-end p50 and p95 latency and throughput by topology and workload.
+- Coordinator queue, CPU, peak memory, result rows, and network bytes.
+- Per-leaf rows, bytes, marks, CPU, memory, and query duration.
+- Insert acknowledgement latency, throughput, pending distributed sends, and
+  per-shard row/byte skew.
+- Fixed fanout cost for small tenants and narrow time ranges.
+- Local partial-aggregation reduction ratio before coordinator merge.
+- Result correctness and expected-versus-participating shard coverage.
+- Query cancellation and deadline propagation.
+
+## Failure tests
+
+Stop one leaf during controlled read-only queries and compare:
+
+- complete execution with `skip_unavailable_shards = 0`, which must fail rather
+  than return an apparently complete result;
+- bounded-latency execution with `skip_unavailable_shards = 1`, where Lighthouse
+  must report expected shards, participating shards, missing coverage, and a
+  partial result; and
+- cancellation or timeout while one leaf is slow.
+
+ClickHouse does not by itself provide the full product-level coverage contract.
+The experiment should identify the metadata the Lighthouse coordinator must add
+instead of treating a successful partial response as complete.
+
+## Interpretation limits
+
+This mechanism is a distributed-systems simulation, not a scale-out capacity
+measurement:
+
+- loopback networking understates real network latency and failure modes;
+- shared disks, ARC, memory bandwidth, and CPUs create contention that separate
+  machines would not share;
+- adding local shards may reduce performance even when real independent nodes
+  would add capacity; and
+- it cannot validate rack/AZ placement, replica reconstruction, or 100 TB
+  recovery behavior.
+
+It can still validate query semantics, sharding correctness, fanout overhead,
+coordinator scaling trends, skew, observability, cancellation, and unavailable-
+shard behavior before paying for a real cluster.
+
+## Guardrails
+
+- Run after Experiment 013 and remove its disposable sort-key candidate tables
+  before loading distributed copies.
+- Preserve the ten-day hot events, exact payloads, and immutable run artifacts.
+- Run topologies sequentially and retain only one disposable distributed corpus
+  at a time.
+- Preserve at least 100 GiB free on the SSD dataset.
+- Use high unprivileged ports and isolated directories; never reuse production
+  service ports or data paths.
+- Stop all coordinator and leaf processes on normal or failed harness exit.
+
+## Results
+
+Pending.
