@@ -1,0 +1,224 @@
+# Experiment 015: Cloud Production Capacity and Cost
+
+[RFD 0001](../README.adoc) · [Experiment index](README.md)
+
+- **Status:** Planned
+- **Date:** 2026-08-27
+- **External mutation:** Requires separate approval before provisioning cloud
+  infrastructure, uploading data, or incurring cost
+
+## Question
+
+Which cloud or dedicated-host deployment meets Lighthouse's ingestion,
+interactive-query, retention, durability, and degraded-operation requirements at
+the lowest total cost per retained logical TB and accepted event?
+
+## Principle
+
+Production performance is a workload and topology property, not an instance
+benchmark. Compare providers using the same immutable corpus, ClickHouse build,
+schema, shard expression, retention, replication semantics, query fixtures,
+concurrency, ingestion replay, failure tests, and result validation.
+
+Do not compare a replicated production candidate on one provider with an
+unreplicated cache on another. Do not call the highest short-lived throughput
+production capacity. A candidate passes only at a sustained operating point
+with safety headroom and the required degraded behavior.
+
+## Candidate deployment classes
+
+Select current instance generations and prices immediately before provisioning;
+do not freeze family names in the RFD.
+
+1. **AWS self-managed:** storage-optimized EC2 with local NVMe for hot serving,
+   S3 for durable batches and exact payload, and same-AZ then cross-AZ replica
+   layouts.
+2. **GCP self-managed:** storage-optimized Compute Engine or suitable
+   general-purpose compute with Local SSD, Cloud Storage durability, and
+   equivalent zonal and multi-zone layouts. This candidate must include the
+   avoided-egress benefit when source telemetry already originates in GCP.
+3. **Azure self-managed:** local-NVMe storage-optimized virtual machines with
+   Blob Storage durability and equivalent zone placement.
+4. **Dedicated or bare-metal providers:** current offerings from providers such
+   as Hetzner or OVHcloud when they provide sufficient NVMe, memory, network,
+   region, replacement, and object-storage behavior. Lower rental cost must be
+   weighed against weaker elasticity, slower replacement, and operational
+   responsibility.
+5. **Managed ClickHouse:** ClickHouse Cloud or another credible managed
+   ClickHouse service as an outcome-level comparison. Its object-storage and
+   compute architecture need not match self-managed local NVMe, but it must run
+   the same product workload and disclose available settings, scaling events,
+   storage, transfer, and service cost.
+6. **Current owned host:** use the completed local measurements as a calibration
+   and amortized-cost reference, not as production availability evidence.
+
+Compare x86 and ARM only when the same ClickHouse version, query semantics, and
+operational tooling are supported. Spot or preemptible capacity may prepare or
+transform data, but measured latency and soak runs use non-interruptible
+capacity unless interruption is itself the tested production policy.
+
+## Staged test matrix
+
+### Stage A: provider calibration
+
+Run the same approximately 1 TB logical natural day on one storage-optimized
+leaf from each serious candidate. Use this inexpensive gate to compare:
+
+- load and merge behavior;
+- local hot-table compression;
+- narrow and full-day raw queries;
+- configured indexes and aggregate states;
+- local NVMe or block-storage throughput and latency; and
+- observed cost for the measured wall duration.
+
+Eliminate candidates that cannot meet single-leaf correctness, operational, or
+price/performance requirements. Do not run every provider at 10 TB merely to
+produce a broad comparison table.
+
+### Stage B: actual horizontal scaling
+
+For finalists, load the immutable 5.69B-row, 10.81 TB logical corpus and compare:
+
+```text
+1 shard x 1 replica
+2 shards x 1 replica
+4 shards x 1 replica
+```
+
+This stage measures real network fanout, leaf-local partial aggregation,
+coordinator reduction, shard skew, and scale efficiency without replication
+overhead obscuring the trend.
+
+### Stage C: production candidate
+
+Run the likely production topology, initially expected to be approximately:
+
+```text
+4 shards x 2 replicas
+2 query coordinators or equivalent query entry points
+durable stream and immutable object archive
+local-NVMe hot serving tier
+object-backed exact payload and replay tier
+```
+
+Test a low-latency same-zone placement baseline, then the intended failure-domain
+layout with replicas separated across zones. Record replication lag, cross-zone
+bytes and cost, insert acknowledgement latency, and replica selection behavior.
+
+### Stage D: 24-to-72-hour soak
+
+Replay the source's timestamp distribution at observed rate, twice expected
+rate, burst rate, and the provisional 1B- and 3B-events/day targets. Run
+dashboard, exploration, incident-burst, bounded drill-down, and expensive exact
+workloads concurrently while inserts, merges, aggregate maintenance, payload
+archival, retention, and replica catch-up operate.
+
+## Workload and SLO gates
+
+Define exact freshness, p50/p95/p99 latency, concurrency, retention, and cost
+limits before provisioning Stage B. At minimum, measure independently:
+
+- dashboard aggregate-state refreshes;
+- narrow interactive event exploration;
+- selective and prevalent attribute predicates;
+- latest-event and trace retrieval;
+- exact payload retrieval;
+- guarded raw fallback and asynchronous exact work; and
+- mixed workloads with dashboard isolation.
+
+Ramp each workload until query latency, ingestion freshness, merge backlog,
+memory, disk, or network violates its threshold. Production capacity is the
+highest sustained operating point that also passes required N-1 behavior, not
+the saturation point. Initial sizing should retain substantial safety headroom,
+subject to measured failure capacity rather than a fixed universal percentage.
+
+## Failure and recovery tests
+
+- Stop one replica and measure query behavior, write availability, lag, and
+  catch-up.
+- Remove one complete shard and verify complete queries fail while explicitly
+  bounded partial queries disclose coverage.
+- Slow one leaf and verify deadlines, cancellation, and coordinator limits.
+- Terminate a coordinator and verify client retry and query identity behavior.
+- Rebuild a replica from the chosen authoritative source and measure network,
+  time, and serving impact.
+- Delay the stream consumer and replay immutable batches without duplication.
+- Exercise object-store throttling or delayed exact-payload retrieval.
+
+Critical SLOs must be evaluated with the required failure margin. A topology
+that passes only when every node is healthy is not production capacity.
+
+## Cost model
+
+Capture actual metered and listed cost for the test interval, normalized as:
+
+- cost per retained logical TB-month;
+- cost per billion accepted events;
+- cost per million dashboard and exploratory queries at the target SLO;
+- hot serving, replicas, coordinators, stream, and object archive separately;
+- cross-zone and cross-region network traffic;
+- source-cloud egress, especially for the approximately 32 TB/month GCP-origin
+  telemetry workload;
+- object requests, retrieval, and lifecycle transitions;
+- backup, observability, load-generation, and idle headroom; and
+- rebuild and failure-test transfer cost.
+
+Cross-cloud source egress can dominate a cheaper compute quote. Report both a
+same-cloud deployment and any cross-cloud alternative using the actual source
+location and expected monthly transfer. Managed-service cost should include its
+operational benefit explicitly but remain separate from measured infrastructure
+spend; do not invent a precise engineering-labor adjustment.
+
+For dedicated hardware, include amortized server cost, power, rack, network,
+spares, replacement time, and realistic utilization. For cloud, show on-demand
+test cost and production scenarios using then-current committed-use or reserved
+discounts without applying those discounts to short benchmark invoices.
+
+## Reproducibility
+
+Provision self-managed candidates with OpenTofu or Terraform and install the
+Nix-pinned ClickHouse closure. Record:
+
+- provider, region, zone, instance generation, CPU architecture, memory, local
+  disks, network limits, and placement policy;
+- image, kernel, filesystem, RAID, mount, and CPU-affinity settings;
+- ClickHouse version, configuration, schema, and benchmark revision;
+- shard, replica, coordinator, stream, and object-store topology;
+- corpus manifest, checksums, transformation, and load distribution;
+- warm, ClickHouse-cold, restart-cold, and cache policies;
+- raw provider billing export or cost report for the test interval; and
+- repeated runs on fresh capacity where host variance could change a decision.
+
+Use a separate load-generator instance or pool so query clients and ingestion
+drivers do not consume database resources. Preserve raw query logs, system
+metrics, host metrics, result hashes, coverage metadata, and infrastructure
+plans with secrets removed.
+
+## Decision gates
+
+- Stage A selects at most a small number of finalists based on correctness,
+  operability, and price/performance.
+- Stage B selects a topology only when scaling efficiency and coordinator cost
+  are measured rather than extrapolated.
+- Stage C selects a production candidate only when replication and failure-
+  domain placement pass.
+- Stage D determines sustained production capacity and cost with headroom.
+- The later 100 TB validation uses the selected candidate or explicitly records
+  why a different architecture is required.
+
+## Guardrails
+
+- Obtain explicit approval for the estimated budget before provisioning each
+  stage.
+- Apply provider budget alerts, resource tags, automatic expiration, and a
+  complete destroy plan before starting.
+- Never upload unredacted source telemetry without confirming data
+  classification, region, encryption, and access policy.
+- Do not publish datasets, credentials, infrastructure addresses, or billing
+  exports in public run artifacts.
+- Stop after a failed decision gate instead of completing an expensive matrix
+  with a non-viable candidate.
+
+## Results
+
+Pending.

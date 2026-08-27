@@ -753,6 +753,10 @@ criterion.
   single-node, two-shard, and four-shard fanout, skew, coordinator work,
   concurrency, cancellation, and unavailable-shard semantics over one natural
   day before the real 100 TB cluster validation.
+- [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, then run
+  10 TB scaling, replicated failure-domain, sustained-ingestion, failure, and
+  24-to-72-hour soak tests only on finalists; compare full infrastructure,
+  object storage, network, source-cloud egress, and operational cost.
 - [ ] Validate object-storage or cold-tier behavior on selected partitions.
 - [ ] Compare transparent ClickHouse tiering with an explicit hot/archive query
   split for selected aggregate and raw-event fixtures.

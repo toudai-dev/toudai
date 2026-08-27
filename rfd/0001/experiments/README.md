@@ -45,3 +45,4 @@ conditions. Add a new run or record and link the relationship.
 | 012 | Completed | [Ten-day acceleration validation](012-ten-day-acceleration-validation.md) |
 | 013 | Running | [Event sort-key comparison](013-event-sort-key-comparison.md) |
 | 014 | Planned | [Local distributed-cluster simulation](014-local-distributed-cluster-simulation.md) |
+| 015 | Planned | [Cloud production capacity and cost](015-cloud-production-capacity-and-cost.md) |

@@ -154,6 +154,13 @@ validate sharding correctness, coordinator overhead, skew, cancellation, and
 partial-result metadata, but shared CPU, memory, storage, and loopback networking
 mean it cannot establish scale-out throughput or production recovery capacity.
 
+Production sizing will then use staged cloud and dedicated-host measurements:
+an inexpensive 1 TB provider calibration, 1/2/4-shard scaling over the 10.81 TB
+corpus, a replicated failure-domain candidate, and a 24-to-72-hour ingestion and
+query soak. Cost comparisons include hot serving, replication, durable stream,
+object storage, cross-zone traffic, and source-cloud egress; cheaper compute
+alone is not a production cost result.
+
 == Measured evidence
 
 The benchmark corpus is GCP Logging data originally represented as JSON and
