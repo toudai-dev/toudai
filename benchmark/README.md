@@ -145,3 +145,23 @@ benchmark/scripts/benchmark-clickhouse smoke
 Do not point `LIGHTHOUSE_BENCH_ROOT` at the Parquet source directory. Benchmark
 results must record the ClickHouse version, configuration revision, dataset
 properties, and effective environment overrides.
+
+## Sort-key comparison
+
+Compare the current hour/service ordering with timestamp-first and
+hour/timestamp alternatives over one natural day retained in
+`events_map_hot`:
+
+```bash
+LIGHTHOUSE_BENCH_RESET=1 \
+LIGHTHOUSE_BENCH_SOURCE_DAY=2026-08-05 \
+LIGHTHOUSE_BENCH_EXPECTED_ROWS=548954103 \
+benchmark/scripts/benchmark-run-sort-keys experiment-013-sort-keys-v1
+```
+
+The resumable loader creates three disposable candidate tables using 24 equal
+hourly level-zero parts and stops their background merges during measured
+queries. It validates row counts and content checksums for every window, rotates
+candidate execution order, and compares 5-minute, 1-hour, 6-hour, and full-day
+latest-event, time-range, service/severity, and dynamic-field fixtures. The
+ClickHouse-cold policy does not clear the OS page cache or ZFS ARC.
