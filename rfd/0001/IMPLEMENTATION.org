@@ -685,7 +685,9 @@ criterion.
   completed scale load and raw query baseline; do not carry native =JSON= or
   typed arrays into the 10 TB load.
 - [ ] Run the complete query inventory with cold and warm cache conditions.
-- [ ] Compare candidate sort keys and timestamp bucket widths.
+- [X] Compare candidate sort keys and timestamp bucket widths; Experiment 013
+  rejects the hour/timestamp compromise and records the timestamp-first versus
+  hour/service compression and query trade-off.
 - [ ] Compare trace projection and derived trace-table approaches using a
   deterministic correlated-event fixture.
 - [ ] Record the =Map= representation, final sort key, identifier types, and

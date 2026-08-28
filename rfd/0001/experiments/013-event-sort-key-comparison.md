@@ -2,8 +2,9 @@
 
 [RFD 0001](../README.adoc) · [Experiment index](README.md)
 
-- **Status:** Running
+- **Status:** Completed
 - **Started:** 2026-08-27T07:28:00Z
+- **Completed:** 2026-08-28T09:14:27Z
 - **Source mutation:** None; the experiment creates disposable candidate tables
 
 ## Question
@@ -87,8 +88,61 @@ cache or ZFS ARC, so it is not a host-cold measurement.
 
 ## Results
 
-The controlled run is active at
+The controlled run completed all 72 checksum-validated load windows and all
+288 query measurements. All 96 cache/range/fixture/repetition groups produced
+byte-identical results across the three candidates. Raw artifacts remain at
 `/mnt/fast-storage/lighthouse/runs/experiment-013-sort-keys-v1`.
+
+The run used ClickHouse 26.3.17.110 at repository revision `d5669569`, with 12
+query threads, a 40 GiB query memory limit, and one final active part per
+candidate. Each number below is the median of three repetitions. ClickHouse-cold
+means ClickHouse caches were reset; it does not mean Linux page cache or ZFS ARC
+was evicted.
+
+### Storage and build cost
+
+| Candidate | Compressed size | Difference from baseline | Hourly inserts | Successful final compaction |
+|---|---:|---:|---:|---:|
+| Hour/service baseline | 103.95 GiB | — | 51.2 min | 35.4 min |
+| Timestamp-first | 145.61 GiB | +40.1% | 55.2 min | 47.3 min |
+| Hour/timestamp | 145.61 GiB | +40.1% | 55.8 min | 52.4 min |
+
+Clustering by service therefore provided a substantial compression benefit for
+this corpus. Merely retaining the hour expression without placing service
+before timestamp did not preserve that benefit.
+
+### ClickHouse-cold latency
+
+Values are median wall-clock milliseconds in candidate order
+**hour/service · timestamp-first · hour/timestamp**.
+
+| Fixture | 5 min | 1 hour | 6 hours | 24 hours |
+|---|---:|---:|---:|---:|
+| Latest 100 events | 158 · **125** · 133 | 315 · **130** · 302 | 1,387 · **119** · 1,351 | 5,793 · **124** · 5,788 |
+| Time-range count | 126 · 111 · **105** | 264 · **248** · 249 | 1,154 · **1,118** · 1,151 | 5,003 · **4,815** · 4,915 |
+| Service and severity | 125 · **121** · 133 | **164** · 286 · 293 | **366** · 1,250 · 1,303 | **1,760** · 5,577 · 5,749 |
+| Dynamic `Map` filter | 749 · 341 · **340** | 4,043 · 4,319 · **3,628** | **24,492** · 31,953 · 30,164 | **129,310** · 161,898 · 166,078 |
+
+Timestamp-first changed the latest-event path qualitatively: at 24 hours it
+read about 75,700 rows and 3 MiB instead of about 549 million rows and 21.18
+GiB, reducing the median from 5.79 seconds to 124 milliseconds. Its benefit to
+ordinary range aggregates was modest: 3.8% at 24 hours and no more than 12% in
+this matrix.
+
+The hour/service layout retained the expected selective-field advantage. For
+the 24-hour service/severity query it read 142.7 million rows and 4.71 GiB,
+versus 549.0 million rows and 18.11 GiB for timestamp-first, and was 3.2 times
+faster. It was also 1.25 times faster for the 24-hour cold dynamic predicate,
+consistent with its smaller representation even though the dynamic field was
+not in the ordering key.
+
+Warm results supported the same broad trade-off. Timestamp-first served the
+24-hour latest tail in 74 ms versus 4.69 seconds for hour/service, while
+hour/service served the 24-hour service predicate in 1.55 seconds versus 4.83
+seconds. Warm dynamic-filter results also exercised ClickHouse's query-condition
+cache and must not be interpreted as storage-only pruning.
+
+### Operational observations
 
 The first attempt stopped safely at hour 20 of the hour/service candidate after
 ClickHouse rejected a new insert with `TOO_MANY_PARTS`. Holding background
@@ -96,5 +150,38 @@ merges while parallel `INSERT SELECT` blocks accumulated created 3,041 parts,
 crossing the 3,000-part guardrail. The source was unchanged and all 20 completed
 windows retained row-count and checksum markers. The harness now allows normal
 build merges and normalizes every completed candidate with `OPTIMIZE FINAL`
-before measured queries; the same immutable run selection resumes from its
+before measured queries; the same immutable run selection resumed from its
 validated markers.
+
+Two resumed `OPTIMIZE FINAL` calls returned without compacting after waiting 120
+seconds for existing background merges. The harness rejected the remaining
+multi-part layouts, retained all validated windows, and resumed compaction once
+the background merges had stopped. This did not affect measured queries: every
+candidate had exactly one active part before the matrix began.
+
+## Interpretation
+
+- The hour/timestamp compromise is not useful for this corpus. It has the same
+  storage cost as timestamp-first, behaves like hour/service for broad latest
+  queries, and does not gain service pruning because service follows timestamp.
+- Timestamp-first is the strongest general raw exploration key when rapid
+  newest-event retrieval is part of the contract. Its cost here is 40.1% more
+  compressed storage and approximately three-times slower broad
+  service/severity filtering than the hour/service baseline.
+- Hour/service remains credible if storage efficiency and promoted service
+  predicates dominate. It should not be chosen on the assumption that strict
+  time bounds alone make recent-tail retrieval cheap; this experiment directly
+  contradicts that assumption.
+- The provisional MVP recommendation is `(tenant_id, dataset, timestamp,
+  event_id)`, with service dashboards handled by aggregate states and selective
+  service access tested through projections or configured attribute indexes.
+  This remains an RFD input rather than a finalized architecture decision.
+
+## Follow-ups
+
+1. Compare a service-oriented projection or bounded secondary table against the
+   40.1% base-table storage increase and service-filter regression.
+2. Repeat the selected base layout in Experiment 014's local distributed
+   topology to measure leaf pruning, fanout, and coordinator merge cost.
+3. Validate ingestion and merge behavior without `OPTIMIZE FINAL`; production
+   cannot depend on forced single-part normalization.
