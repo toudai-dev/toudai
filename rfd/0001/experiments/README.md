@@ -46,3 +46,4 @@ conditions. Add a new run or record and link the relationship.
 | 013 | Completed | [Event sort-key comparison](013-event-sort-key-comparison.md) |
 | 014 | Planned | [Local distributed-cluster simulation](014-local-distributed-cluster-simulation.md) |
 | 015 | Planned | [Cloud production capacity and cost](015-cloud-production-capacity-and-cost.md) |
+| 016 | Running | [Date/service sort-key comparison](016-date-service-sort-key.md) |
