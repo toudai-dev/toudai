@@ -1,35 +1,35 @@
-# Experiment 008: Tenant Attribute Acceleration
+= Experiment 008: Tenant Attribute Acceleration
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Completed
-- **Date:** 2026-08-19
-- **Source mutation:** None
+- *Status:* Completed
+- *Date:* 2026-08-19
+- *Source mutation:* None
 
-## Question
+== Question
 
 Can schema-stable, tenant-scoped derived tables make selected dynamic filters
 and dashboard aggregations interactive without altering or sampling the
 full-resolution Map event table, and what storage and build cost does that
 acceleration require?
 
-## Candidates
+== Candidates
 
 The experiment builds three derived tables over the completed 547,356,173-row
 Map dataset:
 
-1. A generic string attribute index containing only configured `type` and
+. A generic string attribute index containing only configured `type` and
    `workspace_id` fields. Tenant-specific configuration changes inserted rows,
    not ClickHouse columns.
-2. A five-minute event-count rollup by the configured `service_name` dimension.
-3. A five-minute duration-state rollup for the global duration distribution and
+. A five-minute event-count rollup by the configured `service_name` dimension.
+. A five-minute duration-state rollup for the global duration distribution and
    configured `caller` dimension. It stores count, sum, histogram, and t-digest
    states.
 
 These represent manual selections by an acceleration registry. They do not
 assume that every Map key should be indexed or aggregated.
 
-## Measurements
+== Measurements
 
 - Build duration, rows written, peak memory, and CPU time for each derived path.
 - Physical bytes and amplification relative to `events_map`.
@@ -41,7 +41,7 @@ assume that every Map key should be indexed or aggregated.
 The experiment ran one cold and one warm repetition as a safety pilot, followed
 by three controlled query-only repetitions against the same derived data.
 
-## Guardrails
+== Guardrails
 
 - Keep at least 100 GiB free on the benchmark dataset.
 - Build only the explicitly selected fields and dimensions.
@@ -50,7 +50,7 @@ by three controlled query-only repetitions against the same derived data.
 - Treat aggregate output as an approximate execution path; exact mode continues
   to query raw events.
 
-## Results
+== Results
 
 Complete evidence is stored in:
 
@@ -59,7 +59,7 @@ Complete evidence is stored in:
 - `experiment-008-tenant-acceleration-controlled`: three cold and three warm
   repetitions with automated correctness checks.
 
-### Build and Storage
+=== Build and Storage
 
 The attribute names do not divide cleanly into low and high cardinality in this
 natural dataset. `type` occurs on 170,143,336 events with 66,101 distinct
@@ -68,12 +68,40 @@ events and has approximately 42,919 distinct values. The fixture names are
 retained for continuity, but both indexes represent moderately high-cardinality
 fields with very frequent selected values.
 
-| Derived path | Build wall time | Rows written | Peak memory | CPU time |
-|---|---:|---:|---:|---:|
-| `type` string index | 165.20 s | 170,143,336 | 0.70 GiB | 802.53 s |
-| `workspace_id` string index | 199.01 s | 152,817,265 | 0.79 GiB | 858.98 s |
-| Service five-minute counts | 6.84 s | 7,983 | 0.09 GiB | 68.61 s |
-| Duration states | 176.01 s | 2,341 | 1.63 GiB | 1,466.54 s |
+[options="header",cols="5*"]
+|===
+
+|Derived path
+|Build wall time
+|Rows written
+|Peak memory
+|CPU time
+
+|`type` string index
+|165.20 s
+|170,143,336
+|0.70 GiB
+|802.53 s
+
+|`workspace_id` string index
+|199.01 s
+|152,817,265
+|0.79 GiB
+|858.98 s
+
+|Service five-minute counts
+|6.84 s
+|7,983
+|0.09 GiB
+|68.61 s
+
+|Duration states
+|176.01 s
+|2,341
+|1.63 GiB
+|1,466.54 s
+
+|===
 
 The two string fields share one generic table with 322,960,601 rows and 3.06
 GiB physical storage. The service count rollup uses 31.96 KiB, and duration
@@ -86,18 +114,63 @@ time and consumed approximately 3,197 CPU-seconds. That is acceptable for an
 asynchronous one-day backfill, but it does not establish sustainable
 ingestion-time maintenance cost.
 
-### Controlled Query Performance
+=== Controlled Query Performance
 
 Values are median ClickHouse duration across three repetitions. Speedup compares
 the raw Map query with the derived path in the same cache mode.
 
-| Fixture | Cold raw | Cold accelerated | Speedup | Warm raw | Warm accelerated | Speedup |
-|---|---:|---:|---:|---:|---:|---:|
-| Dynamic `type` filter | 84.50 s | 447 ms | 189× | 15.42 s | 423 ms | 36× |
-| Dynamic `workspace_id` filter | 82.96 s | 205 ms | 405× | 44.96 s | 198 ms | 227× |
-| Rate by service | 5.06 s | 14 ms | 362× | 5.16 s | 6 ms | 860× |
-| Duration heatmap | 80.71 s | 8 ms | 10,088× | 80.83 s | 7 ms | 11,548× |
-| Percentiles by caller | 92.58 s | 33 ms | 2,806× | 68.60 s | 31 ms | 2,213× |
+[options="header",cols="7*"]
+|===
+
+|Fixture
+|Cold raw
+|Cold accelerated
+|Speedup
+|Warm raw
+|Warm accelerated
+|Speedup
+
+|Dynamic `type` filter
+|84.50 s
+|447 ms
+|189×
+|15.42 s
+|423 ms
+|36×
+
+|Dynamic `workspace_id` filter
+|82.96 s
+|205 ms
+|405×
+|44.96 s
+|198 ms
+|227×
+
+|Rate by service
+|5.06 s
+|14 ms
+|362×
+|5.16 s
+|6 ms
+|860×
+
+|Duration heatmap
+|80.71 s
+|8 ms
+|10,088×
+|80.83 s
+|7 ms
+|11,548×
+
+|Percentiles by caller
+|92.58 s
+|33 ms
+|2,806×
+|68.60 s
+|31 ms
+|2,213×
+
+|===
 
 The selected `type` value matches 59,213,972 events and the selected
 `workspace_id` matches 16,538,385 events. These are intentionally demanding
@@ -111,7 +184,7 @@ The count rollup reads 0.28 MiB. Duration heatmaps read 1.64 MiB, and caller
 percentiles read 0.43 MiB. Peak accelerated-query memory is approximately 64.5
 MiB for the indexes and 12.1 MiB for the aggregate paths.
 
-### Correctness
+=== Correctness
 
 All 30 controlled checks passed:
 
@@ -126,7 +199,7 @@ stored approximate states changes aggregation order. This is acceptable only
 for an explicitly identified approximate or automatic execution mode. Exact
 mode continues to use raw Map values.
 
-## Interpretation
+== Interpretation
 
 Schema-stable tenant acceleration works extremely well for this dataset. It
 does not require tenant-specific columns: `tenant_id`, `field_name`, and
@@ -142,17 +215,17 @@ alone.
 
 The recommended control model is:
 
-1. Dashboard definitions explicitly create their required aggregate states.
-2. Workload observation recommends equality indexes for expensive, repeated
+. Dashboard definitions explicitly create their required aggregate states.
+. Workload observation recommends equality indexes for expensive, repeated
    tenant-field predicates and estimates bytes from prevalence and value size.
-3. Automatic activation is allowed only within per-tenant field-count, storage,
+. Automatic activation is allowed only within per-tenant field-count, storage,
    cardinality, and backfill-CPU budgets.
-4. The planner activates a path only for its complete time-coverage watermark
+. The planner activates a path only for its complete time-coverage watermark
    and retains raw fallback for uncovered, unsupported, or exact queries.
-5. Unused accelerations expire after measured inactivity; raw events remain
+. Unused accelerations expire after measured inactivity; raw events remain
    unchanged.
 
-## Decision and Follow-ups
+== Decision and Follow-ups
 
 Advance the generic attribute-index and aggregate-state approach. Before
 choosing automation thresholds or a production ingestion design:

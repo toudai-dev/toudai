@@ -1,19 +1,19 @@
-# Experiment 010: Ten-Day Split-Storage Load
+= Experiment 010: Ten-Day Split-Storage Load
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Completed
-- **Started:** 2026-08-19T10:32:50Z
-- **Completed:** 2026-08-25T11:49:20Z
+- *Status:* Completed
+- *Started:* 2026-08-19T10:32:50Z
+- *Completed:* 2026-08-25T11:49:20Z
 
-## Question
+== Question
 
 Can one ClickHouse node retain approximately ten logical terabytes of natural
 events by keeping normalized Map events on striped SSD and exact raw payloads
 on bulk ZFS, while maintaining resumable ingestion and sufficient SSD headroom
 for tenant acceleration?
 
-## Environment
+== Environment
 
 The benchmark-only `fast-storage` pool was recreated, with explicit approval,
 from a two-disk mirror as a two-vdev stripe:
@@ -31,7 +31,7 @@ All prior experiment evidence was copied to
 `storage/lighthouse-bench/preserved-before-stripe-2026-08-19` and 1,115 regular
 files were checksum-verified before pool destruction.
 
-## Method
+== Method
 
 Load the first ten natural day directories from `/mnt/storage/lighthouse`.
 Only one day is staged at a time in `gcp_source` on bulk storage. Each staged day
@@ -44,22 +44,43 @@ The loader records file, window, row, query-log, storage, and free-space
 evidence and is resumable at file and hourly target boundaries. It truncates
 the decoded source stage after both targets for a day are complete.
 
-## Results
+== Results
 
 All ten natural days completed. Each of the 240 hourly windows has a durable
 row-count and checksum validation marker for both the normalized hot table and
 the exact payload table.
 
-| Measurement | Final result |
-|---|---:|
-| Source rows | 5,689,254,359 |
-| Source Parquet bytes | 1,116,601,405,252 (1,039.92 GiB) |
-| GCP-equivalent logical bytes | 10,809,583,282,100 (~10.81 TB) |
-| Normalized hot bytes | 1,074,656,521,772 (1,000.85 GiB) |
-| Exact payload bytes | 760,722,901,112 (708.48 GiB) |
-| Combined serving and payload bytes | 1,835,379,422,884 (1,709.33 GiB) |
-| Active hot parts | 114 |
-| Active payload parts | 106 |
+[options="header",cols="2*"]
+|===
+
+|Measurement
+|Final result
+
+|Source rows
+|5,689,254,359
+
+|Source Parquet bytes
+|1,116,601,405,252 (1,039.92 GiB)
+
+|GCP-equivalent logical bytes
+|10,809,583,282,100 (~10.81 TB)
+
+|Normalized hot bytes
+|1,074,656,521,772 (1,000.85 GiB)
+
+|Exact payload bytes
+|760,722,901,112 (708.48 GiB)
+
+|Combined serving and payload bytes
+|1,835,379,422,884 (1,709.33 GiB)
+
+|Active hot parts
+|114
+
+|Active payload parts
+|106
+
+|===
 
 The normalized hot table occupies 9.94% of calibrated logical input, or 10.06×
 logical-to-physical compression. Exact payload occupies 7.04%, or 14.21×
@@ -74,17 +95,17 @@ Both pools were online with no read, write, checksum, or known data errors. The
 single node therefore retained the target corpus while preserving substantial
 SSD headroom for the next acceleration experiment.
 
-### Recovery evidence
+=== Recovery evidence
 
 The run has preserved validated boundaries through three interruptions:
 
-1. After Day 1, ClickHouse's large-table safety limit rejected staging-table
+. After Day 1, ClickHouse's large-table safety limit rejected staging-table
    truncation. The loader now supplies the explicit size override and resumed
    without reloading the validated targets.
-2. After Day 5, staging-table truncation completed server-side but the original
+. After Day 5, staging-table truncation completed server-side but the original
    loader did not preserve the client exit reason. The loader now records its
    phase, command, line, exit code, and combined output on failure.
-3. During Day 8, replacement of the benchmark executor killed ClickHouse and the
+. During Day 8, replacement of the benchmark executor killed ClickHouse and the
    loader without allowing the shell failure trap to run. Sixteen hot windows
    and fifteen payload windows had durable validation markers. The interrupted
    payload insert contained 2,468,087 unvalidated rows; they were removed with
@@ -111,7 +132,7 @@ diagnosis, a ClickHouse patch change, and concurrent external writes to the bulk
 pool. Per-window query-log data remains useful, but production ingestion capacity
 requires a separate controlled measurement.
 
-## Interpretation
+== Interpretation
 
 The split physical design passes the retained-capacity and full-resolution
 correctness gate on this host. Approximately 10.81 TB of calibrated logical
@@ -125,13 +146,14 @@ Those are the next gates. It also does not prove object storage or durable repla
 the bulk payload table is a useful physical boundary, not the final archive
 contract.
 
-## Artifacts and Follow-ups
+== Artifacts and Follow-ups
 
 The completed run is:
 
-```text
+[source,text]
+----
 /mnt/fast-storage/lighthouse/runs/experiment-010-ten-day-split-storage-v1
-```
+----
 
 It contains the day manifests, validation markers, query metrics, final active
 parts, and host-storage evidence. Next:

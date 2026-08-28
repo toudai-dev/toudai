@@ -140,7 +140,7 @@ Relevant references:
 
 - https://docs.honeycomb.io/get-started/honeycomb/traces-metrics-logs
 - https://www.honeycomb.io/blog/introducing-honeycomb-telemetry-pipeline
-- =experiments/000-gcp-parquet-corpus-profile.md=
+- =experiments/000-gcp-parquet-corpus-profile.adoc=
 - [[file:README.adoc][RFD 0001]]
 
 ** Scuba product model
@@ -288,11 +288,11 @@ only in the Scuba workload model:
 
 Relevant experiment records:
 
-- =experiments/006-one-day-map-json-scale-load.md=
-- =experiments/007-full-day-map-query-baseline.md=
-- =experiments/008-tenant-attribute-acceleration.md=
-- =experiments/009-split-hot-events-payload.md=
-- =experiments/010-ten-day-split-storage-load.md=
+- =experiments/006-one-day-map-json-scale-load.adoc=
+- =experiments/007-full-day-map-query-baseline.adoc=
+- =experiments/008-tenant-attribute-acceleration.adoc=
+- =experiments/009-split-hot-events-payload.adoc=
+- =experiments/010-ten-day-split-storage-load.adoc=
 
 * Draft MVP Event Contract
 

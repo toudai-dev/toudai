@@ -1,19 +1,19 @@
-# Experiment 007: Full-Day Map Query Baseline
+= Experiment 007: Full-Day Map Query Baseline
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Completed
-- **Date:** 2026-08-19
-- **Source mutation:** None
+- *Status:* Completed
+- *Date:* 2026-08-19
+- *Source mutation:* None
 
-## Question
+== Question
 
 What interactive and exploratory query performance does the selected Map
 candidate provide over one natural day (547,356,173 events), and which access
 paths require metadata catalogs, promoted fields, projections, aggregates, or
 query guardrails before testing sort-key alternatives?
 
-## Dataset and Environment
+== Dataset and Environment
 
 - ClickHouse: 26.3.17.110 LTS
 - Source day: `/mnt/storage/lighthouse/2026-08-05`
@@ -30,7 +30,7 @@ The source and loaded table are the completed Map result from experiment 006.
 That experiment's manifest and file inventory identify the 238 Parquet files
 and their 115,853,143,188 physical bytes.
 
-## Method
+== Method
 
 The run is Map-only and read-only. It starts with a single-repetition warm pilot
 of bounded representative fixtures. The pilot is reviewed for elapsed time,
@@ -70,7 +70,7 @@ Each run records its manifest, rendered SQL, raw results and SHA-256 hashes,
 wall timings, complete ClickHouse query log, summarized query metrics, active
 parts, merge activity, settings, repository revision, and host/storage state.
 
-## Safety and Interpretation Limits
+== Safety and Interpretation Limits
 
 - The initial run is serial and does not represent dashboard concurrency.
 - No query runs concurrently with ingestion in this baseline.
@@ -81,19 +81,19 @@ parts, merge activity, settings, repository revision, and host/storage state.
 - Field-name and allowed-value discovery over raw events are diagnostic
   measurements, not the proposed production implementation.
 
-## Planned Follow-ups
+== Planned Follow-ups
 
-1. Run and review the bounded warm pilot.
-2. Run controlled ClickHouse-cold and warm repetitions for safe fixtures.
-3. Measure raw field discovery separately under explicit limits.
-4. Add guarded high-cardinality group-by, bounded exact percentile,
+. Run and review the bounded warm pilot.
+. Run controlled ClickHouse-cold and warm repetitions for safe fixtures.
+. Measure raw field discovery separately under explicit limits.
+. Add guarded high-cardinality group-by, bounded exact percentile,
    allowed-value discovery, and deterministic trace-access fixtures.
-5. Add concurrent dashboard and exploration workloads, then ingestion under
+. Add concurrent dashboard and exploration workloads, then ingestion under
    query load.
-6. Use the evidence to specify bounded metadata catalogs, promoted fields, and
+. Use the evidence to specify bounded metadata catalogs, promoted fields, and
    aggregate states before comparing sort keys.
 
-## Results
+== Results
 
 The following artifacts contain the complete evidence:
 
@@ -116,24 +116,87 @@ Values below are median ClickHouse duration across three repetitions. Read
 volume is the median for the same repetitions, and peak memory is the maximum
 across all six cold and warm measurements.
 
-| Fixture | ClickHouse-cold | Warm | Cold read | Warm read | Peak memory |
-|---|---:|---:|---:|---:|---:|
-| Recent tail | 5.03 s | 4.92 s | 21.12 GiB | 21.12 GiB | 0.18 GiB |
-| Service and severity | 1.62 s | 1.56 s | 6.21 GiB | 6.21 GiB | 0.02 GiB |
-| Body search | 6.93 s | 6.28 s | 26.15 GiB | 24.96 GiB | 0.11 GiB |
-| Rate by service | 5.19 s | 5.13 s | 9.18 GiB | 9.18 GiB | 0.09 GiB |
-| Dynamic low-cardinality filter | 86.69 s | 11.75 s | 4.94 GiB | 3.18 GiB | 1.05 GiB |
-| Dynamic high-cardinality filter | 83.75 s | 36.35 s | 10.24 GiB | 9.43 GiB | 1.26 GiB |
-| Dynamic conjunction | 87.91 s | 13.00 s | 9.36 GiB | 4.49 GiB | 1.15 GiB |
-| Duration heatmap | 84.19 s | 76.86 s | 5.57 GiB | 5.56 GiB | 1.38 GiB |
-| Percentiles by caller | 95.04 s | 66.07 s | 8.56 GiB | 7.51 GiB | 0.72 GiB |
+[options="header",cols="6*"]
+|===
+
+|Fixture
+|ClickHouse-cold
+|Warm
+|Cold read
+|Warm read
+|Peak memory
+
+|Recent tail
+|5.03 s
+|4.92 s
+|21.12 GiB
+|21.12 GiB
+|0.18 GiB
+
+|Service and severity
+|1.62 s
+|1.56 s
+|6.21 GiB
+|6.21 GiB
+|0.02 GiB
+
+|Body search
+|6.93 s
+|6.28 s
+|26.15 GiB
+|24.96 GiB
+|0.11 GiB
+
+|Rate by service
+|5.19 s
+|5.13 s
+|9.18 GiB
+|9.18 GiB
+|0.09 GiB
+
+|Dynamic low-cardinality filter
+|86.69 s
+|11.75 s
+|4.94 GiB
+|3.18 GiB
+|1.05 GiB
+
+|Dynamic high-cardinality filter
+|83.75 s
+|36.35 s
+|10.24 GiB
+|9.43 GiB
+|1.26 GiB
+
+|Dynamic conjunction
+|87.91 s
+|13.00 s
+|9.36 GiB
+|4.49 GiB
+|1.15 GiB
+
+|Duration heatmap
+|84.19 s
+|76.86 s
+|5.57 GiB
+|5.56 GiB
+|1.38 GiB
+
+|Percentiles by caller
+|95.04 s
+|66.07 s
+|8.56 GiB
+|7.51 GiB
+|0.72 GiB
+
+|===
 
 Field discovery completed in 28.19 seconds ClickHouse-cold and 27.81 seconds
 warm. It scanned all 547,356,173 events, read 19.90 GiB, returned the 100 most
 frequent keys, and used 0.26 GiB peak query memory. Its cold and warm results
 matched byte-for-byte.
 
-## Correctness
+== Correctness
 
 Exact query outputs were byte-stable across repetitions and cache modes. The
 duration heatmap consistently selected 133,820,058 samples with a duration sum
@@ -141,7 +204,7 @@ of 581,514,702,978,425. Caller sample counts and duration sums were also stable
 for grouped percentiles. Histogram boundaries and t-digest values varied
 across parallel runs as expected for approximate aggregate functions.
 
-## Interpretation
+== Interpretation
 
 Map is operationally viable at the one-day, approximately 1 TB logical scale,
 but raw Map extraction alone does not meet an interactive exploration goal for
@@ -170,7 +233,7 @@ dynamic key or replacing raw events with aggregates: raw Map events remain the
 full-resolution source of truth, and promoted columns, metadata catalogs,
 projections, and aggregate states are derived paths selected by workload.
 
-## Decision and Next Experiment
+== Decision and Next Experiment
 
 Advance Map to sort-key and promoted-field testing. The next experiment should
 compare the current ordering with alternatives that improve latest-event access

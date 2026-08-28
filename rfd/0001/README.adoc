@@ -21,7 +21,7 @@ an unaccelerated field unqueryable.
 This proposal is still in discussion. The benchmark program establishes the
 storage and latency envelope before the MVP workload contract is committed. See
 link:IMPLEMENTATION.org[the implementation and validation checklist] and the
-link:experiments/README.md[experiment record].
+link:experiments/README.adoc[experiment record].
 
 == Product contract
 
@@ -168,33 +168,33 @@ compacted into Parquet. GCP-equivalent logical bytes use the available monthly
 32 TB billing-scale estimate provisionally; the exact source metric and scope
 remain to be verified.
 
-* link:experiments/006-one-day-map-json-scale-load.md[Experiment 006] loaded a
+* link:experiments/006-one-day-map-json-scale-load.adoc[Experiment 006] loaded a
   547,356,173-row natural day. `Map` completed while native JSON was stopped at
   63.2% after descriptor, part-count, and inode pressure. This selects `Map` for
   the current MVP, not for every possible workload.
-* link:experiments/007-full-day-map-query-baseline.md[Experiment 007] established
+* link:experiments/007-full-day-map-query-baseline.adoc[Experiment 007] established
   raw full-day latency and showed that repeated dynamic predicates can benefit
   materially from ClickHouse's query-condition cache, while broad scans still
   require workload-aware acceleration.
-* link:experiments/008-tenant-attribute-acceleration.md[Experiment 008] showed
+* link:experiments/008-tenant-attribute-acceleration.adoc[Experiment 008] showed
   schema-stable promoted fields and configured aggregate states can accelerate
   measured tenant workloads, but their storage and maintenance cost requires
   tenant budgets rather than global promotion of arbitrary fields.
-* link:experiments/009-split-hot-events-payload.md[Experiment 009] preserved
+* link:experiments/009-split-hot-events-payload.adoc[Experiment 009] preserved
   matching rows and checksums while splitting normalized hot events from exact
   payload. Exact lookup was about 12 ms on SSD and 351 ms on bulk storage in the
   measured fixture.
-* link:experiments/010-ten-day-split-storage-load.md[Experiment 010] loaded and
+* link:experiments/010-ten-day-split-storage-load.adoc[Experiment 010] loaded and
   checksum-validated 5,689,254,359 rows across 240 hourly windows: 10.81 TB of
   logical input became 1,000.85 GiB of normalized hot data and 708.48 GiB of
   exact payload, 16.98% of logical input in total.
-* link:experiments/011-ten-day-query-baseline.md[Experiment 011] completed 60
+* link:experiments/011-ten-day-query-baseline.adoc[Experiment 011] completed 60
   controlled ten-day raw measurements. Schema-stable service/severity filtering
   was fastest at about 12 seconds. Dynamic `Map` predicates took 15.5 to 16.3
   minutes cold and 6.9 to 8.1 minutes warm; heatmap and percentile scans took
   12.1 to 16.8 minutes. Deterministic exact payload lookup took 919 ms on its
   first ClickHouse-cold access and 62 to 73 ms thereafter.
-* link:experiments/012-ten-day-acceleration-validation.md[Experiment 012]
+* link:experiments/012-ten-day-acceleration-validation.adoc[Experiment 012]
   rebuilt two configured attribute indexes and two dashboard aggregate paths
   over all ten days. Derived storage was 31.80 GiB, or 3.18% of normalized hot
   storage. Attribute indexes improved demanding exact full-match aggregates by

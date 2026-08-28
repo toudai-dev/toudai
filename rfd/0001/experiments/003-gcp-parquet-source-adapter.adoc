@@ -1,34 +1,49 @@
-# Experiment 003: GCP Parquet Source Adapter Calibration
+= Experiment 003: GCP Parquet Source Adapter Calibration
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** In progress
-- **Started:** 2026-08-16
-- **Source mutation:** None
+- *Status:* In progress
+- *Started:* 2026-08-16
+- *Source mutation:* None
 
-## Question
+== Question
 
 What deterministic transformation should the schema bakeoff use to turn the
 GCP-derived Parquet rows into the common event envelope without changing
 attribute key semantics between candidates?
 
-## Initial Input
+== Initial Input
 
 The first calibration uses
 `/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet`:
 
-| Measurement | Result |
-|---|---:|
-| Rows | 3,629,077 |
-| Event-time range | 2026-08-01 04:01:32.225645–10:41:56.078300 UTC |
-| Uncompressed `raw_entry` strings | 12.09 GiB |
-| Populated trace IDs | 0 |
-| Populated span IDs | 0 |
+[options="header",cols="2*"]
+|===
+
+|Measurement
+|Result
+
+|Rows
+|3,629,077
+
+|Event-time range
+|2026-08-01 04:01:32.225645–10:41:56.078300 UTC
+
+|Uncompressed `raw_entry` strings
+|12.09 GiB
+
+|Populated trace IDs
+|0
+
+|Populated span IDs
+|0
+
+|===
 
 This file can calibrate log and wide-event ingestion, but it cannot validate
 trace lookup or span-specific columns.
 
-## Dotted-Key Finding
+== Dotted-Key Finding
 
 `resource_labels` and `labels` are Parquet JSON logical columns. Their source
 objects contain flat OpenTelemetry-style keys such as `service.name` and
@@ -50,20 +65,20 @@ The native JSON candidate must therefore use an explicit source schema and
 perform the string-to-JSON cast itself. Direct inferred Parquet-to-JSON loading
 is not a valid candidate because it changes source semantics.
 
-## Candidate-Neutral Rules Established So Far
+== Candidate-Neutral Rules Established So Far
 
-1. Every candidate reads the same file list and row set.
-2. Parquet JSON logical columns are first read as strings.
-3. Attribute keys remain literal keys; dots are not interpreted as nesting.
-4. Source `timestamp` and `receive_timestamp` retain microsecond precision from
+. Every candidate reads the same file list and row set.
+. Parquet JSON logical columns are first read as strings.
+. Attribute keys remain literal keys; dots are not interpreted as nesting.
+. Source `timestamp` and `receive_timestamp` retain microsecond precision from
    this corpus. The adapter must not imply nanosecond precision that is absent.
-5. `raw_entry` remains available while retention sensitivity is measured, but
+. `raw_entry` remains available while retention sensitivity is measured, but
    storage results must report it separately because it duplicates normalized
    fields from the original GCP entry.
-6. The adapter derives stable IDs and promoted fields identically for all three
+. The adapter derives stable IDs and promoted fields identically for all three
    attribute representations.
 
-## Initial Mapping
+== Initial Mapping
 
 The first executable adapter uses the following mapping for comparison. It is a
 benchmark hypothesis rather than a production schema decision:
@@ -90,18 +105,45 @@ candidate preserves non-null dynamic types and parses dotted keys with escaping
 enabled. ClickHouse native JSON normalizes explicit nulls to absent paths; exact
 source reconstruction therefore depends on `source_raw` for this candidate.
 
-## 10,000-row Correctness Calibration
+== 10,000-row Correctness Calibration
 
 The native harness loaded 10,000 rows from the representative file into native
 JSON, Map, and typed key/value-array tables. This bounded run validates the
 adapter and candidate equivalence; it is too small and too warm to support a
 performance conclusion.
 
-| Candidate | Rows | Service mismatches | Duration sum | Common-field checksum | Bytes on disk |
-|---|---:|---:|---:|---:|---:|
-| Native JSON | 10,000 | 0 | 2,973,400,783 | 8,348,159,556,535,307,444 | 1.86 MiB |
-| Map | 10,000 | 0 | 2,973,400,783 | 8,348,159,556,535,307,444 | 1.53 MiB |
-| Typed arrays | 10,000 | 0 | 2,973,400,783 | 8,348,159,556,535,307,444 | 1.56 MiB |
+[options="header",cols="6*"]
+|===
+
+|Candidate
+|Rows
+|Service mismatches
+|Duration sum
+|Common-field checksum
+|Bytes on disk
+
+|Native JSON
+|10,000
+|0
+|2,973,400,783
+|8,348,159,556,535,307,444
+|1.86 MiB
+
+|Map
+|10,000
+|0
+|2,973,400,783
+|8,348,159,556,535,307,444
+|1.53 MiB
+
+|Typed arrays
+|10,000
+|0
+|2,973,400,783
+|8,348,159,556,535,307,444
+|1.56 MiB
+
+|===
 
 The bounded source scan uses one thread because a parallel Parquet scan can
 reach its limit from different row groups. Two clean loads produced the same
@@ -111,7 +153,7 @@ per table and must not be extrapolated. Matching duration aggregates and
 checksums establish that the three representations retained the tested promoted
 and duration values.
 
-## Complete Representative-File Calibration
+== Complete Representative-File Calibration
 
 The same adapter then loaded all 3,629,077 rows. Each table was forced into one
 active part before recording storage. The resulting values are preliminary:
@@ -119,11 +161,34 @@ background merges were not controlled, caches were warm, the candidates ran
 sequentially, and the staging load was not measured separately by a run
 manifest.
 
-| Candidate | Insert duration | Peak query memory | Final merge duration | Bytes on disk |
-|---|---:|---:|---:|---:|
-| Native JSON | 229.24 s | 2.46 GiB | 425.94 s | 895,001,985 |
-| Map | 43.18 s | 1.17 GiB | 18.92 s | 775,363,865 |
-| Typed arrays | 44.78 s | 1.28 GiB | 18.20 s | 797,066,333 |
+[options="header",cols="5*"]
+|===
+
+|Candidate
+|Insert duration
+|Peak query memory
+|Final merge duration
+|Bytes on disk
+
+|Native JSON
+|229.24 s
+|2.46 GiB
+|425.94 s
+|895,001,985
+
+|Map
+|43.18 s
+|1.17 GiB
+|18.92 s
+|775,363,865
+
+|Typed arrays
+|44.78 s
+|1.28 GiB
+|18.20 s
+|797,066,333
+
+|===
 
 All candidates produced 3,629,077 rows, zero promoted-service mismatches, the
 same duration sum of 5,343,709,954,117, and the same common-field checksum of
@@ -144,7 +209,7 @@ reason to keep all candidates in the controlled bakeoff, not a selection
 decision: the next run must isolate insertion, merge, and query workloads and
 repeat them under captured cold and warm conditions.
 
-## Still To Define Before Timed Loading
+== Still To Define Before Timed Loading
 
 - Logical input-byte accounting for this transformed row set.
 - A trace-bearing input fixture for correctness tests that this file cannot
@@ -156,7 +221,7 @@ repeat them under captured cold and warm conditions.
 - Run manifests and measurement capture required before interpreting throughput
   or latency.
 
-## Interpretation
+== Interpretation
 
 Source decoding is part of the benchmark contract, not an incidental loader
 detail. Without the explicit string read, the native JSON candidate would be

@@ -1,19 +1,19 @@
-# Experiment 001: Local Benchmark Host Profile
+= Experiment 001: Local Benchmark Host Profile
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Completed
-- **Date:** 2026-08-16
-- **Data mutation:** Removed abandoned DuckDB spill files created during corpus
+- *Status:* Completed
+- *Date:* 2026-08-16
+- *Data mutation:* Removed abandoned DuckDB spill files created during corpus
   profiling; no source corpus or pool data was changed
 
-## Question
+== Question
 
 Should local ClickHouse storage experiments run in a container or as a native
 process, and which local filesystem is appropriate for source data, ClickHouse
 parts, and temporary files?
 
-## Environment
+== Environment
 
 - CPU: AMD Ryzen 5 3600, 6 cores / 12 threads, one NUMA node
 - Memory: 62 GiB RAM, 68 GiB swap
@@ -22,11 +22,12 @@ parts, and temporary files?
 - Docker root: `/var/lib/docker` on the OS filesystem
 - ClickHouse system service: inactive
 
-## Method
+== Method
 
 The host was inspected without running an I/O benchmark. Commands included:
 
-```bash
+[source,bash]
+----
 lsblk -e7 -o NAME,TYPE,SIZE,FSTYPE,FSVER,MOUNTPOINTS,MODEL,SERIAL
 df -hT
 df -ih
@@ -37,24 +38,43 @@ zpool get ashift,autotrim,autoexpand,fragmentation,capacity,free storage fast-st
 docker info
 docker system df
 clickhouse local --version
-```
+----
 
 No `fio` or ClickHouse load test was run, so this record describes capacity and
 topology rather than measured throughput or latency.
 
-## Results
+== Results
 
-### OS filesystem
+=== OS filesystem
 
-| Property | Result after cleanup |
-|---|---:|
-| Device | Samsung SSD 980 1 TB NVMe |
-| Filesystem | LUKS-backed ext4 |
-| Mounted size | 848 GiB |
-| Used | 237 GiB |
-| Available | 568 GiB |
-| Docker storage driver | `overlay2` |
-| Docker root | `/var/lib/docker` |
+[options="header",cols="2*"]
+|===
+
+|Property
+|Result after cleanup
+
+|Device
+|Samsung SSD 980 1 TB NVMe
+
+|Filesystem
+|LUKS-backed ext4
+
+|Mounted size
+|848 GiB
+
+|Used
+|237 GiB
+
+|Available
+|568 GiB
+
+|Docker storage driver
+|`overlay2`
+
+|Docker root
+|`/var/lib/docker`
+
+|===
 
 Docker named volumes therefore consume OS-disk capacity unless explicitly
 replaced with bind mounts. The existing Compose `clickhouse_data` named volume
@@ -65,38 +85,86 @@ repository's `.tmp/` directory. No DuckDB process had them open. Removing only
 `duckdb_temp_storage_*.tmp` returned the workspace from 66 GiB to 2.5 MiB and
 increased OS free space from 502 GiB to 568 GiB.
 
-### `fast-storage` pool
+=== `fast-storage` pool
 
-| Property | Result |
-|---|---|
-| Topology | Two 1 TB SATA SSDs in a ZFS mirror |
-| Devices | Samsung 870 QVO and Samsung 870 EVO |
-| Usable size | 900 GiB |
-| Available | 899 GiB |
-| Fragmentation | 0% |
-| Compression | ZFS `zstd` |
-| Record size | 128 KiB |
-| Access time updates | off |
-| Health | online, no known data errors |
+[options="header",cols="2*"]
+|===
+
+|Property
+|Result
+
+|Topology
+|Two 1 TB SATA SSDs in a ZFS mirror
+
+|Devices
+|Samsung 870 QVO and Samsung 870 EVO
+
+|Usable size
+|900 GiB
+
+|Available
+|899 GiB
+
+|Fragmentation
+|0%
+
+|Compression
+|ZFS `zstd`
+
+|Record size
+|128 KiB
+
+|Access time updates
+|off
+
+|Health
+|online, no known data errors
+
+|===
 
 The mirror's write behavior is bounded by the slower member and provides only
 one drive's usable capacity. It is nevertheless the best isolated local target
 for repeatable ClickHouse part writes and query tests.
 
-### `storage` pool
+=== `storage` pool
 
-| Property | Result |
-|---|---|
-| Topology | Two 4 TB Seagate HDDs as independent top-level vdevs |
-| Effective layout | striped, no pool-level redundancy |
-| Usable size | 7.2 TiB |
-| Used | 1.3 TiB |
-| Filesystem available | 6.0 TiB |
-| Pool fragmentation | 5% |
-| Compression | ZFS `on` |
-| Record size | 128 KiB |
-| Access time updates | on |
-| Health | online, no known data errors |
+[options="header",cols="2*"]
+|===
+
+|Property
+|Result
+
+|Topology
+|Two 4 TB Seagate HDDs as independent top-level vdevs
+
+|Effective layout
+|striped, no pool-level redundancy
+
+|Usable size
+|7.2 TiB
+
+|Used
+|1.3 TiB
+
+|Filesystem available
+|6.0 TiB
+
+|Pool fragmentation
+|5%
+
+|Compression
+|ZFS `on`
+
+|Record size
+|128 KiB
+
+|Access time updates
+|on
+
+|Health
+|online, no known data errors
+
+|===
 
 The source corpus is the only significant child at approximately 1.3 TiB and is
 available at both `/mnt/storage/lighthouse` and
@@ -107,9 +175,9 @@ would mix source reads, part writes, and background merge I/O on the same HDDs.
 That can be useful as an explicit constrained-storage experiment, but it is not
 a clean baseline for comparing schemas.
 
-## Recommendation
+== Recommendation
 
-### ClickHouse execution
+=== ClickHouse execution
 
 Run storage and query-performance experiments with the Nix-pinned native
 ClickHouse 26.3.15.4 server as an unprivileged, dedicated process using a
@@ -125,18 +193,35 @@ If a container is later included in a performance comparison, it must use the
 same ClickHouse version and a direct bind mount to the same benchmark dataset;
 the named volume must not be used.
 
-### Data placement
+=== Data placement
 
 Use separate paths by responsibility:
 
-| Responsibility | Recommended location |
-|---|---|
-| Immutable Parquet source | `/mnt/storage/lighthouse` |
-| Primary 1 TB schema bakeoff parts | dedicated child dataset under `/mnt/fast-storage/lighthouse/` |
-| Logs and benchmark metadata | small dedicated path under `/mnt/fast-storage/lighthouse/` |
-| Bounded transient files | dedicated path under `/mnt/fast-storage/lighthouse/`, with an explicit size limit |
-| Capacity/cold-tier experiment | dedicated child dataset under `/mnt/storage/lighthouse-bench/` |
-| Docker integration data | bind-mounted benchmark path, never the named volume |
+[options="header",cols="2*"]
+|===
+
+|Responsibility
+|Recommended location
+
+|Immutable Parquet source
+|`/mnt/storage/lighthouse`
+
+|Primary 1 TB schema bakeoff parts
+|dedicated child dataset under `/mnt/fast-storage/lighthouse/`
+
+|Logs and benchmark metadata
+|small dedicated path under `/mnt/fast-storage/lighthouse/`
+
+|Bounded transient files
+|dedicated path under `/mnt/fast-storage/lighthouse/`, with an explicit size limit
+
+|Capacity/cold-tier experiment
+|dedicated child dataset under `/mnt/storage/lighthouse-bench/`
+
+|Docker integration data
+|bind-mounted benchmark path, never the named volume
+
+|===
 
 Keep at least 15-20% of `fast-storage` free. The initial ClickHouse physical
 footprint is unknown, so the 1 TB logical bakeoff must stop before total pool use
@@ -148,7 +233,7 @@ Do not use the OS NVMe for persistent benchmark parts. Reserve it for the OS,
 Nix store, Docker integration images, repository work, and strictly bounded
 temporary data.
 
-## Filesystem Controls to Decide Before Loading
+== Filesystem Controls to Decide Before Loading
 
 Create dedicated ZFS child datasets rather than writing directly into either
 pool root. Record all properties with each run. Before the first load, decide
@@ -166,7 +251,7 @@ and document:
 Changing these properties is setup work and was not performed during this
 read-only topology inspection.
 
-## Interpretation
+== Interpretation
 
 - Native ClickHouse is the cleanest initial performance baseline on this host.
 - `fast-storage` isolates ClickHouse writes from the HDD-backed source and is
@@ -179,7 +264,7 @@ read-only topology inspection.
   limits. It cannot by itself establish a production 100 TB or 1 PB distributed
   architecture.
 
-## Follow-ups
+== Follow-ups
 
 - Create versioned native ClickHouse benchmark configuration and lifecycle
   commands.

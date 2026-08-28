@@ -48,6 +48,7 @@
             grpc-gateway
             git-cliff
             goreleaser
+            asciidoctor
           ];
         };
       }

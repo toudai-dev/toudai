@@ -1,18 +1,18 @@
-# Experiment 004: ClickHouse 26.3.17 Patch Comparison
+= Experiment 004: ClickHouse 26.3.17 Patch Comparison
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Completed
-- **Date:** 2026-08-16
-- **Source mutation:** None
+- *Status:* Completed
+- *Date:* 2026-08-16
+- *Source mutation:* None
 
-## Question
+== Question
 
 Does updating the Nix-pinned ClickHouse LTS package from 26.3.15.4 to
 26.3.17.110 materially change the initial native JSON, Map, or typed-array
 calibration results?
 
-## Change Under Test
+== Change Under Test
 
 - Baseline ClickHouse: 26.3.15.4 LTS
 - Comparison ClickHouse: 26.3.17.110 LTS
@@ -23,7 +23,7 @@ The ambient development shell still resolved ClickHouse 26.3.15.4. Every server
 and client command for this run therefore executed explicitly through
 `nix develop`. The server reported 26.3.17.110 before the load began.
 
-## Fixed Conditions
+== Fixed Conditions
 
 - Source: all 3,629,077 rows in
   `/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet`
@@ -40,7 +40,7 @@ loaded sequentially in JSON, Map, typed-array order. Each table was then forced
 to one active part with `OPTIMIZE FINAL`. Durations and peak query memory came
 from `system.query_log`; storage came from the final active part.
 
-## Correctness
+== Correctness
 
 All candidates again produced:
 
@@ -53,15 +53,58 @@ Native JSON still omitted explicit null paths for all 659,314 source rows with
 at least one top-level null attribute. The patch does not change that semantic
 limitation.
 
-## Results
+== Results
 
 Negative deltas mean the updated version used less time or storage.
 
-| Candidate | Insert 26.3.15 | Insert 26.3.17 | Delta | Merge 26.3.15 | Merge 26.3.17 | Delta | Storage 26.3.15 | Storage 26.3.17 | Delta |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Native JSON | 229.238 s | 228.429 s | -0.35% | 425.942 s | 416.605 s | -2.19% | 895,001,985 B | 893,531,129 B | -0.16% |
-| Map | 43.179 s | 46.384 s | +7.42% | 18.920 s | 18.012 s | -4.80% | 775,363,865 B | 775,358,431 B | -0.00% |
-| Typed arrays | 44.784 s | 47.940 s | +7.05% | 18.203 s | 18.149 s | -0.30% | 797,066,333 B | 797,225,641 B | +0.02% |
+[options="header",cols="10*"]
+|===
+
+|Candidate
+|Insert 26.3.15
+|Insert 26.3.17
+|Delta
+|Merge 26.3.15
+|Merge 26.3.17
+|Delta
+|Storage 26.3.15
+|Storage 26.3.17
+|Delta
+
+|Native JSON
+|229.238 s
+|228.429 s
+|-0.35%
+|425.942 s
+|416.605 s
+|-2.19%
+|895,001,985 B
+|893,531,129 B
+|-0.16%
+
+|Map
+|43.179 s
+|46.384 s
+|+7.42%
+|18.920 s
+|18.012 s
+|-4.80%
+|775,363,865 B
+|775,358,431 B
+|-0.00%
+
+|Typed arrays
+|44.784 s
+|47.940 s
+|+7.05%
+|18.203 s
+|18.149 s
+|-0.30%
+|797,066,333 B
+|797,225,641 B
+|+0.02%
+
+|===
 
 Peak query memory was effectively unchanged at the precision reported here:
 2.44 GiB for native JSON, 1.17 GiB for Map, and 1.28 GiB for typed arrays. The
@@ -69,7 +112,7 @@ complete staging and three-candidate loader took 367.617 seconds versus 363.761
 seconds in the baseline run, but this combined wall time is not an accepted
 ingestion metric.
 
-## Interpretation
+== Interpretation
 
 This patch update does not materially change the initial conclusion. Native
 JSON remains approximately five times slower to insert, more than twenty times

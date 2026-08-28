@@ -112,6 +112,9 @@ lint:
 check-rfds:
 	scripts/check-rfd-status.sh
 	scripts/check-rfd-status-test.sh
+	@for file in $$(find rfd -name '*.adoc' -type f | sort); do \
+		asciidoctor -w --failure-level WARN -o /dev/null "$$file"; \
+	done
 
 .PHONY: up
 up:

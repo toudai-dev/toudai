@@ -1,19 +1,19 @@
-# Experiment 015: Cloud Production Capacity and Cost
+= Experiment 015: Cloud Production Capacity and Cost
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Planned
-- **Date:** 2026-08-27
-- **External mutation:** Requires separate approval before provisioning cloud
+- *Status:* Planned
+- *Date:* 2026-08-27
+- *External mutation:* Requires separate approval before provisioning cloud
   infrastructure, uploading data, or incurring cost
 
-## Question
+== Question
 
 Which cloud or dedicated-host deployment meets Lighthouse's ingestion,
 interactive-query, retention, durability, and degraded-operation requirements at
 the lowest total cost per retained logical TB and accepted event?
 
-## Principle
+== Principle
 
 Production performance is a workload and topology property, not an instance
 benchmark. Compare providers using the same immutable corpus, ClickHouse build,
@@ -25,31 +25,31 @@ unreplicated cache on another. Do not call the highest short-lived throughput
 production capacity. A candidate passes only at a sustained operating point
 with safety headroom and the required degraded behavior.
 
-## Candidate deployment classes
+== Candidate deployment classes
 
 Select current instance generations and prices immediately before provisioning;
 do not freeze family names in the RFD.
 
-1. **AWS self-managed:** storage-optimized EC2 with local NVMe for hot serving,
+. *AWS self-managed:* storage-optimized EC2 with local NVMe for hot serving,
    S3 for durable batches and exact payload, and same-AZ then cross-AZ replica
    layouts.
-2. **GCP self-managed:** storage-optimized Compute Engine or suitable
+. *GCP self-managed:* storage-optimized Compute Engine or suitable
    general-purpose compute with Local SSD, Cloud Storage durability, and
    equivalent zonal and multi-zone layouts. This candidate must include the
    avoided-egress benefit when source telemetry already originates in GCP.
-3. **Azure self-managed:** local-NVMe storage-optimized virtual machines with
+. *Azure self-managed:* local-NVMe storage-optimized virtual machines with
    Blob Storage durability and equivalent zone placement.
-4. **Dedicated or bare-metal providers:** current offerings from providers such
+. *Dedicated or bare-metal providers:* current offerings from providers such
    as Hetzner or OVHcloud when they provide sufficient NVMe, memory, network,
    region, replacement, and object-storage behavior. Lower rental cost must be
    weighed against weaker elasticity, slower replacement, and operational
    responsibility.
-5. **Managed ClickHouse:** ClickHouse Cloud or another credible managed
+. *Managed ClickHouse:* ClickHouse Cloud or another credible managed
    ClickHouse service as an outcome-level comparison. Its object-storage and
    compute architecture need not match self-managed local NVMe, but it must run
    the same product workload and disclose available settings, scaling events,
    storage, transfer, and service cost.
-6. **Current owned host:** use the completed local measurements as a calibration
+. *Current owned host:* use the completed local measurements as a calibration
    and amortized-cost reference, not as production availability evidence.
 
 Compare x86 and ARM only when the same ClickHouse version, query semantics, and
@@ -57,9 +57,9 @@ operational tooling are supported. Spot or preemptible capacity may prepare or
 transform data, but measured latency and soak runs use non-interruptible
 capacity unless interruption is itself the tested production policy.
 
-## Staged test matrix
+== Staged test matrix
 
-### Stage A: provider calibration
+=== Stage A: provider calibration
 
 Run the same approximately 1 TB logical natural day on one storage-optimized
 leaf from each serious candidate. Use this inexpensive gate to compare:
@@ -75,37 +75,39 @@ Eliminate candidates that cannot meet single-leaf correctness, operational, or
 price/performance requirements. Do not run every provider at 10 TB merely to
 produce a broad comparison table.
 
-### Stage B: actual horizontal scaling
+=== Stage B: actual horizontal scaling
 
 For finalists, load the immutable 5.69B-row, 10.81 TB logical corpus and compare:
 
-```text
+[source,text]
+----
 1 shard x 1 replica
 2 shards x 1 replica
 4 shards x 1 replica
-```
+----
 
 This stage measures real network fanout, leaf-local partial aggregation,
 coordinator reduction, shard skew, and scale efficiency without replication
 overhead obscuring the trend.
 
-### Stage C: production candidate
+=== Stage C: production candidate
 
 Run the likely production topology, initially expected to be approximately:
 
-```text
+[source,text]
+----
 4 shards x 2 replicas
 2 query coordinators or equivalent query entry points
 durable stream and immutable object archive
 local-NVMe hot serving tier
 object-backed exact payload and replay tier
-```
+----
 
 Test a low-latency same-zone placement baseline, then the intended failure-domain
 layout with replicas separated across zones. Record replication lag, cross-zone
 bytes and cost, insert acknowledgement latency, and replica selection behavior.
 
-### Stage D: 24-to-72-hour soak
+=== Stage D: 24-to-72-hour soak
 
 Replay the source's timestamp distribution at observed rate, twice expected
 rate, burst rate, and the provisional 1B- and 3B-events/day targets. Run
@@ -113,7 +115,7 @@ dashboard, exploration, incident-burst, bounded drill-down, and expensive exact
 workloads concurrently while inserts, merges, aggregate maintenance, payload
 archival, retention, and replica catch-up operate.
 
-## Workload and SLO gates
+== Workload and SLO gates
 
 Define exact freshness, p50/p95/p99 latency, concurrency, retention, and cost
 limits before provisioning Stage B. At minimum, measure independently:
@@ -132,7 +134,7 @@ highest sustained operating point that also passes required N-1 behavior, not
 the saturation point. Initial sizing should retain substantial safety headroom,
 subject to measured failure capacity rather than a fixed universal percentage.
 
-## Failure and recovery tests
+== Failure and recovery tests
 
 - Stop one replica and measure query behavior, write availability, lag, and
   catch-up.
@@ -148,7 +150,7 @@ subject to measured failure capacity rather than a fixed universal percentage.
 Critical SLOs must be evaluated with the required failure margin. A topology
 that passes only when every node is healthy is not production capacity.
 
-## Cost model
+== Cost model
 
 Capture actual metered and listed cost for the test interval, normalized as:
 
@@ -174,7 +176,7 @@ spares, replacement time, and realistic utilization. For cloud, show on-demand
 test cost and production scenarios using then-current committed-use or reserved
 discounts without applying those discounts to short benchmark invoices.
 
-## Reproducibility
+== Reproducibility
 
 Provision self-managed candidates with OpenTofu or Terraform and install the
 Nix-pinned ClickHouse closure. Record:
@@ -194,7 +196,7 @@ drivers do not consume database resources. Preserve raw query logs, system
 metrics, host metrics, result hashes, coverage metadata, and infrastructure
 plans with secrets removed.
 
-## Decision gates
+== Decision gates
 
 - Stage A selects at most a small number of finalists based on correctness,
   operability, and price/performance.
@@ -206,7 +208,7 @@ plans with secrets removed.
 - The later 100 TB validation uses the selected candidate or explicitly records
   why a different architecture is required.
 
-## Guardrails
+== Guardrails
 
 - Obtain explicit approval for the estimated budget before provisioning each
   stage.
@@ -219,6 +221,6 @@ plans with secrets removed.
 - Stop after a failed decision gate instead of completing an expensive matrix
   with a non-viable candidate.
 
-## Results
+== Results
 
 Pending.

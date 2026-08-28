@@ -1,20 +1,20 @@
-# Experiment 012: Ten-Day Acceleration Validation
+= Experiment 012: Ten-Day Acceleration Validation
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Completed
-- **Started:** 2026-08-26T03:48:03Z
-- **Completed:** 2026-08-26T11:56:06Z
-- **Source mutation:** None; the experiment creates disposable derived tables
+- *Status:* Completed
+- *Started:* 2026-08-26T03:48:03Z
+- *Completed:* 2026-08-26T11:56:06Z
+- *Source mutation:* None; the experiment creates disposable derived tables
 
-## Question
+== Question
 
 Do the bounded tenant acceleration paths selected at one day preserve their
 storage efficiency, build feasibility, correctness anchors, and interactive
 latency over the completed 5,689,254,359-row, approximately 10.81 TB logical
 corpus?
 
-## Hypothesis
+== Hypothesis
 
 The generic two-field attribute index should grow roughly with field prevalence
 and remain a small percentage of the 1,000.85 GiB normalized event table.
@@ -25,33 +25,33 @@ The experiment does not assume linear build time or query latency. Part count,
 merge work, cache behavior, and high-cardinality value distribution may change
 at ten days.
 
-## Candidates
+== Candidates
 
 Rebuild the same manually selected accelerations from Experiment 008 against
 `benchmark.events_map_hot`:
 
-1. Generic string-attribute rows for configured `type` and `workspace_id`
+. Generic string-attribute rows for configured `type` and `workspace_id`
    fields.
-2. Five-minute event counts by `service_name`.
-3. Five-minute duration count, sum, adaptive histogram, and t-digest states for
+. Five-minute event counts by `service_name`.
+. Five-minute duration count, sum, adaptive histogram, and t-digest states for
    the global distribution and configured `caller` dimension.
 
 These are schema-stable shared tables keyed by tenant, dataset, field or
 dimension name, and value. They do not create tenant-specific ClickHouse
 columns and do not index every discovered field.
 
-## Method
+== Method
 
-1. Record the source table, row count, parts, storage, host state, ClickHouse
+. Record the source table, row count, parts, storage, host state, ClickHouse
    settings, and repository revision.
-2. Drop only the three disposable acceleration tables from Experiment 008 and
+. Drop only the three disposable acceleration tables from Experiment 008 and
    recreate them on the benchmark SSD policy.
-3. Build each selected path serially while recording elapsed time, rows and
+. Build each selected path serially while recording elapsed time, rows and
    bytes written, CPU, memory, and part growth.
-4. Run raw and accelerated versions of two dynamic equality filters, rate by
+. Run raw and accelerated versions of two dynamic equality filters, rate by
    service, duration heatmap, and percentiles by caller.
-5. Run three repetitions under ClickHouse-cold and warm cache policies.
-6. Require byte equality for exact filter and rate outputs. For approximate
+. Run three repetitions under ClickHouse-cold and warm cache policies.
+. Require byte equality for exact filter and rate outputs. For approximate
    aggregates, require identical sample counts and duration sums and report
    histogram or t-digest variation separately.
 
@@ -60,7 +60,7 @@ The selected fixture values match Experiment 011:
 - `type = event_lifecycle`;
 - `workspace_id = 7b10263c-4daa-44e4-9dde-d15c404b23e2`.
 
-## Guardrails
+== Guardrails
 
 - Preserve the raw hot-event and exact payload tables unchanged.
 - Preserve at least 100 GiB free on the SSD dataset.
@@ -71,7 +71,7 @@ The selected fixture values match Experiment 011:
 - Keep activation manual; this experiment does not justify automatic tenant
   acceleration policy.
 
-## Acceptance Criteria
+== Acceptance Criteria
 
 - Every source query uses the ten-day `events_map_hot` table and records the
   expected 5,689,254,359 rows.
@@ -82,53 +82,144 @@ The selected fixture values match Experiment 011:
 - Accelerated medians and raw fallbacks are reported independently for both
   cache modes.
 
-## Results
+== Results
 
 The controlled run `experiment-012-ten-day-acceleration-v1` completed all four
 builds and 60 measured queries in 8 hours 8 minutes. The artifact is preserved
 at `/mnt/fast-storage/lighthouse/runs/experiment-012-ten-day-acceleration-v1`.
 It used ClickHouse 26.3.17.110 and repository revision `57be8c591d1e`.
 
-### Build cost and storage
+=== Build cost and storage
 
 All builds scanned the complete 5,689,254,359-row hot table serially.
 
-| Path | Build time | Rows written | Peak memory | CPU time |
-|---|---:|---:|---:|---:|
-| `type` attribute index | 29m 57s | 2.084B | 3.71 GiB | 2.12 CPU-h |
-| `workspace_id` attribute index | 29m 7s | 1.337B | 3.70 GiB | 2.20 CPU-h |
-| Service five-minute counts | 1m 11s | 79,599 | 0.23 GiB | 0.20 CPU-h |
-| Duration states | 27m 35s | 23,487 | 13.53 GiB | 3.75 CPU-h |
+[options="header",cols="5*"]
+|===
+
+|Path
+|Build time
+|Rows written
+|Peak memory
+|CPU time
+
+|`type` attribute index
+|29m 57s
+|2.084B
+|3.71 GiB
+|2.12 CPU-h
+
+|`workspace_id` attribute index
+|29m 7s
+|1.337B
+|3.70 GiB
+|2.20 CPU-h
+
+|Service five-minute counts
+|1m 11s
+|79,599
+|0.23 GiB
+|0.20 CPU-h
+
+|Duration states
+|27m 35s
+|23,487
+|13.53 GiB
+|3.75 CPU-h
+
+|===
 
 The four serial builds consumed 87.8 minutes of query wall time and 8.27 CPU
 hours. This is asynchronous backfill evidence, not ingestion-time maintenance
 cost. The duration build's 13.53 GiB peak also requires an explicit memory
 budget before concurrent tenant backfills are allowed.
 
-| Derived object | Rows | Physical bytes |
-|---|---:|---:|
-| Shared configured attribute index | 3,421,500,542 | 31.76 GiB |
-| Duration aggregate states | 23,487 | 42.25 MiB |
-| Service count rollup | 79,599 | 299.11 KiB |
-| **Total** | — | **31.80 GiB** |
+[options="header",cols="3*"]
+|===
+
+|Derived object
+|Rows
+|Physical bytes
+
+|Shared configured attribute index
+|3,421,500,542
+|31.76 GiB
+
+|Duration aggregate states
+|23,487
+|42.25 MiB
+
+|Service count rollup
+|79,599
+|299.11 KiB
+
+|*Total*
+|—
+|*31.80 GiB*
+
+|===
 
 The derived objects add 3.18% to the 1,000.85 GiB normalized hot table, or
 0.32% of the provisional 10.81 TB logical input. The attribute index accounts
 for effectively all derived storage; the two dashboard aggregate paths are
 negligible. Free SSD capacity remained 765 GiB after the build.
 
-### Controlled query performance
+=== Controlled query performance
 
 Values are median client wall time across three repetitions. Speedup compares
 raw and accelerated execution in the same cache mode.
 
-| Fixture | Cold raw | Cold accelerated | Speedup | Warm raw | Warm accelerated | Speedup |
-|---|---:|---:|---:|---:|---:|---:|
-| Dynamic `type` filter | 942.2 s | 9.29 s | 102× | 414.2 s | 8.49 s | 49× |
-| Dynamic `workspace_id` filter | 1005.4 s | 3.83 s | 263× | 485.5 s | 3.75 s | 130× |
-| Rate by service | 57.87 s | 124 ms | 467× | 55.09 s | 123 ms | 448× |
-| Duration heatmap | 998.65 s | 75 ms | 13,315× | 991.85 s | 76 ms | 13,051× |
-| Percentiles by caller | 967.62 s | 119 ms | 8,131× | 726.78 s | 116 ms | 6,265× |
+[options="header",cols="7*"]
+|===
+
+|Fixture
+|Cold raw
+|Cold accelerated
+|Speedup
+|Warm raw
+|Warm accelerated
+|Speedup
+
+|Dynamic `type` filter
+|942.2 s
+|9.29 s
+|102×
+|414.2 s
+|8.49 s
+|49×
+
+|Dynamic `workspace_id` filter
+|1005.4 s
+|3.83 s
+|263×
+|485.5 s
+|3.75 s
+|130×
+
+|Rate by service
+|57.87 s
+|124 ms
+|467×
+|55.09 s
+|123 ms
+|448×
+
+|Duration heatmap
+|998.65 s
+|75 ms
+|13,315×
+|991.85 s
+|76 ms
+|13,051×
+
+|Percentiles by caller
+|967.62 s
+|119 ms
+|8,131×
+|726.78 s
+|116 ms
+|6,265×
+
+|===
 
 The two selected index values are highly prevalent: `type = event_lifecycle`
 matches 1,019,093,824 events and the selected `workspace_id` matches
@@ -142,7 +233,7 @@ The aggregate states meet an interactive dashboard envelope on this host at
 75-to-124 ms. Cache mode has no material effect because they read tiny derived
 tables rather than the raw corpus.
 
-### Correctness
+=== Correctness
 
 All 30 raw-versus-accelerated checks passed:
 
@@ -158,7 +249,7 @@ order. The product still needs fixed compatible heatmap buckets or another
 explicit sketch contract, numeric tolerance for approximate percentiles, and
 exact raw fallback.
 
-## Interpretation
+== Interpretation
 
 Bounded, schema-stable acceleration remains viable at ten days without
 tenant-specific ClickHouse columns. Dashboard aggregate states are the strongest
@@ -178,7 +269,7 @@ fallback. It does not yet justify automatic activation because sustainable
 ingestion maintenance, per-tenant skew, selective and absent values, expiration,
 backfill isolation, and mixed concurrency remain unmeasured.
 
-## Follow-ups
+== Follow-ups
 
 - Measure selective, absent, range, conjunction, and bounded event-retrieval
   index queries.

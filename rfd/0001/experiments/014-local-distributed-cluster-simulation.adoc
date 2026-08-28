@@ -1,18 +1,18 @@
-# Experiment 014: Local Distributed-Cluster Simulation
+= Experiment 014: Local Distributed-Cluster Simulation
 
-[RFD 0001](../README.adoc) · [Experiment index](README.md)
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- **Status:** Planned
-- **Date:** 2026-08-27
-- **Source mutation:** None; the experiment creates disposable shard copies
+- *Status:* Planned
+- *Date:* 2026-08-27
+- *Source mutation:* None; the experiment creates disposable shard copies
 
-## Question
+== Question
 
 Can Lighthouse use ClickHouse's standard `Distributed` engine with stable
 event-hash sharding while keeping fanout latency, coordinator work, shard skew,
 query correctness, and failure semantics observable and bounded?
 
-## Scope
+== Scope
 
 Run one coordinator and multiple native ClickHouse leaf processes on this host,
 each with isolated ports, data, temporary, user-file, log, and run directories.
@@ -22,9 +22,10 @@ MergeTree configuration as the single-node experiments.
 Test 1-, 2-, and 4-shard topologies sequentially. Each topology stores one total
 copy of the selected source corpus divided by:
 
-```text
+[source,text]
+----
 cityHash64(tenant_id, dataset, event_id) % shard_count
-```
+----
 
 The exact production hash remains a schema decision; the experiment requires
 only one recorded stable expression for all compared topologies.
@@ -32,7 +33,7 @@ only one recorded stable expression for all compared topologies.
 Do not add replicas initially. Sharding/fanout and replication/recovery are
 different questions and should not be confounded in the first simulation.
 
-## Why native multi-instance processes
+== Why native multi-instance processes
 
 Separate server processes exercise actual ClickHouse network protocol,
 `Distributed` query planning, leaf-local partial aggregation, coordinator
@@ -46,7 +47,7 @@ Each leaf will receive explicit CPU affinity and memory limits where the host
 supports them. All leaves still share one CPU socket, memory subsystem, ZFS ARC,
 and striped SSD pool; those limitations must remain visible in every result.
 
-## Dataset profiles
+== Dataset profiles
 
 Start with one natural approximately 1 TB logical day using the sort key
 selected by Experiment 013. One distributed physical copy should require about
@@ -64,24 +65,24 @@ deterministic synthetic tenant mapping in a separate load to model:
 The mapping must preserve event values and identity checksums within each
 logical tenant assignment and remain reproducible from source event identity.
 
-## Query workloads
+== Query workloads
 
 For every topology, run matching single-node and `Distributed` queries over:
 
-1. latest-event retrieval over narrow and full-day ranges;
-2. raw time-range counts and rates;
-3. selective and prevalent configured attribute predicates;
-4. dashboard count, heatmap, and percentile aggregate states;
-5. bounded raw-event retrieval from an attribute index;
-6. one large tenant and one small tenant; and
-7. serial, dashboard-concurrent, raw-concurrent, and mixed workloads.
+. latest-event retrieval over narrow and full-day ranges;
+. raw time-range counts and rates;
+. selective and prevalent configured attribute predicates;
+. dashboard count, heatmap, and percentile aggregate states;
+. bounded raw-event retrieval from an attribute index;
+. one large tenant and one small tenant; and
+. serial, dashboard-concurrent, raw-concurrent, and mixed workloads.
 
 The coordinator must receive aggregate states or bounded event rows, not all
 matching raw rows. Record normalized SQL, result hashes or approximation
 anchors, participating shards, leaf and coordinator query IDs, and execution
 settings.
 
-## Measurements
+== Measurements
 
 - End-to-end p50 and p95 latency and throughput by topology and workload.
 - Coordinator queue, CPU, peak memory, result rows, and network bytes.
@@ -93,7 +94,7 @@ settings.
 - Result correctness and expected-versus-participating shard coverage.
 - Query cancellation and deadline propagation.
 
-## Failure tests
+== Failure tests
 
 Stop one leaf during controlled read-only queries and compare:
 
@@ -108,7 +109,7 @@ ClickHouse does not by itself provide the full product-level coverage contract.
 The experiment should identify the metadata the Lighthouse coordinator must add
 instead of treating a successful partial response as complete.
 
-## Interpretation limits
+== Interpretation limits
 
 This mechanism is a distributed-systems simulation, not a scale-out capacity
 measurement:
@@ -125,7 +126,7 @@ It can still validate query semantics, sharding correctness, fanout overhead,
 coordinator scaling trends, skew, observability, cancellation, and unavailable-
 shard behavior before paying for a real cluster.
 
-## Guardrails
+== Guardrails
 
 - Run after Experiment 013 and remove its disposable sort-key candidate tables
   before loading distributed copies.
@@ -137,6 +138,6 @@ shard behavior before paying for a real cluster.
   service ports or data paths.
 - Stop all coordinator and leaf processes on normal or failed harness exit.
 
-## Results
+== Results
 
 Pending.
