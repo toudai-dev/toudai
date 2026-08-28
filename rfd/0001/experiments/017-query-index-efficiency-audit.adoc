@@ -1,0 +1,124 @@
+= Experiment 017: Query and Index Efficiency Audit
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Planned
+- *Date:* 2026-08-28
+- *Source mutation:* None for retained tables; historical candidates may require
+  explicitly recorded disposable rebuilds
+
+== Question
+
+Which ClickHouse indexes and key conditions were actually available to every
+measured SELECT workload, how many parts and granules did each stage retain or
+discard, and how does that access plan correlate with measured rows, bytes,
+CPU, memory, and latency?
+
+== Evidence standard
+
+This audit must not infer an index path from latency or selected-row counts.
+Every conclusion requires a saved `EXPLAIN indexes = 1` plan produced against:
+
+* the exact table DDL and ClickHouse version used by the measurement;
+* the exact rendered query text and parameter values;
+* the exact time range and relevant settings; and
+* an equivalent part layout, with differences explicitly recorded.
+
+Plans reconstructed after an experiment must be labeled *reconstructed*, not
+presented as artifacts captured during the original timed run. If any required
+input or physical layout cannot be reproduced, the record must say
+*not reconstructable* and identify the missing evidence. A similar query or
+schema is not an acceptable substitute.
+
+== Inventory
+
+No completed run through Experiment 013 contains saved EXPLAIN artifacts. The
+manual plan inspection performed after Experiment 013 confirmed the immediate
+service-filter question but was not retained as a run artifact and therefore
+does not satisfy this audit.
+
+[options="header",cols="1,2,2,3"]
+|===
+|Experiment |Measured SELECT scope |Current physical data |Required action
+
+|005
+|One-million-row JSON, Map, and typed-array calibration
+|Candidate tables currently exist but are empty
+|Rebuild from the recorded revision and source selection, then capture every
+fixture and candidate plan
+
+|007
+|One-day raw Map baseline
+|The original `events_map` table is empty; the source Parquet remains
+|Rebuild the exact one-day table and part layout before capturing plans
+
+|008
+|One-day raw, attribute-index, and aggregate-state comparison
+|Acceleration table names now contain the ten-day Experiment 012 data
+|Rebuild isolated one-day tables from the recorded DDL and inputs
+
+|011
+|Ten-day raw Map and exact-payload queries
+|`events_map_hot` and `event_payloads` are retained
+|Capture plans using the original revision's fixture text and manifest
+parameters
+
+|012
+|Ten-day raw versus configured attribute indexes and aggregate states
+|The exact hot and acceleration tables are retained
+|Capture raw and accelerated plans using the original manifest and fixtures
+
+|013
+|One-day sort-key comparison over three retained candidates
+|All three compacted one-part candidates are retained
+|Capture every candidate, fixture, and range plan; correlate with the 288
+measurements
+
+|016
+|Date/service and date-leading/service sort keys
+|Run in progress
+|Use plans captured by the revised harness after timed queries finish
+|===
+
+Experiments 000–004, 006, 009, and 010 are data profiling, host/runtime,
+ingestion, storage-layout, or load experiments rather than SELECT-performance
+comparisons and do not require query-plan backfill. Experiments 014 and 015 are
+planned and must include plan evidence when their query phases run.
+
+== Method
+
+. Wait for Experiment 016 to reach a terminal state so audit queries cannot
+  perturb its load, compaction, or timed-query phases.
+. Recover each historical run's fixture files from its recorded repository
+  commit rather than assuming current fixtures are identical.
+. Recover parameters, time bounds, ClickHouse version, and settings from the
+  run manifest and query log.
+. Verify table DDL, row count, parts, and marks against retained evidence before
+  classifying a plan as exact reconstruction.
+. Rebuild missing historical tables under isolated names only when all inputs
+  and the physical layout can be reproduced. Record rebuild checksums.
+. Save normalized query text, `EXPLAIN indexes = 1`, table DDL, part evidence,
+  and a machine-readable index-efficiency summary for every plan.
+. Join each plan to the original timing and query-log metrics by fixture,
+  candidate or path, time range, and cache mode. Explain cache effects
+  separately because EXPLAIN describes planning and pruning, not cache hits.
+
+== Required correlation
+
+For every measured fixture, report:
+
+* partition, primary-key, projection, and skipping-index conditions;
+* selected versus total parts and granules at each index stage;
+* the resulting ranges and search algorithm where ClickHouse reports them;
+* median measured rows, bytes, CPU, peak memory, and wall latency;
+* whether latency changes track pruning, compression, cache state,
+  aggregation work, sorting, or another directly measured factor; and
+* unresolved effects where the evidence cannot isolate causality.
+
+The write-up must distinguish correlation from causation. It must not claim an
+index caused a latency change unless candidate controls or measured scan work
+support that conclusion.
+
+== Results
+
+Pending Experiment 016 completion.

@@ -103,4 +103,8 @@ conditions. Add a new run or record and link the relationship.
 |Running
 |link:016-date-service-sort-key.adoc[Date/service sort-key comparison]
 
+|017
+|Planned
+|link:017-query-index-efficiency-audit.adoc[Query and index efficiency audit]
+
 |===

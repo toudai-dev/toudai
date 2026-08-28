@@ -688,6 +688,10 @@ criterion.
 - [X] Compare candidate sort keys and timestamp bucket widths; Experiment 013
   rejects the hour/timestamp compromise and records the timestamp-first versus
   hour/service compression and query trade-off.
+- [ ] Backfill exact or explicitly non-reconstructable =EXPLAIN indexes = 1=
+  evidence for every SELECT-performance experiment through Experiment 013.
+- [ ] Correlate index-stage part and granule selection with measured rows,
+  bytes, CPU, memory, and latency without inferring unsupported causes.
 - [ ] Compare trace projection and derived trace-table approaches using a
   deterministic correlated-event fixture.
 - [ ] Record the =Map= representation, final sort key, identifier types, and
