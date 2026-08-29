@@ -122,4 +122,126 @@ support that conclusion.
 
 == Results
 
-The retained-table capture is in progress. Historical rebuilds remain pending.
+=== Retained-table capture
+
+The first audit run completed at 2026-08-29T05:31:17Z and preserved 101 exact
+recorded queries and their `EXPLAIN indexes = 1` output at
+`/mnt/fast-storage/lighthouse/runs/experiment-017-retained-query-plans-v1`:
+
+[options="header",cols="1,1,2,2"]
+|===
+|Experiment |Plans |Query evidence |Physical-layout classification
+
+|011
+|11
+|Ten raw fixtures plus exact-payload lookup
+|Reconstructed; background merges changed the retained hot and payload parts
+
+|012
+|10
+|Five raw and five accelerated fixtures
+|Reconstructed; background merges changed hot and attribute-index parts
+
+|013
+|48
+|Three candidates, four ranges, and four fixtures
+|Exact retained one-part layouts
+
+|016
+|32
+|Two candidates, four ranges, and four fixtures
+|Exact retained one-part layouts
+|===
+
+The capture used ClickHouse 26.3.17.110, matching every source run. It selected
+query text from each source run's `QueryStart` record, verified that cold and
+warm repetitions had the same query, and stored source artifact hashes, table
+DDL, current parts, source query IDs, query hashes, and plan hashes. Experiment
+011's payload query was recovered by its exact query ID from `system.query_log`.
+
+Experiments 013 and 016 account for 80 exact-layout plans. Experiments 011 and
+012 account for 21 plans with exact query text, schema, data, and ClickHouse
+version but changed part boundaries. Their plans must not be presented as the
+original index-stage part or granule counts.
+
+=== Exact sort-key evidence
+
+Experiment 013 now has exact range-specific plans. For the service/severity
+fixture, primary-key granule selection was:
+
+[options="header",cols="1,1,1,1,1"]
+|===
+|Candidate |5 min |1 hour |6 hours |24 hours
+
+|Hour/service
+|85 / 90,984
+|663 / 90,984
+|3,569 / 90,984
+|23,398 / 90,984
+
+|Timestamp-first
+|224 / 89,964
+|3,351 / 89,964
+|19,705 / 89,964
+|89,964 / 89,964
+
+|Hour/timestamp
+|242 / 90,209
+|3,379 / 90,209
+|19,749 / 90,209
+|90,209 / 90,209
+|===
+
+The timestamp-first and hour/timestamp plans selected exactly the same granules
+as their unfiltered time-range fixtures. `service_name` therefore provided no
+additional pruning in either layout. Hour/service reduced the 24-hour service
+scan to 25.72% of its granules; the original execution correspondingly read
+142.7 million rows and 4.71 GiB in 1.76 seconds, versus 549.0 million rows and
+18.11 GiB in 5.58 seconds for timestamp-first. This is a controlled plan,
+scan-work, and latency correlation rather than an inferred index explanation.
+
+For latest-tail retrieval, timestamp-first planned the same time-range granules
+as its range-count query but read only about 55,700–75,700 rows and 2–3 MiB
+across the four ranges before satisfying `LIMIT 100`. At 24 hours it completed
+in 124 ms. Hour/service and hour/timestamp read approximately 549 million rows
+and 21.18 GiB in 5.79 seconds. The primary-key plan alone does not explain that
+difference; the execution evidence shows early termination is effective only
+when the physical order can supply the requested timestamp order.
+
+Dynamic `Map` predicates added no primary-key condition in any candidate. Their
+plans selected the same granules as time-only counts. The measured latency is
+therefore correlated with scanning and evaluating the dynamic value, not with a
+dynamic-field index.
+
+Experiment 016 confirms the date expression result at every range. The two
+date/service candidates selected nearly identical granules. For example, the
+service query retained 39 granules in both candidates at five minutes, 614
+versus 618 at one hour, 3,534 versus 3,527 at six hours, and 23,259 versus
+23,251 at 24 hours. Moving the partition-constant date to the leading position
+did not create a different effective index path.
+
+=== Reconstructed ten-day evidence
+
+The original Experiment 011 metrics show that nine of ten raw fixtures selected
+all 936,149 marks and read all 5.689 billion rows. Service/severity selected
+203,517 marks and read 1.233 billion rows; recent-tail planned all marks and read
+5.689 billion rows because the retained order could not stop on global time.
+These are original execution metrics. Current EXPLAIN output is supplementary
+only because four later background merges changed part boundaries.
+
+For Experiment 012, original raw execution selected all 936,149 marks for every
+fixture. Original accelerated execution selected 124,431 marks for the
+prevalent `type` value and 36,352 for `workspace_id`; the aggregate-state paths
+read 11 marks. The reconstructed plans report the same index conditions and
+nearby counts of 124,429, 36,309, and 11 after merges. This corroborates the
+access-path interpretation, but the reconstructed numbers are not substituted
+for the original missing plans.
+
+=== Remaining work
+
+Experiments 005, 007, and 008 require isolated historical rebuilds. Their
+original physical tables or run artifacts are no longer retained, so no plan
+will be labeled exact unless the recorded source, DDL, row counts, checksums,
+part layout, ClickHouse version, query text, and parameters can all be
+reproduced. Experiment 017 remains running until those cases are captured or
+explicitly classified as not reconstructable.
