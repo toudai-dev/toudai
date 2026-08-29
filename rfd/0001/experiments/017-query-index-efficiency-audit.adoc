@@ -76,8 +76,9 @@ measurements
 
 |016
 |Date/service and date-leading/service sort keys
-|Run in progress
-|Use plans captured by the revised harness after timed queries finish
+|Both one-part candidates and eight representative full-day plans are retained
+|Capture missing range-specific plans and correlate them with all 192
+measurements
 |===
 
 Experiments 000–004, 006, 009, and 010 are data profiling, host/runtime,

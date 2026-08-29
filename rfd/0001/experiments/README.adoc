@@ -100,7 +100,7 @@ conditions. Add a new run or record and link the relationship.
 |link:015-cloud-production-capacity-and-cost.adoc[Cloud production capacity and cost]
 
 |016
-|Running
+|Completed
 |link:016-date-service-sort-key.adoc[Date/service sort-key comparison]
 
 |017

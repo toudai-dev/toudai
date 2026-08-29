@@ -2,9 +2,10 @@
 
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- *Status:* Running
+- *Status:* Completed
 - *Started:* 2026-08-28T16:27:04Z
-- *Source mutation:* None; the experiment creates one disposable candidate
+- *Completed:* 2026-08-29T04:37:04Z
+- *Source mutation:* None; the experiment creates two disposable candidates
 
 == Question
 
@@ -80,4 +81,120 @@ capacity result.
 
 == Results
 
-Pending.
+The controlled run completed all 48 checksum-validated load windows, all 192
+timed queries, and eight representative full-day `EXPLAIN indexes = 1` plans.
+Every result hash matched the corresponding timestamp-first result from
+Experiment 013. Raw artifacts remain at
+`/mnt/fast-storage/lighthouse/runs/experiment-016-date-service-v1`.
+
+The run used ClickHouse 26.3.17.110, 12 query threads, a 40 GiB query memory
+limit, and one final active part per candidate. ClickHouse-cold reset
+ClickHouse-managed caches but not Linux page cache or ZFS ARC. Latencies below
+are medians of three wall-clock measurements.
+
+=== Storage and build cost
+
+[options="header",cols="1,1,1,1"]
+|===
+|Candidate |Compressed size |Hourly inserts |Successful final compaction
+
+|Date after tenant/dataset
+|103.94 GiB
+|42.3 min
+|35.4 min
+
+|Date first
+|103.94 GiB
+|42.1 min
+|35.6 min
+|===
+
+The compressed sizes differed by only 18,722 bytes across 111.61 GB per
+candidate, or less than 0.00002%. Both builds loaded the same rows in nearly the
+same time. This directly confirms that moving a date value that is constant
+inside the daily partition did not produce a meaningful storage or load-layout
+difference.
+
+=== ClickHouse-cold latency
+
+Values are milliseconds in candidate order *date after tenant/dataset · date
+first*.
+
+[options="header",cols="1,1,1,1,1"]
+|===
+|Fixture |5 min |1 hour |6 hours |24 hours
+
+|Latest 100 events
+|141 · 132
+|263 · 262
+|1,078 · 1,073
+|4,450 · 4,485
+
+|Time-range count
+|109 · 107
+|224 · 220
+|926 · 938
+|4,111 · 4,165
+
+|Service and severity
+|109 · 114
+|141 · 131
+|313 · 271
+|1,493 · 1,288
+
+|Dynamic `Map` filter
+|321 · 346
+|2,954 · 2,962
+|17,954 · 21,674
+|93,863 · 90,583
+|===
+
+The candidates had nearly identical selected marks, rows, and bytes for every
+fixture despite some wall-time variation. For example, the 24-hour service
+query read 142,546,085 rows, 4.702 GiB, and 23,251 marks with date after
+tenant/dataset, versus 142,543,655 rows, 4.702 GiB, and 23,259 marks with date
+first. The observed latency difference therefore does not have an index-pruning
+explanation in this evidence and must not be attributed to date position.
+
+=== Index evidence
+
+For full-day recent-tail, range-count, and dynamic-filter queries, EXPLAIN
+reported:
+
+* 90,543 of 90,543 primary-key granules for date after tenant/dataset;
+* 90,735 of 90,735 for date first; and
+* one range in both candidates.
+
+For the service/severity query, the primary key retained 23,251 of 90,543
+granules (25.68%) and 23,259 of 90,735 granules (25.63%), respectively. Both
+plans used generic exclusion search with the same effective keys:
+`tenant_id`, `dataset`, `service_name`, and `timestamp`. ClickHouse omitted the
+constant date expression from the reported effective keys in both plans.
+
+These plans directly support equivalent full-day index behavior. They do not
+describe 5-minute, 1-hour, or 6-hour pruning; Experiment 017 will capture those
+range-specific plans rather than extrapolating from the full-day plan.
+
+=== Operational observations
+
+Both initial `OPTIMIZE FINAL` attempts waited for existing background merges
+and returned after the 120-second wait limit without reaching one part. The
+harness rejected each multi-part result, retained all validated windows, and
+resumed after background merges stopped. The successful final compactions took
+35.4 and 35.6 minutes. Every timed query ran only after both candidates had one
+active part.
+
+== Interpretation
+
+* Leading the sorting key with `toDate(timestamp)` has no demonstrated benefit
+  under daily partitioning. It produced effectively identical storage, build
+  cost, scan work, and full-day index plans.
+* The date-leading candidate weakens the visible tenant-first invariant without
+  adding measured pruning. The tenant/dataset prefix should remain first.
+* Service-first ordering itself remains the source of service pruning. The date
+  expression is redundant and can be omitted from the sorting key without
+  relying on a performance estimate.
+* The comparison with timestamp-first and hour/service layouts remains a
+  cross-run comparison until Experiment 017 captures and correlates their exact
+  range-specific plans. This record does not assign unexplained cross-run
+  latency differences to an index.
