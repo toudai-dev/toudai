@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Capture EXPLAIN indexes plans from the exact queries recorded by benchmark runs."""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_ROOT", "/mnt/fast-storage/lighthouse"))
+RUNS_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_RUNS_ROOT", BENCHMARK_ROOT / "runs"))
+CLIENT = REPO_ROOT / "benchmark/scripts/benchmark-clickhouse"
+SOURCE_RUNS = {
+    "011": ("experiment-011-ten-day-raw-controlled-v1", "evidence/parts-after.jsonl"),
+    "012": ("experiment-012-ten-day-acceleration-v1", "evidence/parts-after-query.jsonl"),
+    "013": ("experiment-013-sort-keys-v1", "evidence/parts-after-query.jsonl"),
+    "016": ("experiment-016-date-service-v1", "evidence/parts-after-query.jsonl"),
+}
+EXPECTED_PLANS = {"011": 10, "012": 10, "013": 48, "016": 32}
+IGNORED_TIMING_COLUMNS = {
+    "query_id",
+    "cache_mode",
+    "repetition",
+    "wall_ms",
+    "result_file",
+    "result_sha256",
+}
+PART_FIELDS = ("table", "partition", "name", "rows", "bytes_on_disk", "marks", "level")
+
+
+def client(query: str) -> str:
+    result = subprocess.run(
+        [str(CLIENT), "client", "--multiquery"],
+        cwd=REPO_ROOT,
+        input=query,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"ClickHouse client exited {result.returncode}")
+    return result.stdout
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise RuntimeError(f"missing required artifact: {path}")
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def normalized_parts(rows: list[dict[str, Any]], tables: set[str]) -> list[tuple[str, ...]]:
+    return sorted(
+        tuple(str(row.get(field, "")) for field in PART_FIELDS)
+        for row in rows
+        if row["table"] in tables
+    )
+
+
+def measured_queries(run_dir: Path) -> list[dict[str, Any]]:
+    timings = list(csv.DictReader((run_dir / "timings.tsv").open(), delimiter="\t"))
+    starts = {
+        row["query_id"]: row["query"]
+        for row in read_jsonl(run_dir / "query-log.jsonl")
+        if row["type"] == "QueryStart"
+    }
+    groups: dict[tuple[tuple[str, str], ...], list[dict[str, str]]] = {}
+    for timing in timings:
+        dimensions = tuple(
+            (key, value)
+            for key, value in timing.items()
+            if key not in IGNORED_TIMING_COLUMNS
+        )
+        groups.setdefault(dimensions, []).append(timing)
+
+    queries = []
+    for dimensions, rows in sorted(groups.items()):
+        texts = {starts[row["query_id"]] for row in rows if row["query_id"] in starts}
+        if len(texts) != 1:
+            raise RuntimeError(f"expected one recorded query for {run_dir.name} {dimensions}; found {len(texts)}")
+        preferred = sorted(
+            rows,
+            key=lambda row: (
+                row["cache_mode"] != "clickhouse-cold",
+                int(row["repetition"]),
+            ),
+        )[0]
+        queries.append(
+            {
+                "dimensions": dict(dimensions),
+                "query_id": preferred["query_id"],
+                "query": texts.pop(),
+            }
+        )
+    return queries
+
+
+def table_names(query: str) -> set[str]:
+    return set(re.findall(r"\bbenchmark\.([A-Za-z_][A-Za-z0-9_]*)\b", query))
+
+
+def slug(dimensions: dict[str, str]) -> str:
+    value = "-".join(dimensions.values())
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", value)
+
+
+def explain_query(query: str) -> str:
+    query = re.sub(r"\s+FORMAT\s+JSONEachRow\s*$", "", query, flags=re.IGNORECASE)
+    return client(f"EXPLAIN indexes = 1 {query}\n")
+
+
+def payload_query() -> dict[str, Any]:
+    rows = read_jsonl_from_text(
+        client(
+            "SELECT query_id, query FROM system.query_log "
+            "WHERE type = 'QueryStart' "
+            "AND query_id = 'lighthouse_experiment_011_payload_clickhouse_cold_1' "
+            "ORDER BY event_time_microseconds LIMIT 1 FORMAT JSONEachRow\n"
+        )
+    )
+    if len(rows) != 1:
+        raise RuntimeError("the exact Experiment 011 payload query is no longer in system.query_log")
+    return {
+        "dimensions": {"candidate": "payload", "fixture": "exact-payload-lookup"},
+        "query_id": rows[0]["query_id"],
+        "query": rows[0]["query"],
+    }
+
+
+def read_jsonl_from_text(text: str) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in text.splitlines() if line]
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or not re.fullmatch(r"[A-Za-z0-9._-]+", sys.argv[1]):
+        print(f"usage: {Path(sys.argv[0]).name} RUN_ID", file=sys.stderr)
+        return 2
+
+    run_dir = RUNS_ROOT / sys.argv[1]
+    if run_dir.exists():
+        raise RuntimeError(f"run directory already exists: {run_dir}")
+    (run_dir / "plans").mkdir(parents=True)
+    (run_dir / "evidence/ddl").mkdir(parents=True)
+    (run_dir / "status").write_text("running\n")
+
+    try:
+        started_at = subprocess.check_output(["date", "-u", "+%FT%TZ"], text=True).strip()
+        revision = subprocess.check_output(
+            ["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"],
+            cwd=REPO_ROOT,
+            text=True,
+        ).strip()
+        change_id = subprocess.check_output(
+            ["jj", "log", "-r", "@-", "--no-graph", "-T", "change_id"],
+            cwd=REPO_ROOT,
+            text=True,
+        ).strip()
+        current_version = client("SELECT version() FORMAT TSVRaw\n").strip()
+        current_parts = read_jsonl_from_text(
+            client(
+                "SELECT table, partition, name, rows, bytes_on_disk, marks, level "
+                "FROM system.parts WHERE active AND database = 'benchmark' "
+                "ORDER BY table, partition, name FORMAT JSONEachRow\n"
+            )
+        )
+        (run_dir / "evidence/current-parts.jsonl").write_text(
+            "".join(json.dumps(row, sort_keys=True) + "\n" for row in current_parts)
+        )
+
+        sources: dict[str, dict[str, Any]] = {}
+        all_queries: dict[str, list[dict[str, Any]]] = {}
+        referenced_tables: set[str] = set()
+        for experiment, (source_name, parts_path) in SOURCE_RUNS.items():
+            source_dir = RUNS_ROOT / source_name
+            manifest_path = source_dir / "manifest.json"
+            timings_path = source_dir / "timings.tsv"
+            query_log_path = source_dir / "query-log.jsonl"
+            manifest = json.loads(manifest_path.read_text())
+            if manifest["clickhouse_version"] != current_version:
+                raise RuntimeError(
+                    f"Experiment {experiment} used ClickHouse {manifest['clickhouse_version']}; current is {current_version}"
+                )
+            queries = measured_queries(source_dir)
+            if len(queries) != EXPECTED_PLANS[experiment]:
+                raise RuntimeError(
+                    f"Experiment {experiment} expected {EXPECTED_PLANS[experiment]} plans; found {len(queries)}"
+                )
+            if experiment == "011":
+                queries.append(payload_query())
+            tables = set().union(*(table_names(item["query"]) for item in queries))
+            referenced_tables.update(tables)
+            original_parts = read_jsonl(source_dir / parts_path)
+            layout_match = normalized_parts(original_parts, tables) == normalized_parts(current_parts, tables)
+            sources[experiment] = {
+                "run": source_name,
+                "recorded_commit": manifest["repository"]["commit_id"],
+                "clickhouse_version": manifest["clickhouse_version"],
+                "tables": sorted(tables),
+                "physical_layout_match": layout_match,
+                "classification": "exact-retained-layout" if layout_match else "reconstructed-changed-part-layout",
+                "artifacts": {
+                    "manifest_sha256": sha256(manifest_path),
+                    "timings_sha256": sha256(timings_path),
+                    "query_log_sha256": sha256(query_log_path),
+                    "parts_sha256": sha256(source_dir / parts_path),
+                },
+            }
+            all_queries[experiment] = queries
+
+        for table in sorted(referenced_tables):
+            ddl = client(f"SHOW CREATE TABLE benchmark.{table}\n")
+            (run_dir / f"evidence/ddl/{table}.sql").write_text(ddl)
+
+        manifest = {
+            "run_id": sys.argv[1],
+            "started_at": started_at,
+            "repository": {"commit_id": revision, "change_id": change_id},
+            "clickhouse_version": current_version,
+            "sources": sources,
+            "plan_count": sum(len(queries) for queries in all_queries.values()),
+            "evidence_policy": "Exact recorded query text; physical layout classified per source run.",
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+        with (run_dir / "plans.tsv").open("w", newline="") as output:
+            writer = csv.DictWriter(
+                output,
+                fieldnames=(
+                    "experiment",
+                    "source_run",
+                    "dimensions",
+                    "source_query_id",
+                    "tables",
+                    "classification",
+                    "query_file",
+                    "explain_file",
+                    "query_sha256",
+                    "explain_sha256",
+                ),
+                delimiter="\t",
+            )
+            writer.writeheader()
+            for experiment, queries in all_queries.items():
+                source = sources[experiment]
+                experiment_dir = run_dir / "plans" / experiment
+                experiment_dir.mkdir()
+                for item in queries:
+                    name = slug(item["dimensions"])
+                    query_path = experiment_dir / f"{name}.sql"
+                    explain_path = experiment_dir / f"{name}.explain.txt"
+                    query_path.write_text(item["query"].rstrip() + "\n")
+                    explain_path.write_text(explain_query(item["query"]))
+                    writer.writerow(
+                        {
+                            "experiment": experiment,
+                            "source_run": source["run"],
+                            "dimensions": json.dumps(item["dimensions"], sort_keys=True),
+                            "source_query_id": item["query_id"],
+                            "tables": ",".join(sorted(table_names(item["query"]))),
+                            "classification": source["classification"],
+                            "query_file": str(query_path.relative_to(run_dir)),
+                            "explain_file": str(explain_path.relative_to(run_dir)),
+                            "query_sha256": sha256(query_path),
+                            "explain_sha256": sha256(explain_path),
+                        }
+                    )
+
+        (run_dir / "completed-at").write_text(
+            subprocess.check_output(["date", "-u", "+%FT%TZ"], text=True)
+        )
+        (run_dir / "status").write_text("completed\n")
+        print(f"query-plan audit capture completed: {run_dir}")
+        return 0
+    except BaseException:
+        (run_dir / "status").write_text("failed\n")
+        raise
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

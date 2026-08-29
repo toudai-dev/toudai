@@ -2,8 +2,8 @@
 
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- *Status:* Planned
-- *Date:* 2026-08-28
+- *Status:* Running
+- *Started:* 2026-08-29
 - *Source mutation:* None for retained tables; historical candidates may require
   explicitly recorded disposable rebuilds
 
@@ -122,4 +122,4 @@ support that conclusion.
 
 == Results
 
-Pending Experiment 016 completion.
+The retained-table capture is in progress. Historical rebuilds remain pending.
