@@ -9,6 +9,7 @@ historical_revision="e1a2fc8b3ba3d4a84017f3b3d7838528fa595c4b"
 expected_version="26.3.17.110"
 expected_rows="3629077"
 run_id="${1:-experiment-017-rebuild-005-v1}"
+resume="${LIGHTHOUSE_BENCH_RESUME:-0}"
 
 if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
@@ -21,7 +22,17 @@ fi
 
 run_dir="${runs_root}/${run_id}"
 if [[ -e "${run_dir}" ]]; then
-  echo "run directory already exists: ${run_dir}" >&2
+  if [[ "${resume}" != "1" ]]; then
+    echo "run directory already exists: ${run_dir}" >&2
+    exit 1
+  fi
+  prior_status="$(cat "${run_dir}/status" 2>/dev/null || true)"
+  if [[ "${prior_status}" != "failed" && "${prior_status}" != "running" ]]; then
+    echo "cannot resume run with status '${prior_status}': ${run_dir}" >&2
+    exit 1
+  fi
+elif [[ "${resume}" == "1" ]]; then
+  echo "cannot resume missing run directory: ${run_dir}" >&2
   exit 1
 fi
 
@@ -69,37 +80,43 @@ load_sql="${historical_root}/benchmark/clickhouse/load-candidates.sql"
 
 # These names are disposable historical candidates. Refuse to replace data so
 # this reconstruction cannot accidentally destroy another active experiment.
-existing_rows="$("${client[@]}" --query "
-  SELECT sum(total_rows)
-  FROM system.tables
-  WHERE database = 'benchmark'
-    AND name IN ('gcp_source', 'events_json', 'events_map', 'events_typed')
-  FORMAT TSVRaw")"
-if [[ "${existing_rows}" != "0" ]]; then
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+if [[ "${resume}" != "1" ]]; then
+  existing_rows="$("${client[@]}" --query "
+    SELECT sum(total_rows)
+    FROM system.tables
+    WHERE database = 'benchmark'
+      AND name IN ('gcp_source', 'events_json', 'events_map', 'events_typed')
+    FORMAT TSVRaw")"
+  if [[ "${existing_rows}" != "0" && "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
     fail "historical candidate tables contain ${existing_rows} rows; set LIGHTHOUSE_BENCH_RESET=1 to replace them"
   fi
+
+  "${client[@]}" --multiquery --query "
+    DROP VIEW IF EXISTS benchmark.gcp_events;
+    DROP TABLE IF EXISTS benchmark.events_json;
+    DROP TABLE IF EXISTS benchmark.events_map;
+    DROP TABLE IF EXISTS benchmark.events_typed;
+    DROP TABLE IF EXISTS benchmark.gcp_source;
+  " >/dev/null
+  "${client[@]}" --multiquery < "${candidate_sql}"
+
+  structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
+  echo "staging Experiment 005 source"
+  clickhouse local \
+    --param_source="${source_path}" \
+    --param_structure="${structure}" \
+    --query "SELECT * FROM file({source:String}, Parquet, {structure:String}) FORMAT Native" |
+    "${client[@]}" --query "INSERT INTO benchmark.gcp_source FORMAT Native"
+
+  echo "loading Experiment 005 candidates"
+  "${client[@]}" --multiquery < "${load_sql}"
+else
+  source_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+  if [[ "${source_rows}" != "${expected_rows}" ]]; then
+    fail "expected ${expected_rows} staged rows when resuming; found ${source_rows}"
+  fi
+  echo "resuming Experiment 005 from loaded candidates"
 fi
-
-"${client[@]}" --multiquery --query "
-  DROP VIEW IF EXISTS benchmark.gcp_events;
-  DROP TABLE IF EXISTS benchmark.events_json;
-  DROP TABLE IF EXISTS benchmark.events_map;
-  DROP TABLE IF EXISTS benchmark.events_typed;
-  DROP TABLE IF EXISTS benchmark.gcp_source;
-" >/dev/null
-"${client[@]}" --multiquery < "${candidate_sql}"
-
-structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
-echo "staging Experiment 005 source"
-clickhouse local \
-  --param_source="${source_path}" \
-  --param_structure="${structure}" \
-  --query "SELECT * FROM file({source:String}, Parquet, {structure:String}) FORMAT Native" |
-  "${client[@]}" --query "INSERT INTO benchmark.gcp_source FORMAT Native"
-
-echo "loading Experiment 005 candidates"
-"${client[@]}" --multiquery < "${load_sql}"
 
 table_state="$("${client[@]}" --query "
   SELECT count(), uniqExact(total_rows), min(total_rows)
@@ -115,7 +132,8 @@ fi
 # inserts initially produce multiple parts on this host, so force the same
 # documented layout before capturing plans rather than racing background merges.
 for table in events_json events_map events_typed; do
-  "${client[@]}" --query "OPTIMIZE TABLE benchmark.${table} FINAL"
+  "${client[@]}" --receive_timeout=86400 --send_timeout=86400 \
+    --query "OPTIMIZE TABLE benchmark.${table} FINAL"
 done
 
 part_state="$("${client[@]}" --query "
