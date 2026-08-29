@@ -37,10 +37,15 @@ on_error() {
 }
 trap on_error ERR
 
+fail() {
+  echo "$1" >&2
+  echo "failed" > "${run_dir}/status"
+  exit 1
+}
+
 current_version="$("${client[@]}" --query "SELECT version() FORMAT TSVRaw")"
 if [[ "${current_version}" != "${expected_version}" ]]; then
-  echo "Experiment 005 used ClickHouse ${expected_version}; current version is ${current_version}" >&2
-  exit 1
+  fail "Experiment 005 used ClickHouse ${expected_version}; current version is ${current_version}"
 fi
 
 # Recover source-controlled inputs from the measured revision rather than using
@@ -71,8 +76,9 @@ existing_rows="$("${client[@]}" --query "
     AND name IN ('gcp_source', 'events_json', 'events_map', 'events_typed')
   FORMAT TSVRaw")"
 if [[ "${existing_rows}" != "0" ]]; then
-  echo "historical candidate tables contain ${existing_rows} rows; refusing to replace them" >&2
-  exit 1
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+    fail "historical candidate tables contain ${existing_rows} rows; set LIGHTHOUSE_BENCH_RESET=1 to replace them"
+  fi
 fi
 
 "${client[@]}" --multiquery --query "
@@ -102,9 +108,15 @@ table_state="$("${client[@]}" --query "
     AND name IN ('events_json', 'events_map', 'events_typed')
   FORMAT TSVRaw")"
 if [[ "${table_state}" != $'3\t1\t'"${expected_rows}" ]]; then
-  echo "expected three candidate tables with ${expected_rows} rows; found: ${table_state}" >&2
-  exit 1
+  fail "expected three candidate tables with ${expected_rows} rows; found: ${table_state}"
 fi
+
+# The original measurement recorded one active part per candidate. Parallel
+# inserts initially produce multiple parts on this host, so force the same
+# documented layout before capturing plans rather than racing background merges.
+for table in events_json events_map events_typed; do
+  "${client[@]}" --query "OPTIMIZE TABLE benchmark.${table} FINAL"
+done
 
 part_state="$("${client[@]}" --query "
   SELECT count(), uniqExact(table)
@@ -113,8 +125,7 @@ part_state="$("${client[@]}" --query "
     AND table IN ('events_json', 'events_map', 'events_typed')
   FORMAT TSVRaw")"
 if [[ "${part_state}" != $'3\t3' ]]; then
-  echo "expected one active part per candidate; found: ${part_state}" >&2
-  exit 1
+  fail "expected one active part per candidate after FINAL compaction; found: ${part_state}"
 fi
 
 start="$("${client[@]}" --query "SELECT min(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
