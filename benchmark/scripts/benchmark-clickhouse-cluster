@@ -473,6 +473,8 @@ smoke_cluster() {
 }
 EOF
   date -u +%FT%TZ > "${run_dir}/completed-at"
+  stop_cluster "${shards}" >/dev/null
+  trap - EXIT
   echo "completed" > "${run_dir}/status"
   completed=1
   echo "distributed smoke completed: ${run_dir}"
