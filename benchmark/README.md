@@ -165,3 +165,29 @@ has one compacted part before measurement. It rotates candidate execution order
 and compares 5-minute, 1-hour, 6-hour, and full-day latest-event, time-range,
 service/severity, and dynamic-field fixtures. The ClickHouse-cold policy does
 not clear the OS page cache or ZFS ARC.
+
+## Distributed-cluster simulation
+
+Load one total day across a previously initialized 1-, 2-, or 4-shard native
+cluster, distributed by stable event identity:
+
+```bash
+benchmark/scripts/benchmark-load-distributed-day \
+  2 experiment-014-distributed-day-v1-2s
+```
+
+Run the serial distributed query matrix against that retained topology:
+
+```bash
+benchmark/scripts/benchmark-run-distributed-queries \
+  2 experiment-014-distributed-query-v1-2s
+```
+
+The query runner covers 5-minute, 1-hour, 6-hour, and full-day ranges for tail,
+count, service, dynamic-field, rate, heatmap, and percentile queries. It saves
+coordinator and leaf-local `EXPLAIN indexes = 1` plans, coordinator and leaf
+query-log metrics, result hashes, and host evidence. ClickHouse-cold resets
+ClickHouse-managed caches on every process but does not clear the Linux page
+cache or shared ZFS ARC. The native processes share one host, so this validates
+distributed semantics and fanout behavior rather than production scale-out
+capacity.

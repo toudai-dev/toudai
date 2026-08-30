@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+shards="${1:-}"
+run_id="${2:-}"
+repetitions="${LIGHTHOUSE_DISTRIBUTED_REPETITIONS:-3}"
+cache_mode_spec="${LIGHTHOUSE_DISTRIBUTED_CACHE_MODES:-clickhouse-cold,warm}"
+range_spec="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h}"
+fixture_filter="${LIGHTHOUSE_DISTRIBUTED_FIXTURES:-}"
+expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
+load_run="experiment-014-distributed-day-v1-${shards}s"
+
+if [[ -z "${shards}" || -z "${run_id}" ]]; then
+  echo "usage: $0 SHARDS RUN_ID" >&2
+  exit 2
+fi
+case "${shards}" in
+  1|2|4) ;;
+  *) echo "SHARDS must be 1, 2, or 4" >&2; exit 2 ;;
+esac
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LIGHTHOUSE_DISTRIBUTED_REPETITIONS must be a positive integer" >&2
+  exit 2
+fi
+if [[ "$(cat "${runs_root}/${load_run}/status" 2>/dev/null || true)" != "completed" ]]; then
+  echo "completed distributed load not found: ${runs_root}/${load_run}" >&2
+  exit 1
+fi
+
+run_dir="${runs_root}/${run_id}"
+if [[ -e "${run_dir}" ]]; then
+  echo "run directory already exists: ${run_dir}" >&2
+  exit 1
+fi
+mkdir -p "${run_dir}"/{evidence,plans/coordinator,plans/leaves,queries,results}
+echo "starting" > "${run_dir}/status"
+
+cluster=("${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster")
+completed=0
+cleanup() {
+  local exit_status=$?
+  "${cluster[@]}" stop "${shards}" >/dev/null 2>&1 || true
+  if [[ "${completed}" != "1" ]]; then
+    echo "failed" > "${run_dir}/status"
+    date -u +%FT%TZ > "${run_dir}/failed-at"
+  fi
+  return "${exit_status}"
+}
+trap cleanup EXIT
+
+"${cluster[@]}" start "${shards}"
+client=("${cluster[@]}" client)
+actual_rows="$("${client[@]}" --query "SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw")"
+if [[ "${actual_rows}" != "${expected_rows}" ]]; then
+  echo "expected ${expected_rows} distributed rows; found ${actual_rows}" >&2
+  exit 1
+fi
+
+IFS=',' read -r -a modes <<< "${cache_mode_spec}"
+IFS=',' read -r -a ranges <<< "${range_spec}"
+IFS=',' read -r -a selected_fixtures <<< "${fixture_filter}"
+for mode in "${modes[@]}"; do
+  case "${mode}" in
+    clickhouse-cold|warm) ;;
+    *) echo "unknown cache mode: ${mode}" >&2; exit 2 ;;
+  esac
+done
+range_seconds() {
+  case "$1" in
+    5m) echo 300 ;;
+    1h) echo 3600 ;;
+    6h) echo 21600 ;;
+    24h) echo 86400 ;;
+    *) echo "unknown range: $1" >&2; return 2 ;;
+  esac
+}
+for range_name in "${ranges[@]}"; do
+  range_seconds "${range_name}" >/dev/null
+done
+
+day_end="2026-08-06 04:00:00"
+service="${LIGHTHOUSE_BENCH_SERVICE:-executor}"
+severity="${LIGHTHOUSE_BENCH_SEVERITY:-ERROR}"
+dynamic_value="${LIGHTHOUSE_BENCH_DYNAMIC_VALUE:-event_lifecycle}"
+safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
+query_prefix="lighthouse_${safe_run_id}"
+revision="$(jj log -r @- --no-graph -T 'commit_id')"
+date -u +%FT%TZ > "${run_dir}/started-at"
+
+cat > "${run_dir}/manifest.json" <<EOF
+{
+  "run_id": "${run_id}",
+  "repository_revision": "${revision}",
+  "clickhouse_version": "$("${client[@]}" --query 'SELECT version() FORMAT TSVRaw')",
+  "load_run": "${load_run}",
+  "rows": ${expected_rows},
+  "shards": ${shards},
+  "replicas": 1,
+  "ranges": "${range_spec}",
+  "cache_modes": "${cache_mode_spec}",
+  "repetitions": ${repetitions},
+  "fixture_filter": "${fixture_filter}",
+  "service": "${service}",
+  "severity": "${severity}",
+  "dynamic_value": "${dynamic_value}",
+  "cache_policy": "ClickHouse-managed caches only; Linux page cache and ZFS ARC remain uncontrolled",
+  "execution": "serial"
+}
+EOF
+
+{
+  date -u +%FT%TZ
+  uname -a
+  lscpu
+  free -h
+  df -h "${benchmark_root}"
+  zpool list -v fast-storage
+  "${cluster[@]}" status "${shards}"
+} > "${run_dir}/evidence/host.txt"
+for index in $(seq 1 "${shards}"); do
+  "${cluster[@]}" leaf-client "${index}" --query "
+    SELECT partition, name, rows, bytes_on_disk, marks, level
+    FROM system.parts
+    WHERE active AND database = 'benchmark_distributed' AND table = 'events_local'
+    ORDER BY partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/leaf-${index}-parts.jsonl"
+done
+
+selected_fixture() {
+  local fixture="$1"
+  [[ -z "${fixture_filter}" ]] && return 0
+  local selected
+  for selected in "${selected_fixtures[@]}"; do
+    [[ "${fixture}" == "${selected}" ]] && return 0
+  done
+  return 1
+}
+
+query_args=(
+  --param_service="${service}"
+  --param_severity="${severity}"
+  --param_dynamic_value="${dynamic_value}"
+  --max_execution_time=1800
+  --max_memory_usage=8589934592
+)
+
+drop_caches() {
+  local node index
+  for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
+    if [[ "${node}" == coordinator ]]; then
+      cache_client=("${client[@]}")
+    else
+      index="${node#leaf-}"
+      cache_client=("${cluster[@]}" leaf-client "${index}")
+    fi
+    "${cache_client[@]}" --multiquery --query "
+      SYSTEM DROP MARK CACHE;
+      SYSTEM DROP UNCOMPRESSED CACHE;
+      SYSTEM DROP QUERY CACHE;
+      SYSTEM DROP QUERY CONDITION CACHE;
+      SYSTEM DROP FILESYSTEM CACHE;" >/dev/null
+  done
+}
+
+printf 'query_id\tcache_mode\trange\tfixture\trepetition\twall_ms\tresult_file\tresult_sha256\n' > "${run_dir}/timings.tsv"
+echo "planning" > "${run_dir}/status"
+for range_name in "${ranges[@]}"; do
+  seconds="$(range_seconds "${range_name}")"
+  range_start="$(date -u -d "${day_end} UTC -${seconds} seconds" '+%F %T')"
+  for source_query in "${repo_root}/benchmark/queries/distributed/"*.sql; do
+    fixture="$(basename "${source_query}" .sql)"
+    selected_fixture "${fixture}" || continue
+    rendered="${run_dir}/queries/${range_name}-${fixture}.sql"
+    sed 's|{{table}}|benchmark_distributed.events|g' "${source_query}" > "${rendered}"
+    {
+      echo "EXPLAIN indexes = 1"
+      sed -e 's|{{table}}|benchmark_distributed.events|g' -e '/^FORMAT JSONEachRow;$/d' "${source_query}"
+    } | "${client[@]}" --multiquery --param_start="${range_start}" --param_end="${day_end}" \
+      "${query_args[@]}" > "${run_dir}/plans/coordinator/${range_name}-${fixture}.txt"
+    for index in $(seq 1 "${shards}"); do
+      {
+        echo "EXPLAIN indexes = 1"
+        sed -e 's|{{table}}|benchmark_distributed.events_local|g' -e '/^FORMAT JSONEachRow;$/d' "${source_query}"
+      } | "${cluster[@]}" leaf-client "${index}" --multiquery \
+        --param_start="${range_start}" --param_end="${day_end}" "${query_args[@]}" \
+        > "${run_dir}/plans/leaves/${range_name}-${fixture}-leaf-${index}.txt"
+    done
+  done
+done
+
+echo "querying" > "${run_dir}/status"
+for mode in "${modes[@]}"; do
+  for range_name in "${ranges[@]}"; do
+    seconds="$(range_seconds "${range_name}")"
+    range_start="$(date -u -d "${day_end} UTC -${seconds} seconds" '+%F %T')"
+    for source_query in "${repo_root}/benchmark/queries/distributed/"*.sql; do
+      fixture="$(basename "${source_query}" .sql)"
+      selected_fixture "${fixture}" || continue
+      rendered="${run_dir}/queries/${range_name}-${fixture}.sql"
+      if [[ "${mode}" == warm ]]; then
+        "${client[@]}" --query_id="${query_prefix}_prewarm_${range_name}_${fixture//-/_}" \
+          --param_start="${range_start}" --param_end="${day_end}" "${query_args[@]}" \
+          --queries-file "${rendered}" >/dev/null
+      fi
+      for repetition in $(seq 1 "${repetitions}"); do
+        [[ "${mode}" != clickhouse-cold ]] || drop_caches
+        query_id="${query_prefix}_${mode//-/_}_${range_name}_${fixture//-/_}_${repetition}"
+        result_file="results/${mode}-${range_name}-${fixture}-r${repetition}.jsonl"
+        started_ns="$(date +%s%N)"
+        "${client[@]}" --query_id="${query_id}" \
+          --param_start="${range_start}" --param_end="${day_end}" "${query_args[@]}" \
+          --queries-file "${rendered}" > "${run_dir}/${result_file}"
+        finished_ns="$(date +%s%N)"
+        result_sha256="$(sha256sum "${run_dir}/${result_file}" | cut -d' ' -f1)"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "${query_id}" "${mode}" "${range_name}" "${fixture}" "${repetition}" \
+          "$(((finished_ns - started_ns) / 1000000))" "${result_file}" "${result_sha256}" \
+          >> "${run_dir}/timings.tsv"
+      done
+    done
+  done
+done
+
+python3 - "${run_dir}/timings.tsv" <<'PY'
+import csv
+import sys
+
+rows = list(csv.DictReader(open(sys.argv[1], encoding="utf-8"), delimiter="\t"))
+exact = {"01-recent-tail", "02-time-range-count", "03-service-severity", "04-dynamic-filter", "05-rate-by-service"}
+groups = {}
+for row in rows:
+    if row["fixture"] in exact:
+        groups.setdefault((row["range"], row["fixture"]), set()).add(row["result_sha256"])
+mismatches = [key for key, hashes in groups.items() if len(hashes) != 1]
+if mismatches:
+    raise SystemExit(f"exact result hashes changed between modes or repetitions: {mismatches}")
+PY
+
+for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
+  if [[ "${node}" == coordinator ]]; then
+    log_client=("${client[@]}")
+  else
+    log_client=("${cluster[@]}" leaf-client "${node#leaf-}")
+  fi
+  "${log_client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null
+  "${log_client[@]}" --query "
+    SELECT query_id, initial_query_id, query_duration_ms, read_rows, read_bytes,
+           result_rows, result_bytes, memory_usage,
+           ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us,
+           ProfileEvents['SelectedParts'] AS selected_parts,
+           ProfileEvents['SelectedMarks'] AS selected_marks,
+           ProfileEvents['NetworkSendBytes'] AS network_send_bytes,
+           ProfileEvents['NetworkReceiveBytes'] AS network_receive_bytes
+    FROM system.query_log
+    WHERE type = 'QueryFinish'
+      AND (startsWith(query_id, '${query_prefix}_')
+        OR startsWith(initial_query_id, '${query_prefix}_'))
+    ORDER BY event_time_microseconds FORMAT JSONEachRow" \
+    > "${run_dir}/evidence/${node}-query-metrics.jsonl"
+done
+
+date -u +%FT%TZ > "${run_dir}/completed-at"
+"${cluster[@]}" stop "${shards}" >/dev/null
+trap - EXIT
+echo "completed" > "${run_dir}/status"
+completed=1
+echo "distributed query run completed: ${run_dir}"
