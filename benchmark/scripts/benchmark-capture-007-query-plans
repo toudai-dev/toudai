@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Capture reconstructed Experiment 007 plans from its rebuilt one-day Map table."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_ROOT", "/mnt/fast-storage/lighthouse"))
+RUNS_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_RUNS_ROOT", BENCHMARK_ROOT / "runs"))
+CLIENT = REPO_ROOT / "benchmark/scripts/benchmark-clickhouse"
+HISTORICAL_REVISION = "6e36caa12bc3229d69397ad15f41cb8c2111898e"
+SOURCE_RUN = "experiment-017-rebuild-007-map-v1"
+EXPECTED_VERSION = "26.3.17.110"
+EXPECTED_ROWS = 547_356_173
+PARAMETERS = {
+    "start": "2026-08-05 04:00:00.000024",
+    "end": "2026-08-06 03:59:59.999999",
+    "service": "executor",
+    "severity": "ERROR",
+    "dynamic_low_value": "event_lifecycle",
+    "dynamic_high_value": "306e56de-c041-4b4d-9a62-d59e742bf58b",
+    "caller": "executor-queue",
+    "body_term": "error",
+}
+
+
+def run(command: list[str], *, input_text: str | None = None) -> str:
+    result = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        input=input_text,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"command exited {result.returncode}: {command}")
+    return result.stdout
+
+
+def client(query: str, parameters: dict[str, str] | None = None) -> str:
+    command = [str(CLIENT), "client"]
+    for name, value in (parameters or {}).items():
+        command.append(f"--param_{name}={value}")
+    command.extend(("--query", query))
+    return run(command)
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def historical_file(path: str) -> str:
+    return run(["jj", "file", "show", "-r", HISTORICAL_REVISION, path])
+
+
+def explain(query: str) -> str:
+    executable = re.sub(
+        r"\s+FORMAT\s+JSONEachRow\s*;?\s*$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    return client(f"EXPLAIN indexes = 1 {executable}", PARAMETERS)
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or not re.fullmatch(r"[A-Za-z0-9._-]+", sys.argv[1]):
+        print(f"usage: {Path(sys.argv[0]).name} RUN_ID", file=sys.stderr)
+        return 2
+
+    run_dir = RUNS_ROOT / sys.argv[1]
+    source_dir = RUNS_ROOT / SOURCE_RUN
+    if run_dir.exists():
+        raise RuntimeError(f"run directory already exists: {run_dir}")
+    if (source_dir / "status").read_text().strip() != "completed":
+        raise RuntimeError(f"source rebuild is not complete: {source_dir}")
+
+    (run_dir / "plans").mkdir(parents=True)
+    (run_dir / "evidence/fixtures").mkdir(parents=True)
+    (run_dir / "status").write_text("running\n")
+
+    try:
+        source_manifest_path = source_dir / "manifest.json"
+        source_parts_path = source_dir / "evidence/parts-after-load.jsonl"
+        source_inventory_path = source_dir / "files.tsv"
+        source_manifest = json.loads(source_manifest_path.read_text())
+        version = client("SELECT version() FORMAT TSVRaw").strip()
+        if version != EXPECTED_VERSION or source_manifest["clickhouse_version"] != EXPECTED_VERSION:
+            raise RuntimeError(
+                f"Experiment 007 requires ClickHouse {EXPECTED_VERSION}; "
+                f"source={source_manifest['clickhouse_version']} current={version}"
+            )
+        if source_manifest["dataset"]["rows"] != EXPECTED_ROWS:
+            raise RuntimeError(f"source manifest row mismatch: {source_manifest['dataset']['rows']}")
+
+        table_rows = int(client("SELECT count() FROM benchmark.events_map FORMAT TSVRaw").strip())
+        if table_rows != EXPECTED_ROWS:
+            raise RuntimeError(f"events_map row mismatch: {table_rows}")
+
+        current_parts_text = client(
+            "SELECT table, partition, name, rows, bytes_on_disk, "
+            "data_compressed_bytes, data_uncompressed_bytes, marks, level "
+            "FROM system.parts WHERE active AND database = 'benchmark' "
+            "AND table = 'events_map' ORDER BY partition, name FORMAT JSONEachRow"
+        )
+        (run_dir / "evidence/current-parts.jsonl").write_text(current_parts_text)
+        current_parts = [json.loads(line) for line in current_parts_text.splitlines() if line]
+        ddl = client("SHOW CREATE TABLE benchmark.events_map")
+        (run_dir / "evidence/events_map.sql").write_text(ddl)
+
+        fixture_paths = sorted(
+            path
+            for path in run(
+                ["jj", "file", "list", "-r", HISTORICAL_REVISION]
+            ).splitlines()
+            if re.fullmatch(r"benchmark/queries/(common|map)/.+\.sql", path)
+        )
+        if len(fixture_paths) != 10:
+            raise RuntimeError(f"expected 10 historical fixtures; found {len(fixture_paths)}")
+
+        plan_rows: list[dict[str, Any]] = []
+        for fixture_path in fixture_paths:
+            fixture = Path(fixture_path).stem
+            fixture_group = Path(fixture_path).parent.name
+            historical = historical_file(fixture_path)
+            fixture_evidence = run_dir / "evidence/fixtures" / fixture_group / f"{fixture}.sql"
+            fixture_evidence.parent.mkdir(exist_ok=True)
+            fixture_evidence.write_text(historical)
+            rendered = historical.replace("{{table}}", "benchmark.events_map")
+            query_path = run_dir / "plans" / f"{fixture}.sql"
+            explain_path = run_dir / "plans" / f"{fixture}.explain.txt"
+            query_path.write_text(rendered)
+            explain_path.write_text(explain(rendered))
+            plan_rows.append(
+                {
+                    "fixture": fixture,
+                    "fixture_group": fixture_group,
+                    "classification": "reconstructed-changed-part-layout",
+                    "query_file": str(query_path.relative_to(run_dir)),
+                    "explain_file": str(explain_path.relative_to(run_dir)),
+                    "query_sha256": sha256(query_path),
+                    "explain_sha256": sha256(explain_path),
+                }
+            )
+
+        with (run_dir / "plans.jsonl").open("w", encoding="utf-8") as output:
+            for row in plan_rows:
+                output.write(json.dumps(row, sort_keys=True) + "\n")
+
+        revision = run(
+            ["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"]
+        ).strip()
+        manifest = {
+            "run_id": sys.argv[1],
+            "capture_revision": revision,
+            "historical_fixture_revision": HISTORICAL_REVISION,
+            "clickhouse_version": version,
+            "source_run": SOURCE_RUN,
+            "source_artifacts": {
+                "manifest_sha256": sha256(source_manifest_path),
+                "inventory_sha256": sha256(source_inventory_path),
+                "parts_after_load_sha256": sha256(source_parts_path),
+            },
+            "classification": "reconstructed-changed-part-layout",
+            "classification_reason": (
+                "The exact source inventory, normalized rows, table DDL, fixture revision, "
+                "parameters, and ClickHouse version were reproduced. The original 24 part "
+                "records and checksums no longer exist; the rebuilt table had "
+                f"{len(current_parts)} active parts at capture, so its physical layout "
+                "cannot be classified as the original measured layout."
+            ),
+            "rows": table_rows,
+            "active_parts": len(current_parts),
+            "parameters": PARAMETERS,
+            "plan_count": len(plan_rows),
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        (run_dir / "status").write_text("completed\n")
+    except Exception:
+        (run_dir / "status").write_text("failed\n")
+        raise
+
+    print(f"Experiment 007 plan capture completed: {run_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
