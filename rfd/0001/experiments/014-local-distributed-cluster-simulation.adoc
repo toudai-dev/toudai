@@ -2,8 +2,9 @@
 
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- *Status:* Planned
+- *Status:* Running
 - *Date:* 2026-08-27
+- *Started:* 2026-08-30
 - *Source mutation:* None; the experiment creates disposable shard copies
 
 == Question
@@ -140,4 +141,8 @@ shard behavior before paying for a real cluster.
 
 == Results
 
-Pending.
+Running. The first phase adds a native coordinator/leaf lifecycle harness and
+validates 1-, 2-, and 4-shard protocol fanout, stable event-hash placement,
+result checksums, leaf row skew, query-plan capture, complete-query failure, and
+explicit partial-query behavior with one unavailable leaf. Full-day loading and
+timed workload comparisons begin only after this smoke matrix passes.
