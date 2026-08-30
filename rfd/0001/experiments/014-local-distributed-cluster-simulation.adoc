@@ -141,8 +141,52 @@ shard behavior before paying for a real cluster.
 
 == Results
 
-Running. The first phase adds a native coordinator/leaf lifecycle harness and
-validates 1-, 2-, and 4-shard protocol fanout, stable event-hash placement,
-result checksums, leaf row skew, query-plan capture, complete-query failure, and
-explicit partial-query behavior with one unavailable leaf. Full-day loading and
-timed workload comparisons begin only after this smoke matrix passes.
+=== Protocol smoke matrix
+
+The native-process harness passed sequential 1-, 2-, and 4-shard smoke tests
+with one coordinator, no replicas, explicit CPU affinity, and 100,000 generated
+events. Every topology used
+`cityHash64(tenant_id, dataset, event_id)` for placement and
+`(tenant_id, dataset, timestamp, event_id)` for leaf ordering. Distributed row
+counts and identity checksums matched the generated source exactly.
+
+[options="header",cols="1,3,2,2"]
+|===
+|Shards |Rows per leaf |Largest deviation from mean |Rows with final leaf down
+
+|1
+|100,000
+|0%
+|No result row
+
+|2
+|49,915 · 50,085
+|0.17%
+|49,915
+
+|4
+|25,039 · 25,181 · 24,876 · 24,904
+|0.72%
+|75,096
+|===
+
+With `skip_unavailable_shards = 0`, every topology failed rather than returning
+an apparently complete result after its final leaf stopped. With
+`skip_unavailable_shards = 1`, two and four shards returned the expected
+surviving rows; a one-shard topology returned no result row when no shard was
+available. Restarting the leaf restored the exact 100,000-row result. This
+confirms ClickHouse's mechanism, but also confirms that Lighthouse must add
+expected-shard and participating-shard metadata: the partial values alone do
+not disclose coverage, and zero available shards is not represented as a
+normal zero count.
+
+Coordinator EXPLAIN output showed `ReadFromRemote` and, for multi-shard
+topologies, `MergingAggregated`. It did not expose each leaf's primary-key
+granule selection. The full-day harness must therefore retain coordinator and
+leaf query logs plus leaf-local EXPLAIN output rather than treating the
+coordinator plan as complete index evidence.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-cluster-smoke-v1-{1,2,4}s`.
+All cluster processes stopped after each run. Full-day loading and timed
+workload comparisons are next.
