@@ -2,10 +2,11 @@
 
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- *Status:* Running
+- *Status:* Completed
 - *Started:* 2026-08-29
-- *Source mutation:* None for retained tables; historical candidates may require
-  explicitly recorded disposable rebuilds
+- *Completed:* 2026-08-30
+- *Source mutation:* Retained ten-day and sort-candidate tables were unchanged;
+  disposable historical candidates and isolated `audit008_*` tables were rebuilt
 
 == Question
 
@@ -43,42 +44,38 @@ does not satisfy this audit.
 
 |005
 |One-million-row JSON, Map, and typed-array calibration
-|Candidate tables currently exist but are empty
-|Rebuild from the recorded revision and source selection, then capture every
-fixture and candidate plan
+|Rebuilt from the exact source and historical revision
+|Completed: 30 reconstructed plans
 
 |007
 |One-day raw Map baseline
-|The original `events_map` table is empty; the source Parquet remains
-|Rebuild the exact one-day table and part layout before capturing plans
+|Rebuilt from all 238 recorded Parquet files
+|Completed: 10 reconstructed plans
 
 |008
 |One-day raw, attribute-index, and aggregate-state comparison
-|Acceleration table names now contain the ten-day Experiment 012 data
-|Rebuild isolated one-day tables from the recorded DDL and inputs
+|Rebuilt under isolated `audit008_*` names; ten-day tables retained
+|Completed: 10 reconstructed plans
 
 |011
 |Ten-day raw Map and exact-payload queries
 |`events_map_hot` and `event_payloads` are retained
-|Capture plans using the original revision's fixture text and manifest
-parameters
+|Completed: 11 reconstructed plans
 
 |012
 |Ten-day raw versus configured attribute indexes and aggregate states
 |The exact hot and acceleration tables are retained
-|Capture raw and accelerated plans using the original manifest and fixtures
+|Completed: 10 reconstructed plans
 
 |013
 |One-day sort-key comparison over three retained candidates
 |All three compacted one-part candidates are retained
-|Capture every candidate, fixture, and range plan; correlate with the 288
-measurements
+|Completed: 48 exact-layout plans
 
 |016
 |Date/service and date-leading/service sort keys
 |Both one-part candidates and eight representative full-day plans are retained
-|Capture missing range-specific plans and correlate them with all 192
-measurements
+|Completed: 32 exact-layout plans
 |===
 
 Experiments 000–004, 006, 009, and 010 are data profiling, host/runtime,
@@ -237,11 +234,72 @@ nearby counts of 124,429, 36,309, and 11 after merges. This corroborates the
 access-path interpretation, but the reconstructed numbers are not substituted
 for the original missing plans.
 
-=== Remaining work
+=== Reconstructed calibration evidence
 
-Experiments 005, 007, and 008 require isolated historical rebuilds. Their
-original physical tables or run artifacts are no longer retained, so no plan
-will be labeled exact unless the recorded source, DDL, row counts, checksums,
-part layout, ClickHouse version, query text, and parameters can all be
-reproduced. Experiment 017 remains running until those cases are captured or
-explicitly classified as not reconstructable.
+Experiment 005 was rebuilt from the exact 514,981,183-byte source file at
+fixture revision `e1a2fc8b`, using ClickHouse 26.3.17.110 and one active part per
+candidate. The run at
+`/mnt/fast-storage/lighthouse/runs/experiment-017-rebuild-005-v2` captured 30
+plans. The original part checksums no longer exist, so these are reconstructed
+rather than exact-layout plans.
+
+The plan comparison separates representation cost from index pruning. The
+service/severity fixture used `service_name` in the primary key and retained
+1,656 / 3,134 JSON granules, 935 / 1,760 Map granules, and 949 / 1,786 typed
+granules. Its measured warm medians were correspondingly close at 28–31 ms.
+Every other representative full-range fixture retained every candidate
+granule. Native JSON's 29–60 ms known-path reads versus Map's 192–347 ms and
+typed arrays' 225–480 ms therefore cannot be attributed to different index
+pruning. Conversely, Map field discovery completed in 182–185 ms versus about
+34.8 seconds for JSON despite identical full-granule selection. The original
+read-volume, CPU, and memory evidence identifies physical field representation
+and dynamic-path reconstruction—not a hidden index—as the differentiator.
+
+=== Reconstructed one-day evidence
+
+The Experiment 007 rebuild used the exact 238-file, 115,853,143,188-byte source
+inventory and checksum-validated all 547,356,173 rows. It produced 172.48 GiB,
+compared with the original 172.45 GiB. Background merges left 25 active parts
+at capture rather than the original record's 24; because the original part
+records and checksums are gone, all ten plans at
+`/mnt/fast-storage/lighthouse/runs/experiment-017-rebuild-007-plans-v1` are
+classified as reconstructed changed-layout evidence.
+
+The service/severity primary-key condition retained 98,568 / 288,352 granules
+(34.18%). This directly supports the original 6.21 GiB reads and 1.56–1.62
+second latency. Recent tail, body search, rate, all dynamic Map predicates,
+field discovery, heatmap, and grouped percentiles retained all 288,352
+granules. Their original execution then separates per-column and aggregation
+cost: recent tail read 21.12 GiB in about 5 seconds, dynamic predicates took
+84–88 seconds cold, field discovery took 28 seconds, and heatmap/percentile
+aggregation took 77–95 seconds. No dynamic predicate appears in a primary-key,
+projection, or skipping-index stage.
+
+Experiment 008 was rebuilt from the same one-day Map data under isolated table
+names so the retained ten-day accelerations were not overwritten. Historical
+DDL and insert queries reproduced 322,960,601 attribute rows, 7,983 service
+rollup rows, and 2,341 duration-state rows. Rebuild times of 167.8, 200.1, 7.3,
+and 180.4 seconds closely reproduce the original 165.2, 199.0, 6.8, and 176.0
+seconds. Its ten plans are at
+`/mnt/fast-storage/lighthouse/runs/experiment-017-rebuild-008-v1` and are
+classified as reconstructed isolated-name and changed-layout evidence.
+
+Raw Experiment 008 paths retained all 288,352 Map granules. The generic
+attribute index used binary search over its complete key: `type` retained 7,231
+/ 39,435 granules (18.34%) and `workspace_id` retained 2,036 / 39,435 (5.16%).
+That pruning, plus the narrower derived rows, correlates with the original
+84.50-second to 447 ms and 82.96-second to 205 ms cold improvements. The
+aggregate paths scanned only two granules across the two daily partitions,
+versus 288,352 raw granules, correlating with the measured 5–93 second raw paths
+becoming 8–33 ms. These controls support the configured attribute-index and
+aggregate-state access paths; they do not establish a benefit from indexing
+unobserved fields.
+
+=== Completion
+
+The audit captured 151 plans: 80 exact retained one-part layouts and 71
+explicitly reconstructed layouts. No reconstructed part or granule count is
+substituted for an unavailable original metric. Future SELECT-performance
+experiments, including Experiments 014 and 015, must capture rendered query text
+and `EXPLAIN indexes = 1` evidence during the measured run so this backfill is
+not repeated.
