@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Rebuild isolated Experiment 008 accelerations and capture their query plans."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_ROOT", "/mnt/fast-storage/lighthouse"))
+RUNS_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_RUNS_ROOT", BENCHMARK_ROOT / "runs"))
+CLIENT = REPO_ROOT / "benchmark/scripts/benchmark-clickhouse"
+HISTORICAL_REVISION = "d326c504676e0d2ba8bec9209f0cf7b3412275ca"
+SOURCE_RUN = "experiment-017-rebuild-007-map-v1"
+EXPECTED_VERSION = "26.3.17.110"
+EXPECTED_SOURCE_ROWS = 547_356_173
+TABLE_RENAMES = {
+    "benchmark.accel_attribute_string": "benchmark.audit008_accel_attribute_string",
+    "benchmark.accel_event_count_5m": "benchmark.audit008_accel_event_count_5m",
+    "benchmark.accel_duration_5m": "benchmark.audit008_accel_duration_5m",
+}
+EXPECTED_BUILD_ROWS = {
+    "attribute_type": ("benchmark.audit008_accel_attribute_string", 170_143_336),
+    "attribute_workspace_id": ("benchmark.audit008_accel_attribute_string", 322_960_601),
+    "event_count_service": ("benchmark.audit008_accel_event_count_5m", 7_983),
+    "duration": ("benchmark.audit008_accel_duration_5m", 2_341),
+}
+PARAMETERS = {
+    "start": "2026-08-05 04:00:00.000024",
+    "end": "2026-08-06 03:59:59.999999",
+    "dynamic_low_value": "event_lifecycle",
+    "dynamic_high_value": "306e56de-c041-4b4d-9a62-d59e742bf58b",
+}
+
+
+def run(command: list[str], *, input_text: str | None = None) -> str:
+    result = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        input=input_text,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"command exited {result.returncode}: {command}")
+    return result.stdout
+
+
+def client(
+    query: str,
+    parameters: dict[str, str] | None = None,
+    *,
+    multiquery: bool = False,
+    query_id: str | None = None,
+) -> str:
+    command = [
+        str(CLIENT),
+        "client",
+        "--receive_timeout=86400",
+        "--send_timeout=86400",
+    ]
+    if multiquery:
+        command.append("--multiquery")
+    if query_id:
+        command.append(f"--query_id={query_id}")
+    for name, value in (parameters or {}).items():
+        command.append(f"--param_{name}={value}")
+    command.extend(("--query", query))
+    return run(command)
+
+
+def historical_file(path: str) -> str:
+    return run(["jj", "file", "show", "-r", HISTORICAL_REVISION, path])
+
+
+def isolated(text: str) -> str:
+    for source, target in TABLE_RENAMES.items():
+        text = text.replace(source, target)
+    return text
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def table_rows(table: str) -> int:
+    return int(client(f"SELECT count() FROM {table} FORMAT TSVRaw").strip())
+
+
+def explain(query: str) -> str:
+    executable = re.sub(
+        r"\s+FORMAT\s+JSONEachRow\s*;?\s*$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    return client(f"EXPLAIN indexes = 1 {executable}", PARAMETERS)
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or not re.fullmatch(r"[A-Za-z0-9._-]+", sys.argv[1]):
+        print(f"usage: {Path(sys.argv[0]).name} RUN_ID", file=sys.stderr)
+        return 2
+
+    run_dir = RUNS_ROOT / sys.argv[1]
+    source_dir = RUNS_ROOT / SOURCE_RUN
+    resume = os.environ.get("LIGHTHOUSE_BENCH_RESUME") == "1"
+    if run_dir.exists() and not resume:
+        raise RuntimeError(f"run directory already exists: {run_dir}")
+    if not run_dir.exists() and resume:
+        raise RuntimeError(f"cannot resume missing run directory: {run_dir}")
+    if (source_dir / "status").read_text().strip() != "completed":
+        raise RuntimeError(f"source rebuild is not complete: {source_dir}")
+
+    (run_dir / "plans/raw").mkdir(parents=True, exist_ok=resume)
+    (run_dir / "plans/accelerated").mkdir(parents=True, exist_ok=resume)
+    (run_dir / "evidence/historical").mkdir(parents=True, exist_ok=resume)
+    (run_dir / "evidence/ddl").mkdir(parents=True, exist_ok=resume)
+    (run_dir / "state").mkdir(parents=True, exist_ok=resume)
+    (run_dir / "status").write_text("running\n")
+
+    try:
+        version = client("SELECT version() FORMAT TSVRaw").strip()
+        if version != EXPECTED_VERSION:
+            raise RuntimeError(f"Experiment 008 used {EXPECTED_VERSION}; current is {version}")
+        if table_rows("benchmark.events_map") != EXPECTED_SOURCE_ROWS:
+            raise RuntimeError("the rebuilt one-day events_map row count changed")
+
+        historical_paths = (
+            "benchmark/clickhouse/accelerations.sql",
+            "benchmark/clickhouse/insert-attribute-index.sql",
+            "benchmark/clickhouse/insert-event-count-rollup.sql",
+            "benchmark/clickhouse/insert-duration-rollup.sql",
+        )
+        historical_inputs: dict[str, str] = {}
+        for path in historical_paths:
+            text = historical_file(path)
+            historical_inputs[path] = text
+            evidence_path = run_dir / "evidence/historical" / Path(path).name
+            evidence_path.write_text(text)
+
+        if not resume:
+            existing = client(
+                "SELECT count() FROM system.tables WHERE database = 'benchmark' "
+                "AND startsWith(name, 'audit008_') FORMAT TSVRaw"
+            ).strip()
+            if existing != "0":
+                raise RuntimeError("isolated audit008 tables already exist")
+            client(isolated(historical_inputs[historical_paths[0]]), multiquery=True)
+
+        builds = (
+            (
+                "attribute_type",
+                historical_inputs["benchmark/clickhouse/insert-attribute-index.sql"],
+                {"field_name": "type"},
+            ),
+            (
+                "attribute_workspace_id",
+                historical_inputs["benchmark/clickhouse/insert-attribute-index.sql"],
+                {"field_name": "workspace_id"},
+            ),
+            (
+                "event_count_service",
+                historical_inputs["benchmark/clickhouse/insert-event-count-rollup.sql"],
+                {},
+            ),
+            (
+                "duration",
+                historical_inputs["benchmark/clickhouse/insert-duration-rollup.sql"],
+                {},
+            ),
+        )
+        for phase, query, parameters in builds:
+            marker = run_dir / "state" / phase
+            table, expected_rows = EXPECTED_BUILD_ROWS[phase]
+            if marker.exists():
+                if table_rows(table) != expected_rows:
+                    raise RuntimeError(f"completed {phase} row count changed")
+                continue
+            current_rows = table_rows(table)
+            if current_rows == expected_rows:
+                marker.write_text("recovered\n")
+                continue
+            expected_before = 170_143_336 if phase == "attribute_workspace_id" else 0
+            if current_rows != expected_before:
+                raise RuntimeError(
+                    f"cannot resume partial {phase}: expected {expected_before} rows before build, found {current_rows}"
+                )
+            print(f"building {phase}", flush=True)
+            client(
+                isolated(query),
+                parameters,
+                query_id=f"lighthouse_{sys.argv[1].replace('-', '_')}_build_{phase}",
+            )
+            actual_rows = table_rows(table)
+            if actual_rows != expected_rows:
+                raise RuntimeError(f"{phase} expected {expected_rows} rows; found {actual_rows}")
+            marker.write_text(f"{actual_rows}\n")
+
+        current_parts_text = client(
+            "SELECT table, partition, name, rows, bytes_on_disk, marks, level "
+            "FROM system.parts WHERE active AND database = 'benchmark' "
+            "AND startsWith(table, 'audit008_') ORDER BY table, partition, name FORMAT JSONEachRow"
+        )
+        (run_dir / "evidence/current-parts.jsonl").write_text(current_parts_text)
+        for table in TABLE_RENAMES.values():
+            short_name = table.removeprefix("benchmark.")
+            (run_dir / "evidence/ddl" / f"{short_name}.sql").write_text(
+                client(f"SHOW CREATE TABLE {table}")
+            )
+
+        fixture_paths = sorted(
+            path
+            for path in run(["jj", "file", "list", "-r", HISTORICAL_REVISION]).splitlines()
+            if re.fullmatch(r"benchmark/queries/acceleration/(raw|accelerated)/.+\.sql", path)
+        )
+        if len(fixture_paths) != 10:
+            raise RuntimeError(f"expected 10 historical fixtures; found {len(fixture_paths)}")
+
+        plan_rows: list[dict[str, Any]] = []
+        for fixture_path in fixture_paths:
+            path = Path(fixture_path)
+            execution_path = path.parent.name
+            fixture = path.stem
+            historical = historical_file(fixture_path)
+            (run_dir / "evidence/historical" / f"{execution_path}-{fixture}.sql").write_text(historical)
+            rendered = isolated(historical)
+            query_path = run_dir / "plans" / execution_path / f"{fixture}.sql"
+            explain_path = run_dir / "plans" / execution_path / f"{fixture}.explain.txt"
+            query_path.write_text(rendered)
+            explain_path.write_text(explain(rendered))
+            plan_rows.append(
+                {
+                    "path": execution_path,
+                    "fixture": fixture,
+                    "classification": "reconstructed-isolated-table-names-and-changed-part-layout",
+                    "query_file": str(query_path.relative_to(run_dir)),
+                    "explain_file": str(explain_path.relative_to(run_dir)),
+                    "query_sha256": sha256(query_path),
+                    "explain_sha256": sha256(explain_path),
+                }
+            )
+        with (run_dir / "plans.jsonl").open("w", encoding="utf-8") as output:
+            for row in plan_rows:
+                output.write(json.dumps(row, sort_keys=True) + "\n")
+
+        source_manifest_path = source_dir / "manifest.json"
+        source_parts_path = source_dir / "evidence/parts-after-load.jsonl"
+        revision = run(
+            ["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"]
+        ).strip()
+        manifest: dict[str, Any] = {
+            "run_id": sys.argv[1],
+            "capture_revision": revision,
+            "historical_revision": HISTORICAL_REVISION,
+            "clickhouse_version": version,
+            "source_run": SOURCE_RUN,
+            "source_artifacts": {
+                "manifest_sha256": sha256(source_manifest_path),
+                "parts_after_load_sha256": sha256(source_parts_path),
+            },
+            "classification": "reconstructed-isolated-table-names-and-changed-part-layout",
+            "classification_reason": (
+                "The exact source rows, historical DDL, build queries, fixture queries, "
+                "parameters, and ClickHouse version were reproduced. Acceleration table "
+                "names were changed to preserve retained ten-day data, and neither the "
+                "original source nor acceleration part checksums remain."
+            ),
+            "table_renames": TABLE_RENAMES,
+            "parameters": PARAMETERS,
+            "plan_count": len(plan_rows),
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        (run_dir / "status").write_text("completed\n")
+    except Exception:
+        (run_dir / "status").write_text("failed\n")
+        raise
+
+    print(f"Experiment 008 reconstruction completed: {run_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
