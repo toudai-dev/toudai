@@ -11,8 +11,13 @@ Each record should contain:
 . *Status and date* — planned, running, completed, invalidated, or superseded.
 . *Question* — the specific uncertainty being tested.
 . *Hypothesis* — optional, but written before inspecting results.
-. *Environment* — hardware, ClickHouse version/settings, storage, caches, and
-   relevant repository revision.
+. *Environment* — CPU model, core/thread count and frequency; RAM capacity and
+   configured speed; disk models, topology, filesystem, capacity, and measured
+   throughput/IOPS; ClickHouse version/settings; caches; and relevant repository
+   revision. Include `_local-hardware-baseline.adoc` for runs on the local host
+   and state which storage path the experiment exercised. Never substitute a
+   device's advertised limit for a measured speed or apply a later topology's
+   measurement retroactively.
 . *Dataset* — source, time range, transformation revision, rows, logical input
    bytes, and expected limitations.
 . *Method* — schema revision, load procedure, query fixture IDs, repetitions,

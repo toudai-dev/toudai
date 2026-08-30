@@ -6,6 +6,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Date:* 2026-08-17
 - *Source mutation:* None
 
+:benchmark-storage-context: Query candidates on the pre-Experiment-010 mirrored hot SSD ZFS tier.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Can the versioned query runner produce reproducible, correctness-checked

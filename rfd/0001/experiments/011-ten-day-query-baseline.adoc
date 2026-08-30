@@ -7,6 +7,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Completed:* 2026-08-26T02:09:25Z
 - *Source mutation:* None
 
+:benchmark-storage-context: Normalized events on the striped hot SSD ZFS tier and exact payload lookups on striped bulk HDD ZFS.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 How do representative raw exploration queries and exact payload lookup behave

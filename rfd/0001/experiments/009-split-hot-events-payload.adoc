@@ -6,6 +6,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Date:* 2026-08-19
 - *Source mutation:* None
 
+:benchmark-storage-context: Normalized events on the pre-Experiment-010 mirrored hot SSD ZFS tier and exact payloads on the striped bulk HDD ZFS tier.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Can the exact original payload move to bulk storage while normalized Map events

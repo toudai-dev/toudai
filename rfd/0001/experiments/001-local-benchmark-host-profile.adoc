@@ -4,8 +4,13 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
 - *Status:* Completed
 - *Date:* 2026-08-16
+- *Measured storage baseline added:* 2026-08-30
 - *Data mutation:* Removed abandoned DuckDB spill files created during corpus
   profiling; no source corpus or pool data was changed
+
+:benchmark-storage-context: Topology inspection covered the OS NVMe, mirrored hot SSD pool, and striped bulk HDD pool; the 2026-08-30 speed baseline used the later striped hot SSD topology.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
 
 == Question
 
@@ -24,7 +29,8 @@ parts, and temporary files?
 
 == Method
 
-The host was inspected without running an I/O benchmark. Commands included:
+The initial 2026-08-16 host inspection did not run an I/O benchmark. Commands
+included:
 
 [source,bash]
 ----
@@ -40,8 +46,10 @@ docker system df
 clickhouse local --version
 ----
 
-No `fio` or ClickHouse load test was run, so this record describes capacity and
-topology rather than measured throughput or latency.
+No `fio` or ClickHouse load test was run on 2026-08-16, so the original record
+describes capacity and topology rather than measured throughput or latency. The
+later, reproducible 2026-08-30 speed baseline is included above; it does not
+reconstruct the destroyed mirrored hot-pool performance.
 
 == Results
 
@@ -270,8 +278,8 @@ read-only topology inspection.
   commands.
 - Create quota-limited ZFS child datasets after explicit approval for host
   storage changes.
-- Measure sequential and random I/O separately on each target before loading
-  ClickHouse.
+- Repeat storage measurements when device topology, filesystem properties, or
+  production hardware changes.
 - Run a small load calibration to estimate physical bytes per logical TB before
   committing to the full 1 TB bakeoff.
 - Record the final native-versus-container choice as an architecture decision

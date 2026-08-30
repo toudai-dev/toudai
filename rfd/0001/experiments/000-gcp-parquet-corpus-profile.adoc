@@ -6,6 +6,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Date:* 2026-08-16
 - *Data mutation:* None; all commands were read-only
 
+:benchmark-storage-context: Parquet corpus reads from the striped bulk HDD ZFS tier; no ClickHouse serving table was loaded.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 What volume, event-time coverage, schema shape, and approximate logical JSON

@@ -7,6 +7,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Completed:* 2026-08-29T04:37:04Z
 - *Source mutation:* None; the experiment creates two disposable candidates
 
+:benchmark-storage-context: Source and date/service sort-key candidate tables on the striped hot SSD ZFS tier.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 What are the measured storage and query characteristics of placing

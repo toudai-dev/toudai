@@ -6,6 +6,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Started:* 2026-08-16
 - *Source mutation:* None
 
+:benchmark-storage-context: Parquet source reads from bulk HDD ZFS and calibration ClickHouse data on the pre-Experiment-010 mirrored hot SSD ZFS tier.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 What deterministic transformation should the schema bakeoff use to turn the

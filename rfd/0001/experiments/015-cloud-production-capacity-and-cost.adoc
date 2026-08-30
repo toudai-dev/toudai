@@ -7,6 +7,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *External mutation:* Requires separate approval before provisioning cloud
   infrastructure, uploading data, or incurring cost
 
+:benchmark-storage-context: The local striped hot SSD and bulk HDD tiers are the reference baseline only; every cloud run must capture its own equivalent hardware and speed evidence.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Which cloud or dedicated-host deployment meets Lighthouse's ingestion,

@@ -7,6 +7,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Data mutation:* Created and removed a temporary smoke directory on
   `fast-storage`; no source corpus data was changed
 
+:benchmark-storage-context: Temporary ClickHouse data on the pre-Experiment-010 mirrored hot SSD ZFS tier.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Can the Nix-pinned ClickHouse server run as an isolated unprivileged process with

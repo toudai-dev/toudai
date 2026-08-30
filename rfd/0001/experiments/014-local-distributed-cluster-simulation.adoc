@@ -7,6 +7,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Started:* 2026-08-30
 - *Source mutation:* None; the experiment creates disposable shard copies
 
+:benchmark-storage-context: All simulated coordinator and leaf processes share the striped hot SSD ZFS tier, CPU socket, memory channels, and ZFS ARC.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Can Lighthouse use ClickHouse's standard `Distributed` engine with stable

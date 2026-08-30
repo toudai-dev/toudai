@@ -6,6 +6,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Started:* 2026-08-17T01:54:44Z
 - *Completed:* 2026-08-18T19:43:56Z
 
+:benchmark-storage-context: Parquet source reads from bulk HDD ZFS and ClickHouse parts temporarily placed on the OS Samsung SSD 980 NVMe.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Can the Map and native JSON event layouts ingest and retain one natural,

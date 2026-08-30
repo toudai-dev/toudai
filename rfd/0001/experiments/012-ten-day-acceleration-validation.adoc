@@ -7,6 +7,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Completed:* 2026-08-26T11:56:06Z
 - *Source mutation:* None; the experiment creates disposable derived tables
 
+:benchmark-storage-context: Raw events and derived acceleration tables on the striped hot SSD ZFS tier.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Do the bounded tenant acceleration paths selected at one day preserve their

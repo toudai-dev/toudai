@@ -8,6 +8,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Source mutation:* Retained ten-day and sort-candidate tables were unchanged;
   disposable historical candidates and isolated `audit008_*` tables were rebuilt
 
+:benchmark-storage-context: Retained and reconstructed ClickHouse tables on the striped hot SSD ZFS tier, with retained exact payloads on bulk HDD ZFS.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Which ClickHouse indexes and key conditions were actually available to every

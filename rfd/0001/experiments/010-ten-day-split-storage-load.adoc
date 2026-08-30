@@ -6,6 +6,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Started:* 2026-08-19T10:32:50Z
 - *Completed:* 2026-08-25T11:49:20Z
 
+:benchmark-storage-context: Normalized events on the striped hot SSD ZFS tier, with Parquet source, staging, and exact payloads on striped bulk HDD ZFS.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
 == Question
 
 Can one ClickHouse node retain approximately ten logical terabytes of natural
