@@ -192,5 +192,123 @@ coordinator plan as complete index evidence.
 
 Artifacts are stored under
 `/mnt/fast-storage/lighthouse/runs/experiment-014-cluster-smoke-v1-{1,2,4}s`.
-All cluster processes stopped after each run. Full-day loading and timed
-workload comparisons are next.
+All cluster processes stopped after each run.
+
+=== One- and two-shard full-day loads
+
+The first two topologies each loaded the same 547,356,173-row natural day
+through 24 checksum-validated hourly windows. Distributed row counts and
+`sum(sipHash64(event_id, timestamp))` matched the source exactly.
+
+[options="header",cols="1,2,2,2,3"]
+|===
+|Shards |Summed load wall time |Physical bytes |Active parts |Rows per leaf
+
+|1
+|64.4 minutes
+|142,418,425,474 (132.6 GiB)
+|44
+|547,356,173
+
+|2
+|78.0 minutes
+|154,835,103,954 (144.2 GiB)
+|54
+|273,668,661 · 273,687,512
+|===
+
+The two-shard placement differs from an exact 50/50 split by only 18,851 rows,
+or 0.0034% of the total corpus. Its 21% slower load and 8.7% larger physical
+footprint are local-host outcomes: both leaves contend for the same CPU,
+memory, and SSDs, and retained different part counts. They are not evidence
+that a two-node production cluster would ingest more slowly or consume the same
+extra space after equivalent compaction.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-distributed-day-v1-{1,2}s`.
+
+=== One- and two-shard raw query matrix
+
+Both topologies completed 168 serial measurements: seven fixtures, four bounded
+time ranges, ClickHouse-cold and warm modes, and three repetitions. The runner
+retained a coordinator and every leaf's `EXPLAIN indexes = 1` plan, query-log
+CPU, memory, rows, bytes, marks, and network counters. ClickHouse-cold resets
+ClickHouse-managed caches on every process but not Linux page cache or the
+shared ZFS ARC.
+
+Selected full-day medians are:
+
+[options="header",cols="2,2,2,2,2,2"]
+|===
+|Fixture |1-shard cold |2-shard cold |2s/1s |1-shard warm |2-shard warm
+
+|Recent tail
+|365 ms
+|473 ms
+|1.30
+|340 ms
+|291 ms
+
+|Time-range count
+|9.01 s
+|7.00 s
+|0.78
+|8.20 s
+|5.21 s
+
+|Service/severity
+|11.60 s
+|8.53 s
+|0.73
+|10.85 s
+|6.60 s
+
+|Dynamic `Map` filter
+|230.75 s
+|224.41 s
+|0.97
+|45.20 s
+|56.52 s
+
+|Rate by service
+|14.30 s
+|9.78 s
+|0.68
+|12.99 s
+|7.90 s
+
+|Duration heatmap
+|197.83 s
+|176.27 s
+|0.89
+|196.17 s
+|127.84 s
+
+|Percentiles by caller
+|211.16 s
+|138.65 s
+|0.66
+|205.86 s
+|134.14 s
+|===
+
+All exact fixture hashes match across cache modes, repetitions, and topologies.
+Approximate histogram and t-digest byte encodings can differ with merge order,
+so correctness uses stable anchors instead: both topologies report 133,820,058
+heatmap samples with a duration sum of 581,514,702,978,425, and the top-100
+percentile output reports 63,567,432 samples with a duration sum of
+581,503,123,071,702 across nine returned caller groups.
+
+The result separates useful parallelism from fixed fanout cost. Two local
+leaves reduced most scan-and-aggregate warm latencies by 35-39%, despite sharing
+one machine. Recent-tail queries gained little or regressed because the
+coordinator must contact and merge both leaves. The full-day dynamic Map filter
+did not improve reliably and every raw full-day distribution remains far above
+the interactive target. Standard distributed partial aggregation works, but it
+does not replace the tenant attribute index and materialized aggregate states
+validated by Experiments 008 and 012.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-distributed-query-v1-{1,2}s`.
+The next phase builds those accelerations on each leaf, validates distributed
+merge semantics and latency, then repeats the retained workload on four shards.
