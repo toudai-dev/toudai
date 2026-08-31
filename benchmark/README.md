@@ -190,4 +190,7 @@ query-log metrics, result hashes, and host evidence. ClickHouse-cold resets
 ClickHouse-managed caches on every process but does not clear the Linux page
 cache or shared ZFS ARC. The native processes share one host, so this validates
 distributed semantics and fanout behavior rather than production scale-out
-capacity.
+capacity. New runs also sample cumulative CPU, block-device, memory, CPU
+frequency, and load counters once per second under `evidence/host-samples` so
+device utilization, queueing, iowait, and throttling can be calculated without
+inferring them from ClickHouse latency.

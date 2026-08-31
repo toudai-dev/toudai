@@ -44,8 +44,17 @@ echo "starting" > "${run_dir}/status"
 
 cluster=("${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster")
 completed=0
+sampler_pid=""
+stop_sampler() {
+  if [[ -n "${sampler_pid}" ]] && kill -0 "${sampler_pid}" 2>/dev/null; then
+    kill "${sampler_pid}"
+    wait "${sampler_pid}" 2>/dev/null || true
+  fi
+  sampler_pid=""
+}
 cleanup() {
   local exit_status=$?
+  stop_sampler
   "${cluster[@]}" stop "${shards}" >/dev/null 2>&1 || true
   if [[ "${completed}" != "1" ]]; then
     echo "failed" > "${run_dir}/status"
@@ -131,6 +140,8 @@ for index in $(seq 1 "${shards}"); do
     WHERE active AND database = 'benchmark_distributed' AND table = 'events_local'
     ORDER BY partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/leaf-${index}-parts.jsonl"
 done
+"${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
+sampler_pid=$!
 
 selected_fixture() {
   local fixture="$1"
@@ -265,6 +276,7 @@ for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
     > "${run_dir}/evidence/${node}-query-metrics.jsonl"
 done
 
+stop_sampler
 date -u +%FT%TZ > "${run_dir}/completed-at"
 "${cluster[@]}" stop "${shards}" >/dev/null
 trap - EXIT

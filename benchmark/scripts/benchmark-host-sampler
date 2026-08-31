@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_dir="${1:-}"
+interval="${LIGHTHOUSE_HOST_SAMPLE_INTERVAL:-1}"
+
+if [[ -z "${output_dir}" ]]; then
+  echo "usage: $0 OUTPUT_DIR" >&2
+  exit 2
+fi
+if [[ ! "${interval}" =~ ^[0-9]+([.][0-9]+)?$ ]] || [[ "${interval}" == "0" ]]; then
+  echo "LIGHTHOUSE_HOST_SAMPLE_INTERVAL must be a positive number" >&2
+  exit 2
+fi
+
+mkdir -p "${output_dir}"
+printf 'timestamp_ns\tuser\tnice\tsystem\tidle\tiowait\tirq\tsoftirq\tsteal\tguest\tguest_nice\n' \
+  > "${output_dir}/cpu.tsv"
+printf 'timestamp_ns\tmajor\tminor\tdevice\treads_completed\treads_merged\tsectors_read\tread_ms\twrites_completed\twrites_merged\tsectors_written\twrite_ms\tios_in_progress\tio_ms\tweighted_io_ms\tdiscards_completed\tdiscards_merged\tsectors_discarded\tdiscard_ms\tflushes_completed\tflush_ms\n' \
+  > "${output_dir}/disks.tsv"
+printf 'timestamp_ns\tmem_total_kib\tmem_available_kib\tdirty_kib\twriteback_kib\n' \
+  > "${output_dir}/memory.tsv"
+printf 'timestamp_ns\tcpu\tscaling_cur_freq_khz\n' \
+  > "${output_dir}/frequency.tsv"
+printf 'timestamp_ns\tload_1m\tload_5m\tload_15m\trunnable_total\n' \
+  > "${output_dir}/load.tsv"
+
+mapfile -t devices < <(lsblk -dn -o NAME,TYPE | awk '$2 == "disk" { print $1 }')
+if [[ "${#devices[@]}" == "0" ]]; then
+  echo "no physical block devices found" >&2
+  exit 1
+fi
+
+contains_device() {
+  local candidate="$1"
+  local device
+  for device in "${devices[@]}"; do
+    [[ "${candidate}" == "${device}" ]] && return 0
+  done
+  return 1
+}
+
+running=1
+trap 'running=0' INT TERM
+while [[ "${running}" == "1" ]]; do
+  timestamp_ns="$(date +%s%N)"
+
+  read -r _ user nice system idle iowait irq softirq steal guest guest_nice _ < /proc/stat
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "${timestamp_ns}" "${user}" "${nice}" "${system}" "${idle}" "${iowait}" \
+    "${irq}" "${softirq}" "${steal}" "${guest}" "${guest_nice}" \
+    >> "${output_dir}/cpu.tsv"
+
+  while read -r major minor device reads_completed reads_merged sectors_read read_ms \
+    writes_completed writes_merged sectors_written write_ms ios_in_progress io_ms \
+    weighted_io_ms discards_completed discards_merged sectors_discarded discard_ms \
+    flushes_completed flush_ms _; do
+    contains_device "${device}" || continue
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "${timestamp_ns}" "${major}" "${minor}" "${device}" "${reads_completed}" \
+      "${reads_merged}" "${sectors_read}" "${read_ms}" "${writes_completed}" \
+      "${writes_merged}" "${sectors_written}" "${write_ms}" "${ios_in_progress}" \
+      "${io_ms}" "${weighted_io_ms}" "${discards_completed:-0}" \
+      "${discards_merged:-0}" "${sectors_discarded:-0}" "${discard_ms:-0}" \
+      "${flushes_completed:-0}" "${flush_ms:-0}" >> "${output_dir}/disks.tsv"
+  done < /proc/diskstats
+
+  awk -v timestamp_ns="${timestamp_ns}" '
+    /^MemTotal:/ { total = $2 }
+    /^MemAvailable:/ { available = $2 }
+    /^Dirty:/ { dirty = $2 }
+    /^Writeback:/ { writeback = $2 }
+    END { printf "%s\t%s\t%s\t%s\t%s\n", timestamp_ns, total, available, dirty, writeback }
+  ' /proc/meminfo >> "${output_dir}/memory.tsv"
+
+  for frequency_path in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq; do
+    [[ -r "${frequency_path}" ]] || continue
+    cpu="$(basename "$(dirname "$(dirname "${frequency_path}")")")"
+    printf '%s\t%s\t%s\n' "${timestamp_ns}" "${cpu}" "$(cat "${frequency_path}")" \
+      >> "${output_dir}/frequency.tsv"
+  done
+
+  read -r load_1m load_5m load_15m runnable_total _ < /proc/loadavg
+  printf '%s\t%s\t%s\t%s\t%s\n' "${timestamp_ns}" "${load_1m}" "${load_5m}" \
+    "${load_15m}" "${runnable_total}" >> "${output_dir}/load.tsv"
+
+  sleep "${interval}" &
+  wait $! || true
+done
