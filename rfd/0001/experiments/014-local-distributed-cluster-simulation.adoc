@@ -343,3 +343,123 @@ Artifacts are stored under
 `/mnt/fast-storage/lighthouse/runs/experiment-014-distributed-query-v1-{1,2}s`.
 The next phase builds those accelerations on each leaf, validates distributed
 merge semantics and latency, then repeats the retained workload on four shards.
+
+=== Distributed acceleration
+
+The one- and two-shard topologies built the same configured `type` and
+`workspace_id` attribute rows, service-count rollup, and duration aggregate
+states as Experiments 008 and 012. Each leaf built from its local event subset;
+two-shard phases ran concurrently across both leaves. Distributed queries then
+merged matching index rows or aggregate states at the coordinator.
+
+[options="header",cols="2,2,2,2"]
+|===
+|Build phase |1-shard wall |2-shard wall |2s/1s
+
+|`type` attribute index
+|177.1 s
+|148.2 s
+|0.84
+
+|`workspace_id` attribute index
+|207.3 s
+|160.6 s
+|0.77
+
+|Service five-minute counts
+|9.4 s
+|8.4 s
+|0.89
+
+|Duration states
+|189.2 s
+|186.5 s
+|0.99
+
+|*Total*
+|*9.72 minutes*
+|*8.40 minutes*
+|*0.86*
+|===
+
+Parallel leaves improved the attribute backfills by 16-23%, but the duration
+state build did not improve on the shared host. The one-shard derived tables
+used 3,283,218,153 bytes (3.06 GiB); two shards used 3,499,112,554 bytes
+(3.26 GiB). Attribute rows account for effectively all storage. Two leaves
+retain separate partial count and duration rows for the same logical group and
+more unmerged parts, explaining the small physical amplification; distributed
+queries merge those rows exactly.
+
+Both topologies completed 120 accelerated measurements across four time ranges,
+two cache modes, and three repetitions. All 120 correctness checks per topology
+passed. Exact index and rate outputs matched raw queries byte-for-byte. Heatmap
+and percentile sample-count and duration-sum anchors matched the raw topology;
+approximate state encoding was not required to be byte-identical.
+
+[options="header",cols="2,2,2,2,2,2"]
+|===
+|Full-day fixture |1s raw |1s accelerated warm |Speedup |2s raw |2s accelerated warm
+
+|Dynamic `type`
+|45.20 s
+|1.122 s
+|40×
+|56.52 s
+|706 ms
+
+|Dynamic `workspace_id`
+|184.51 s
+|439 ms
+|420×
+|121.57 s
+|304 ms
+
+|Rate by service
+|12.99 s
+|77 ms
+|169×
+|7.90 s
+|81 ms
+
+|Duration heatmap
+|196.17 s
+|75 ms
+|2,616×
+|127.84 s
+|74 ms
+
+|Percentiles by caller
+|205.86 s
+|98 ms
+|2,101×
+|134.14 s
+|100 ms
+|===
+
+Raw values are controlled warm medians except `workspace_id`, which was a
+single correctness-validation scan after progressively wider shorter ranges.
+Its speedup is an observed comparison, not a controlled cache-mode ratio.
+
+Once leaf work falls below roughly 100 ms, adding a second local shard does not
+improve dashboard aggregate latency because fixed network-protocol, fanout, and
+coordinator merge costs dominate. Attribute indexes still benefit because their
+matching event-ID rows require more leaf work. This supports standard
+`Distributed` merge behavior for shared acceleration tables without requiring a
+custom query engine.
+
+The new one-second host sampler also resolves the earlier disk-saturation
+ambiguity for these runs. Across the complete two-shard acceleration run, host
+CPU averaged 55.6% busy (75.4% p95) and iowait averaged 0.9% (2.9% p95). The
+Samsung 870 QVO averaged 61.9% block-device utilization, reached 95.4% at p95,
+and averaged a queue depth of 2.01; the 870 EVO averaged 48.3% utilization,
+75.0% p95, and a queue depth of 1.34. The QVO was therefore near saturation
+during high-load intervals, but neither CPU nor both striped devices were
+sustained at saturation over the run. Unequal device behavior is a material
+limit of this local stripe.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-distributed-acceleration-v1-{1,2}s`.
+Each contains 600 or more host snapshots, coordinator and leaf query metrics,
+and 40 or 60 retained EXPLAIN plans. The next step is to remove the disposable
+one- and two-shard physical copies, load four shards with continuous host
+sampling, and repeat both raw and accelerated matrices.
