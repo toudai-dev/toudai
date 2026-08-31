@@ -66,8 +66,17 @@ echo "starting" > "${run_dir}/status"
 cluster=("${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster")
 source_client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 completed=0
+sampler_pid=""
+stop_sampler() {
+  if [[ -n "${sampler_pid}" ]] && kill -0 "${sampler_pid}" 2>/dev/null; then
+    kill "${sampler_pid}"
+    wait "${sampler_pid}" 2>/dev/null || true
+  fi
+  sampler_pid=""
+}
 cleanup() {
   local exit_status=$?
+  stop_sampler
   "${cluster[@]}" stop "${shards}" >/dev/null 2>&1 || true
   if [[ "${completed}" != "1" ]]; then
     echo "failed" > "${run_dir}/status"
@@ -78,6 +87,8 @@ cleanup() {
 trap cleanup EXIT
 
 "${cluster[@]}" start "${shards}"
+"${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
+sampler_pid=$!
 
 local_schema="
   CREATE DATABASE IF NOT EXISTS benchmark_distributed;
@@ -295,6 +306,7 @@ cat > "${run_dir}/manifest.json" <<EOF
 EOF
 
 date -u +%FT%TZ > "${run_dir}/completed-at"
+stop_sampler
 "${cluster[@]}" stop "${shards}" >/dev/null
 trap - EXIT
 echo "completed" > "${run_dir}/status"
