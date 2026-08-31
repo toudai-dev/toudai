@@ -299,6 +299,37 @@ heatmap samples with a duration sum of 581,514,702,978,425, and the top-100
 percentile output reports 63,567,432 samples with a duration sum of
 581,503,123,071,702 across nine returned caller groups.
 
+=== CPU utilization interpretation
+
+Leaf query-log CPU counters do not show sustained CPU saturation. The one-shard
+topology allowed eight query threads and the two-shard topology allowed five per
+leaf, ten total. Median summed leaf CPU seconds per wall second for full-day
+queries were only 1.28-1.83 on one shard and 1.65-3.50 on two shards. The
+coordinator used less than 0.01 CPU seconds per wall second for the measured
+full-day heatmap, so coordinator CPU was not the limiting resource.
+
+For the representative two-shard warm full-day heatmap, each leaf ran for
+approximately 124-129 seconds, consumed 187-191 CPU seconds, and spent a summed
+33 seconds in ClickHouse's disk-read timing while reading approximately 57 GB
+through file descriptors. Together the leaves averaged 2.96 CPU cores during
+the 127.84-second coordinator wall time, well below their ten-thread ceiling.
+The speedup came from increasing useful parallel work, not from relieving a
+previously saturated CPU.
+
+The dynamic Map filter's warm regression also does not correlate with CPU
+saturation. Two shards averaged 2.26 CPU seconds per wall second versus 1.54 on
+one shard, but selected 36,794 marks versus 26,364 and read more data due to the
+different uncompacted part layouts. Part layout and shared storage/cache effects
+therefore confound that comparison.
+
+These are per-query ClickHouse counters, not a host-wide sampled CPU trace. They
+can establish that the queries did not sustain their available query-thread
+capacity, but cannot exclude brief core saturation, frequency throttling, ZFS
+work outside ClickHouse's query CPU counter, or contention from another host
+process. The four-shard and cloud experiments should capture `mpstat` or
+equivalent host-level CPU, iowait, frequency, and per-device utilization beside
+the query logs.
+
 The result separates useful parallelism from fixed fanout cost. Two local
 leaves reduced most scan-and-aggregate warm latencies by 35-39%, despite sharing
 one machine. Recent-tail queries gained little or regressed because the
