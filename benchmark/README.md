@@ -194,3 +194,18 @@ capacity. New runs also sample cumulative CPU, block-device, memory, CPU
 frequency, and load counters once per second under `evidence/host-samples` so
 device utilization, queueing, iowait, and throttling can be calculated without
 inferring them from ClickHouse latency.
+
+Build the configured attribute indexes and five-minute aggregate states on each
+leaf, then run the accelerated distributed query matrix:
+
+```bash
+LIGHTHOUSE_BENCH_RESET=1 \
+benchmark/scripts/benchmark-run-distributed-accelerations \
+  2 experiment-014-distributed-acceleration-v1-2s
+```
+
+The build runs each phase concurrently on all leaves, preserving per-leaf query
+metrics and host samples. Accelerated exact results are checked against the
+matching retained raw topology; heatmap and percentile results compare exact
+sample-count and duration-sum anchors because histogram and t-digest byte
+encodings can vary with distributed merge order.
