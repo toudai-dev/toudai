@@ -202,13 +202,28 @@ remain to be verified.
   Dashboard aggregate states answered rate, heatmap, and percentile fixtures in
   75 to 124 ms, improving raw execution by 448x to 13,315x. All 30 correctness
   anchor checks passed.
+* link:experiments/013-event-sort-key-comparison.adoc[Experiment 013] selected
+  `(tenant_id, dataset, timestamp, event_id)` as the base event ordering. It
+  improved full-day tail latency to 124 ms and avoids coupling the base layout
+  to one service dimension, at a measured 40.1% storage cost versus the prior
+  hour/service ordering.
+* link:experiments/014-local-distributed-cluster-simulation.adoc[Experiment 014]
+  validated exact standard ClickHouse `Distributed` fanout over one, two, and
+  four local shards with stable event-identity hashing. Four-shard placement
+  deviated at most 0.0058% from the mean. Raw full-day scans showed diminishing
+  returns and dynamic `Map` filtering regressed to 81.5 seconds, while shared
+  attribute indexes answered in 258-550 ms and distributed dashboard aggregate
+  states remained at 78-104 ms. Host sampling showed the four-process load was
+  constrained by shared CPU and an asymmetric SSD stripe, so this is semantic
+  and relative-fanout evidence rather than production capacity.
 
 These results support the split `Map`-based serving baseline and demonstrate
 that ten-day retained capacity fits the current host. They also reject broad raw
 `Map` scans as an interactive path and require bounded indexes, metadata
-catalogs, and mergeable aggregate states with raw fallback. They do not yet
-prove sustained production ingestion, mixed concurrency, cluster fanout,
-cold-tier aggregate routing, or the 100 TB architecture.
+catalogs, and mergeable aggregate states with raw fallback. Standard
+`Distributed` fanout is now validated locally; sustained production ingestion,
+mixed concurrency, replicas and recovery, independent-node capacity, cold-tier
+aggregate routing, and the 100 TB architecture remain unproven.
 
 == Privacy and operations
 

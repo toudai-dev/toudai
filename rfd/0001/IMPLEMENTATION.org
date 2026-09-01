@@ -755,10 +755,12 @@ criterion.
 - [ ] Run the mixed-concurrency workload.
 - [ ] Validate dashboard isolation from exploratory scans.
 - [ ] Measure query performance during merges and after restart.
-- [ ] Build a local native multi-instance ClickHouse harness and compare
-  single-node, two-shard, and four-shard fanout, skew, coordinator work,
-  concurrency, cancellation, and unavailable-shard semantics over one natural
-  day before the real 100 TB cluster validation.
+- [X] Build a local native multi-instance ClickHouse harness and compare
+  one-, two-, and four-shard fanout, placement skew, coordinator work,
+  acceleration behavior, and unavailable-shard semantics over one natural day.
+- [ ] Run synthetic multi-tenant concurrency, dashboard/raw workload isolation,
+  and slow-leaf cancellation on independent hosts; the shared local CPU and SSD
+  stripe reached their limits before those profiles could represent scale-out.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, then run
   10 TB scaling, replicated failure-domain, sustained-ingestion, failure, and
   24-to-72-hour soak tests only on finalists; compare full infrastructure,

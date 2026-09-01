@@ -97,7 +97,7 @@ conditions. Add a new run or record and link the relationship.
 |link:013-event-sort-key-comparison.adoc[Event sort-key comparison]
 
 |014
-|Running
+|Completed
 |link:014-local-distributed-cluster-simulation.adoc[Local distributed-cluster simulation]
 
 |015
