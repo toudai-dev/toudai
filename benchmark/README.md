@@ -9,7 +9,7 @@ runtime state below `LIGHTHOUSE_BENCH_ROOT`.
 Create quota-limited ZFS child datasets:
 
 ```bash
-scripts/benchmark-storage-setup
+benchmark/scripts/benchmark-storage-setup
 ```
 
 The command requires `sudo` because it creates and configures ZFS datasets. It
@@ -26,11 +26,11 @@ initial baseline. The setup script is idempotent and reasserts these properties.
 ## Server lifecycle
 
 ```bash
-scripts/benchmark-clickhouse prepare
-scripts/benchmark-clickhouse start
-scripts/benchmark-clickhouse status
-scripts/benchmark-clickhouse client --query 'SELECT version()'
-scripts/benchmark-clickhouse stop
+benchmark/scripts/benchmark-clickhouse prepare
+benchmark/scripts/benchmark-clickhouse start
+benchmark/scripts/benchmark-clickhouse status
+benchmark/scripts/benchmark-clickhouse client --query 'SELECT version()'
+benchmark/scripts/benchmark-clickhouse stop
 ```
 
 Set `LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH` when a capacity experiment needs a
@@ -41,7 +41,7 @@ moved to `os_overflow`.
 Run the lifecycle and write smoke test with:
 
 ```bash
-scripts/benchmark-clickhouse smoke
+benchmark/scripts/benchmark-clickhouse smoke
 ```
 
 ## GCP Parquet calibration load
@@ -49,8 +49,8 @@ scripts/benchmark-clickhouse smoke
 With the server running, load a bounded sample into the three schema candidates:
 
 ```bash
-scripts/benchmark-clickhouse start
-scripts/benchmark-load-gcp \
+benchmark/scripts/benchmark-clickhouse start
+benchmark/scripts/benchmark-load-gcp \
   /mnt/storage/lighthouse/2026-08-01/compact-0000.parquet 10000
 ```
 
@@ -59,7 +59,7 @@ attribute keys are not interpreted as nested JSON paths. It refuses to append
 to non-empty calibration tables. To deliberately replace a prior run:
 
 ```bash
-LIGHTHOUSE_BENCH_RESET=1 scripts/benchmark-load-gcp \
+LIGHTHOUSE_BENCH_RESET=1 benchmark/scripts/benchmark-load-gcp \
   /mnt/storage/lighthouse/2026-08-01/compact-0000.parquet 10000
 ```
 
@@ -73,9 +73,9 @@ pending.
 Run the versioned query fixtures against all populated candidates:
 
 ```bash
-nix develop --command scripts/benchmark-clickhouse start
-nix develop --command scripts/benchmark-run-queries experiment-005-smoke
-nix develop --command scripts/benchmark-clickhouse stop
+nix develop --command benchmark/scripts/benchmark-clickhouse start
+nix develop --command benchmark/scripts/benchmark-run-queries experiment-005-smoke
+nix develop --command benchmark/scripts/benchmark-clickhouse stop
 ```
 
 By default, each fixture runs three times in both `clickhouse-cold` and `warm`
@@ -89,7 +89,7 @@ Useful overrides:
 LIGHTHOUSE_BENCH_REPETITIONS=1 \
 LIGHTHOUSE_BENCH_CACHE_MODES=warm \
 LIGHTHOUSE_BENCH_CANDIDATES=map,typed,json \
-nix develop --command scripts/benchmark-run-queries experiment-005-order-b
+nix develop --command benchmark/scripts/benchmark-run-queries experiment-005-order-b
 ```
 
 Run artifacts are immutable directories below
@@ -103,11 +103,11 @@ parts, hardware details, and ZFS properties. Set
 Stage one natural Parquet day and load Map and native JSON in hourly windows:
 
 ```bash
-nix develop --command scripts/benchmark-clickhouse start
+nix develop --command benchmark/scripts/benchmark-clickhouse start
 
 LIGHTHOUSE_BENCH_RESET=1 \
 LIGHTHOUSE_BENCH_EXPECTED_ROWS=547356173 \
-nix develop --command scripts/benchmark-load-day \
+nix develop --command benchmark/scripts/benchmark-load-day \
   /mnt/storage/lighthouse/2026-08-05 \
   experiment-006-1tb
 ```
@@ -128,7 +128,7 @@ input without changing production defaults:
 LIGHTHOUSE_BENCH_MAX_FILES=1 \
 LIGHTHOUSE_BENCH_ROW_LIMIT_PER_FILE=10000 \
 LIGHTHOUSE_BENCH_RESET=1 \
-nix develop --command scripts/benchmark-load-day \
+nix develop --command benchmark/scripts/benchmark-load-day \
   /mnt/storage/lighthouse/2026-08-05 \
   day-loader-smoke
 ```
@@ -139,9 +139,73 @@ Override the root or ports for an isolated run:
 LIGHTHOUSE_BENCH_ROOT=/mnt/fast-storage/lighthouse/run-001 \
 LIGHTHOUSE_CLICKHOUSE_TCP_PORT=19001 \
 LIGHTHOUSE_CLICKHOUSE_HTTP_PORT=18124 \
-scripts/benchmark-clickhouse smoke
+benchmark/scripts/benchmark-clickhouse smoke
 ```
 
 Do not point `LIGHTHOUSE_BENCH_ROOT` at the Parquet source directory. Benchmark
 results must record the ClickHouse version, configuration revision, dataset
 properties, and effective environment overrides.
+
+## Sort-key comparison
+
+Compare the current hour/service ordering with timestamp-first and
+hour/timestamp alternatives over one natural day retained in
+`events_map_hot`:
+
+```bash
+LIGHTHOUSE_BENCH_RESET=1 \
+LIGHTHOUSE_BENCH_SOURCE_DAY=2026-08-05 \
+LIGHTHOUSE_BENCH_EXPECTED_ROWS=548954103 \
+benchmark/scripts/benchmark-run-sort-keys experiment-013-sort-keys-v1
+```
+
+The resumable loader creates three disposable candidate tables through 24
+checksum-validated hourly inserts, then runs `OPTIMIZE FINAL` so every candidate
+has one compacted part before measurement. It rotates candidate execution order
+and compares 5-minute, 1-hour, 6-hour, and full-day latest-event, time-range,
+service/severity, and dynamic-field fixtures. The ClickHouse-cold policy does
+not clear the OS page cache or ZFS ARC.
+
+## Distributed-cluster simulation
+
+Load one total day across a previously initialized 1-, 2-, or 4-shard native
+cluster, distributed by stable event identity:
+
+```bash
+benchmark/scripts/benchmark-load-distributed-day \
+  2 experiment-014-distributed-day-v1-2s
+```
+
+Run the serial distributed query matrix against that retained topology:
+
+```bash
+benchmark/scripts/benchmark-run-distributed-queries \
+  2 experiment-014-distributed-query-v1-2s
+```
+
+The query runner covers 5-minute, 1-hour, 6-hour, and full-day ranges for tail,
+count, service, dynamic-field, rate, heatmap, and percentile queries. It saves
+coordinator and leaf-local `EXPLAIN indexes = 1` plans, coordinator and leaf
+query-log metrics, result hashes, and host evidence. ClickHouse-cold resets
+ClickHouse-managed caches on every process but does not clear the Linux page
+cache or shared ZFS ARC. The native processes share one host, so this validates
+distributed semantics and fanout behavior rather than production scale-out
+capacity. New runs also sample cumulative CPU, block-device, memory, CPU
+frequency, and load counters once per second under `evidence/host-samples` so
+device utilization, queueing, iowait, and throttling can be calculated without
+inferring them from ClickHouse latency.
+
+Build the configured attribute indexes and five-minute aggregate states on each
+leaf, then run the accelerated distributed query matrix:
+
+```bash
+LIGHTHOUSE_BENCH_RESET=1 \
+benchmark/scripts/benchmark-run-distributed-accelerations \
+  2 experiment-014-distributed-acceleration-v1-2s
+```
+
+The build runs each phase concurrently on all leaves, preserving per-leaf query
+metrics and host samples. Accelerated exact results are checked against the
+matching retained raw topology; heatmap and percentile results compare exact
+sample-count and duration-sum anchors because histogram and t-digest byte
+encodings can vary with distributed merge order.

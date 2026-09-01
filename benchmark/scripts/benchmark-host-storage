@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: benchmark/scripts/benchmark-host-storage RUN_ID
+
+Measure direct-I/O storage throughput on the local benchmark host. The command
+creates and removes one 8 GiB file on each configured storage tier. ClickHouse
+and other storage-heavy workloads must be stopped before running it.
+
+Environment:
+  LIGHTHOUSE_BENCH_RUNS_ROOT  Result root (default: /mnt/fast-storage/lighthouse/runs)
+  LIGHTHOUSE_OS_TEST_ROOT     OS NVMe test directory (default: repository .tmp)
+  LIGHTHOUSE_FAST_TEST_ROOT   SSD ZFS test directory
+  LIGHTHOUSE_BULK_TEST_ROOT   HDD ZFS test directory
+  LIGHTHOUSE_FIO_SIZE         Test file size (default: 8G)
+  LIGHTHOUSE_FIO_RUNTIME      Random-read duration in seconds (default: 30)
+EOF
+}
+
+if [[ $# -ne 1 ]]; then
+  usage >&2
+  exit 2
+fi
+
+if ! command -v fio >/dev/null 2>&1; then
+  echo "fio is required; run through nix shell nixpkgs#fio" >&2
+  exit 1
+fi
+
+run_id="$1"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-/mnt/fast-storage/lighthouse/runs}"
+run_dir="${runs_root}/${run_id}"
+size="${LIGHTHOUSE_FIO_SIZE:-8G}"
+runtime="${LIGHTHOUSE_FIO_RUNTIME:-30}"
+
+declare -A roots=(
+  [os-nvme]="${LIGHTHOUSE_OS_TEST_ROOT:-${PWD}/.tmp/host-storage-baseline}"
+  [fast-ssd-zfs]="${LIGHTHOUSE_FAST_TEST_ROOT:-/mnt/fast-storage/lighthouse/host-storage-baseline}"
+  [bulk-hdd-zfs]="${LIGHTHOUSE_BULK_TEST_ROOT:-/mnt/storage/lighthouse-bench/host-storage-baseline}"
+)
+
+if [[ -e "${run_dir}" ]]; then
+  echo "run directory already exists: ${run_dir}" >&2
+  exit 1
+fi
+
+mkdir -p "${run_dir}"
+
+capture_host() {
+  lscpu > "${run_dir}/lscpu.txt"
+  free -b > "${run_dir}/memory.txt"
+  lsblk -d -o NAME,MODEL,SERIAL,SIZE,ROTA,TRAN,PHY-SEC,LOG-SEC > "${run_dir}/block-devices.txt"
+  findmnt > "${run_dir}/mounts.txt"
+  zpool list -v > "${run_dir}/zpool-list.txt" 2>&1 || true
+  zpool status > "${run_dir}/zpool-status.txt" 2>&1 || true
+  fio --version > "${run_dir}/fio-version.txt"
+  date --iso-8601=seconds > "${run_dir}/started-at.txt"
+}
+
+run_tier() {
+  local tier="$1"
+  local root="${roots[${tier}]}"
+  local file="${root}/${run_id}.fio"
+  local output="${run_dir}/${tier}.json"
+
+  mkdir -p "${root}"
+  trap 'rm -f "${file}"' RETURN
+
+  fio \
+    --name=sequential-write \
+    --filename="${file}" \
+    --size="${size}" \
+    --rw=write \
+    --bs=1M \
+    --ioengine=libaio \
+    --direct=1 \
+    --iodepth=8 \
+    --numjobs=1 \
+    --end_fsync=1 \
+    --stonewall \
+    --name=sequential-read \
+    --filename="${file}" \
+    --size="${size}" \
+    --rw=read \
+    --bs=1M \
+    --ioengine=libaio \
+    --direct=1 \
+    --iodepth=8 \
+    --numjobs=1 \
+    --stonewall \
+    --name=random-read \
+    --filename="${file}" \
+    --size="${size}" \
+    --rw=randread \
+    --bs=4K \
+    --ioengine=libaio \
+    --direct=1 \
+    --iodepth=32 \
+    --numjobs=1 \
+    --time_based=1 \
+    --runtime="${runtime}" \
+    --stonewall \
+    --output-format=json \
+    --output="${output}"
+
+  rm -f "${file}"
+  trap - RETURN
+}
+
+capture_host
+for tier in os-nvme fast-ssd-zfs bulk-hdd-zfs; do
+  run_tier "${tier}"
+done
+date --iso-8601=seconds > "${run_dir}/completed-at.txt"
+printf 'completed\n' > "${run_dir}/status"
+echo "results: ${run_dir}"

@@ -1,0 +1,466 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+shards="${1:-}"
+run_id="${2:-}"
+repetitions="${LIGHTHOUSE_DISTRIBUTED_REPETITIONS:-3}"
+range_spec="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h}"
+expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
+min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+load_run="experiment-014-distributed-day-v1-${shards}s"
+raw_run="${runs_root}/experiment-014-distributed-query-v1-${shards}s"
+
+if [[ -z "${shards}" || -z "${run_id}" ]]; then
+  echo "usage: $0 SHARDS RUN_ID" >&2
+  exit 2
+fi
+case "${shards}" in
+  1|2|4) ;;
+  *) echo "SHARDS must be 1, 2, or 4" >&2; exit 2 ;;
+esac
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LIGHTHOUSE_DISTRIBUTED_REPETITIONS must be a positive integer" >&2
+  exit 2
+fi
+if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+  echo "distributed acceleration rebuild requires LIGHTHOUSE_BENCH_RESET=1" >&2
+  exit 1
+fi
+if [[ "$(cat "${runs_root}/${load_run}/status" 2>/dev/null || true)" != "completed" ]]; then
+  echo "completed distributed load not found: ${runs_root}/${load_run}" >&2
+  exit 1
+fi
+if [[ "$(cat "${raw_run}/status" 2>/dev/null || true)" != "completed" ]]; then
+  echo "completed raw distributed query run not found: ${raw_run}" >&2
+  exit 1
+fi
+available="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+if [[ "${available}" -lt "${min_free_bytes}" ]]; then
+  echo "benchmark dataset has ${available} bytes free, below ${min_free_bytes}" >&2
+  exit 1
+fi
+
+run_dir="${runs_root}/${run_id}"
+if [[ -e "${run_dir}" ]]; then
+  echo "run directory already exists: ${run_dir}" >&2
+  exit 1
+fi
+mkdir -p "${run_dir}"/{evidence,plans/coordinator,plans/leaves,queries,results,state}
+echo "starting" > "${run_dir}/status"
+
+cluster=("${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster")
+completed=0
+sampler_pid=""
+stop_sampler() {
+  if [[ -n "${sampler_pid}" ]] && kill -0 "${sampler_pid}" 2>/dev/null; then
+    kill "${sampler_pid}"
+    wait "${sampler_pid}" 2>/dev/null || true
+  fi
+  sampler_pid=""
+}
+cleanup() {
+  local exit_status=$?
+  stop_sampler
+  "${cluster[@]}" stop "${shards}" >/dev/null 2>&1 || true
+  if [[ "${completed}" != "1" ]]; then
+    echo "failed" > "${run_dir}/status"
+    date -u +%FT%TZ > "${run_dir}/failed-at"
+  fi
+  return "${exit_status}"
+}
+trap cleanup EXIT
+
+"${cluster[@]}" start "${shards}"
+client=("${cluster[@]}" client)
+actual_rows="$("${client[@]}" --query "SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw")"
+if [[ "${actual_rows}" != "${expected_rows}" ]]; then
+  echo "expected ${expected_rows} distributed rows; found ${actual_rows}" >&2
+  exit 1
+fi
+
+IFS=',' read -r -a ranges <<< "${range_spec}"
+range_seconds() {
+  case "$1" in
+    5m) echo 300 ;;
+    1h) echo 3600 ;;
+    6h) echo 21600 ;;
+    24h) echo 86400 ;;
+    *) echo "unknown range: $1" >&2; return 2 ;;
+  esac
+}
+for range_name in "${ranges[@]}"; do
+  range_seconds "${range_name}" >/dev/null
+done
+
+day_end="2026-08-06 04:00:00"
+dynamic_low_value="${LIGHTHOUSE_BENCH_DYNAMIC_LOW_VALUE:-event_lifecycle}"
+dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-306e56de-c041-4b4d-9a62-d59e742bf58b}"
+safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
+query_prefix="lighthouse_${safe_run_id}"
+revision="$(jj log -r @- --no-graph -T 'commit_id')"
+date -u +%FT%TZ > "${run_dir}/started-at"
+
+cat > "${run_dir}/manifest.json" <<EOF
+{
+  "run_id": "${run_id}",
+  "repository_revision": "${revision}",
+  "clickhouse_version": "$("${client[@]}" --query 'SELECT version() FORMAT TSVRaw')",
+  "load_run": "${load_run}",
+  "raw_query_run": "$(basename "${raw_run}")",
+  "rows": ${expected_rows},
+  "shards": ${shards},
+  "replicas": 1,
+  "ranges": "${range_spec}",
+  "repetitions": ${repetitions},
+  "dynamic_low_value": "${dynamic_low_value}",
+  "dynamic_high_value": "${dynamic_high_value}",
+  "accelerations": ["type", "workspace_id", "service_name_count_5m", "duration_all_and_caller_5m"],
+  "execution": "parallel leaf-local builds; serial distributed queries"
+}
+EOF
+
+{
+  date -u +%FT%TZ
+  uname -a
+  lscpu
+  free -h
+  df -h "${benchmark_root}"
+  zpool list -v fast-storage
+  "${cluster[@]}" status "${shards}"
+} > "${run_dir}/evidence/host.txt"
+"${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
+sampler_pid=$!
+
+local_schema="
+  CREATE TABLE benchmark_distributed.accel_attribute_string_local
+  (
+    tenant_id UInt64,
+    dataset LowCardinality(String),
+    field_name LowCardinality(String),
+    field_value String,
+    timestamp DateTime64(6, 'UTC'),
+    event_id String
+  ) ENGINE = MergeTree
+  PARTITION BY toDate(timestamp)
+  ORDER BY (tenant_id, dataset, field_name, field_value, timestamp, event_id);
+
+  CREATE TABLE benchmark_distributed.accel_event_count_5m_local
+  (
+    tenant_id UInt64,
+    dataset LowCardinality(String),
+    bucket DateTime('UTC'),
+    dimension_name LowCardinality(String),
+    dimension_value String,
+    events UInt64
+  ) ENGINE = SummingMergeTree(events)
+  PARTITION BY toDate(bucket)
+  ORDER BY (tenant_id, dataset, dimension_name, dimension_value, bucket);
+
+  CREATE TABLE benchmark_distributed.accel_duration_5m_local
+  (
+    tenant_id UInt64,
+    dataset LowCardinality(String),
+    bucket DateTime('UTC'),
+    dimension_name LowCardinality(String),
+    dimension_value String,
+    samples AggregateFunction(count),
+    duration_sum AggregateFunction(sum, Float64),
+    duration_quantiles AggregateFunction(quantilesTDigest(0.5, 0.9, 0.95, 0.99), Float64),
+    duration_histogram AggregateFunction(histogram(20), Float64)
+  ) ENGINE = AggregatingMergeTree
+  PARTITION BY toDate(bucket)
+  ORDER BY (tenant_id, dataset, dimension_name, dimension_value, bucket);"
+
+for index in $(seq 1 "${shards}"); do
+  "${cluster[@]}" leaf-client "${index}" --multiquery --query "
+    DROP TABLE IF EXISTS benchmark_distributed.accel_attribute_string_local SYNC;
+    DROP TABLE IF EXISTS benchmark_distributed.accel_event_count_5m_local SYNC;
+    DROP TABLE IF EXISTS benchmark_distributed.accel_duration_5m_local SYNC;
+    ${local_schema}"
+done
+"${client[@]}" --multiquery --query "
+  DROP TABLE IF EXISTS benchmark_distributed.accel_attribute_string SYNC;
+  DROP TABLE IF EXISTS benchmark_distributed.accel_event_count_5m SYNC;
+  DROP TABLE IF EXISTS benchmark_distributed.accel_duration_5m SYNC;
+  CREATE TABLE benchmark_distributed.accel_attribute_string
+  (
+    tenant_id UInt64,
+    dataset LowCardinality(String),
+    field_name LowCardinality(String),
+    field_value String,
+    timestamp DateTime64(6, 'UTC'),
+    event_id String
+  )
+    ENGINE = Distributed(lighthouse, benchmark_distributed, accel_attribute_string_local, cityHash64(tenant_id, dataset, event_id));
+  CREATE TABLE benchmark_distributed.accel_event_count_5m
+  (
+    tenant_id UInt64,
+    dataset LowCardinality(String),
+    bucket DateTime('UTC'),
+    dimension_name LowCardinality(String),
+    dimension_value String,
+    events UInt64
+  )
+    ENGINE = Distributed(lighthouse, benchmark_distributed, accel_event_count_5m_local, cityHash64(tenant_id, dataset, dimension_name, dimension_value, bucket));
+  CREATE TABLE benchmark_distributed.accel_duration_5m
+  (
+    tenant_id UInt64,
+    dataset LowCardinality(String),
+    bucket DateTime('UTC'),
+    dimension_name LowCardinality(String),
+    dimension_value String,
+    samples AggregateFunction(count),
+    duration_sum AggregateFunction(sum, Float64),
+    duration_quantiles AggregateFunction(quantilesTDigest(0.5, 0.9, 0.95, 0.99), Float64),
+    duration_histogram AggregateFunction(histogram(20), Float64)
+  )
+    ENGINE = Distributed(lighthouse, benchmark_distributed, accel_duration_5m_local, cityHash64(tenant_id, dataset, dimension_name, dimension_value, bucket));"
+
+declare -A build_sql
+build_sql[attribute_type]="
+  INSERT INTO benchmark_distributed.accel_attribute_string_local
+  SELECT tenant_id, dataset, 'type', attributes['type'], timestamp, event_id
+  FROM benchmark_distributed.events_local WHERE notEmpty(attributes['type'])"
+build_sql[attribute_workspace_id]="
+  INSERT INTO benchmark_distributed.accel_attribute_string_local
+  SELECT tenant_id, dataset, 'workspace_id', attributes['workspace_id'], timestamp, event_id
+  FROM benchmark_distributed.events_local WHERE notEmpty(attributes['workspace_id'])"
+build_sql[event_count_service]="
+  INSERT INTO benchmark_distributed.accel_event_count_5m_local
+  SELECT tenant_id, dataset, toStartOfFiveMinutes(timestamp), 'service_name', service_name, count()
+  FROM benchmark_distributed.events_local
+  GROUP BY tenant_id, dataset, toStartOfFiveMinutes(timestamp), service_name"
+build_sql[duration]="
+  INSERT INTO benchmark_distributed.accel_duration_5m_local
+  WITH toFloat64OrNull(attributes['duration']) AS duration, attributes['caller'] AS caller
+  SELECT tenant_id, dataset, toStartOfFiveMinutes(timestamp),
+    tupleElement(dimension, 1), tupleElement(dimension, 2), countState(),
+    sumState(assumeNotNull(duration)),
+    quantilesTDigestState(0.5, 0.9, 0.95, 0.99)(assumeNotNull(duration)),
+    histogramState(20)(assumeNotNull(duration))
+  FROM benchmark_distributed.events_local
+  ARRAY JOIN if(notEmpty(caller), [('all', ''), ('caller', caller)], [('all', '')]) AS dimension
+  WHERE duration IS NOT NULL
+  GROUP BY tenant_id, dataset, toStartOfFiveMinutes(timestamp), tupleElement(dimension, 1), tupleElement(dimension, 2)"
+
+printf 'phase\twall_ms\n' > "${run_dir}/builds.tsv"
+echo "building" > "${run_dir}/status"
+for phase in attribute_type attribute_workspace_id event_count_service duration; do
+  started_ns="$(date +%s%N)"
+  pids=()
+  for index in $(seq 1 "${shards}"); do
+    "${cluster[@]}" leaf-client "${index}" --receive_timeout=86400 --send_timeout=86400 \
+      --query_id="${query_prefix}_build_${phase}_leaf_${index}" --query "${build_sql[${phase}]}" \
+      > "${run_dir}/evidence/build-${phase}-leaf-${index}.out" \
+      2> "${run_dir}/evidence/build-${phase}-leaf-${index}.err" &
+    pids+=("$!")
+  done
+  failed=0
+  for pid in "${pids[@]}"; do
+    wait "${pid}" || failed=1
+  done
+  if [[ "${failed}" == "1" ]]; then
+    echo "distributed acceleration build failed: ${phase}" >&2
+    exit 1
+  fi
+  finished_ns="$(date +%s%N)"
+  printf '%s\t%s\n' "${phase}" "$(((finished_ns - started_ns) / 1000000))" >> "${run_dir}/builds.tsv"
+done
+
+printf 'leaf\ttable\trows\tbytes_on_disk\tactive_parts\n' > "${run_dir}/table-storage.tsv"
+for index in $(seq 1 "${shards}"); do
+  "${cluster[@]}" leaf-client "${index}" --query "
+    SELECT ${index}, table, sum(rows), sum(bytes_on_disk), count()
+    FROM system.parts
+    WHERE active AND database = 'benchmark_distributed' AND startsWith(table, 'accel_')
+    GROUP BY table ORDER BY table FORMAT TSVRaw" >> "${run_dir}/table-storage.tsv"
+done
+
+query_args=(
+  --param_dynamic_low_value="${dynamic_low_value}"
+  --param_dynamic_high_value="${dynamic_high_value}"
+  --max_execution_time=1800
+  --max_memory_usage=8589934592
+)
+drop_caches() {
+  local node index
+  for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
+    if [[ "${node}" == coordinator ]]; then
+      cache_client=("${client[@]}")
+    else
+      index="${node#leaf-}"
+      cache_client=("${cluster[@]}" leaf-client "${index}")
+    fi
+    "${cache_client[@]}" --multiquery --query "
+      SYSTEM DROP MARK CACHE; SYSTEM DROP UNCOMPRESSED CACHE; SYSTEM DROP QUERY CACHE;
+      SYSTEM DROP QUERY CONDITION CACHE; SYSTEM DROP FILESYSTEM CACHE;" >/dev/null
+  done
+}
+
+printf 'range\twall_ms\tresult_file\tresult_sha256\n' > "${run_dir}/raw-high-validation.tsv"
+for range_name in "${ranges[@]}"; do
+  seconds="$(range_seconds "${range_name}")"
+  range_start="$(date -u -d "${day_end} UTC -${seconds} seconds" '+%F %T')"
+  rendered="${run_dir}/queries/${range_name}-raw-high.sql"
+  sed 's|{{table}}|benchmark_distributed.events|g' \
+    "${repo_root}/benchmark/queries/acceleration/raw/02-dynamic-high-cardinality.sql" > "${rendered}"
+  started_ns="$(date +%s%N)"
+  result_file="results/raw-high-${range_name}.jsonl"
+  "${client[@]}" --query_id="${query_prefix}_raw_high_${range_name}" \
+    --param_start="${range_start}" --param_end="${day_end}" "${query_args[@]}" \
+    --queries-file "${rendered}" > "${run_dir}/${result_file}"
+  finished_ns="$(date +%s%N)"
+  hash="$(sha256sum "${run_dir}/${result_file}" | cut -d' ' -f1)"
+  printf '%s\t%s\t%s\t%s\n' "${range_name}" "$(((finished_ns-started_ns)/1000000))" \
+    "${result_file}" "${hash}" >> "${run_dir}/raw-high-validation.tsv"
+done
+
+printf 'query_id\tcache_mode\trange\tfixture\trepetition\twall_ms\tresult_file\tresult_sha256\n' > "${run_dir}/timings.tsv"
+echo "querying" > "${run_dir}/status"
+for range_name in "${ranges[@]}"; do
+  seconds="$(range_seconds "${range_name}")"
+  range_start="$(date -u -d "${day_end} UTC -${seconds} seconds" '+%F %T')"
+  for source_query in "${repo_root}/benchmark/queries/acceleration/accelerated/"*.sql; do
+    fixture="$(basename "${source_query}" .sql)"
+    rendered="${run_dir}/queries/${range_name}-${fixture}.sql"
+    sed 's|benchmark\.accel_|benchmark_distributed.accel_|g' "${source_query}" > "${rendered}"
+    {
+      echo "EXPLAIN indexes = 1"
+      sed -e 's|benchmark\.accel_|benchmark_distributed.accel_|g' -e '/^FORMAT JSONEachRow;$/d' "${source_query}"
+    } | "${client[@]}" --multiquery --param_start="${range_start}" --param_end="${day_end}" \
+      "${query_args[@]}" > "${run_dir}/plans/coordinator/${range_name}-${fixture}.txt"
+    for index in $(seq 1 "${shards}"); do
+      {
+        echo "EXPLAIN indexes = 1"
+        sed -e 's|benchmark\.accel_attribute_string|benchmark_distributed.accel_attribute_string_local|g' \
+          -e 's|benchmark\.accel_event_count_5m|benchmark_distributed.accel_event_count_5m_local|g' \
+          -e 's|benchmark\.accel_duration_5m|benchmark_distributed.accel_duration_5m_local|g' \
+          -e '/^FORMAT JSONEachRow;$/d' "${source_query}"
+      } | "${cluster[@]}" leaf-client "${index}" --multiquery \
+        --param_start="${range_start}" --param_end="${day_end}" "${query_args[@]}" \
+        > "${run_dir}/plans/leaves/${range_name}-${fixture}-leaf-${index}.txt"
+    done
+  done
+done
+
+for mode in clickhouse-cold warm; do
+  for range_name in "${ranges[@]}"; do
+    seconds="$(range_seconds "${range_name}")"
+    range_start="$(date -u -d "${day_end} UTC -${seconds} seconds" '+%F %T')"
+    for source_query in "${repo_root}/benchmark/queries/acceleration/accelerated/"*.sql; do
+      fixture="$(basename "${source_query}" .sql)"
+      rendered="${run_dir}/queries/${range_name}-${fixture}.sql"
+      if [[ "${mode}" == warm ]]; then
+        "${client[@]}" --query_id="${query_prefix}_prewarm_${range_name}_${fixture//-/_}" \
+          --param_start="${range_start}" --param_end="${day_end}" "${query_args[@]}" \
+          --queries-file "${rendered}" >/dev/null
+      fi
+      for repetition in $(seq 1 "${repetitions}"); do
+        [[ "${mode}" != clickhouse-cold ]] || drop_caches
+        query_id="${query_prefix}_${mode//-/_}_${range_name}_${fixture//-/_}_${repetition}"
+        result_file="results/${mode}-${range_name}-${fixture}-r${repetition}.jsonl"
+        started_ns="$(date +%s%N)"
+        "${client[@]}" --query_id="${query_id}" \
+          --param_start="${range_start}" --param_end="${day_end}" "${query_args[@]}" \
+          --queries-file "${rendered}" > "${run_dir}/${result_file}"
+        finished_ns="$(date +%s%N)"
+        result_sha256="$(sha256sum "${run_dir}/${result_file}" | cut -d' ' -f1)"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "${query_id}" "${mode}" "${range_name}" "${fixture}" "${repetition}" \
+          "$(((finished_ns-started_ns)/1000000))" "${result_file}" "${result_sha256}" \
+          >> "${run_dir}/timings.tsv"
+      done
+    done
+  done
+done
+
+python3 - "${run_dir}" "${raw_run}" "${repetitions}" <<'PY'
+import csv
+import json
+import sys
+from pathlib import Path
+
+run = Path(sys.argv[1])
+raw = Path(sys.argv[2])
+repetitions = int(sys.argv[3])
+range_names = json.loads((run / "manifest.json").read_text())["ranges"].split(",")
+raw_high = {r["range"]: r["result_sha256"] for r in csv.DictReader(open(run / "raw-high-validation.tsv"), delimiter="\t")}
+checks = []
+
+def anchors(path):
+    return {r["caller"]: (r["samples"], r["duration_sum"]) for r in map(json.loads, path.read_text().splitlines())}
+
+for mode in ("clickhouse-cold", "warm"):
+    for range_name in range_names:
+        for repetition in range(1, repetitions + 1):
+            pairs = (
+                ("01-dynamic-low-cardinality", "04-dynamic-filter"),
+                ("03-rate-by-service", "05-rate-by-service"),
+            )
+            for accelerated_fixture, raw_fixture in pairs:
+                accelerated = run / "results" / f"{mode}-{range_name}-{accelerated_fixture}-r{repetition}.jsonl"
+                baseline = raw / "results" / f"{mode}-{range_name}-{raw_fixture}-r{repetition}.jsonl"
+                checks.append((mode, range_name, accelerated_fixture, repetition, accelerated.read_bytes() == baseline.read_bytes()))
+
+            accelerated = run / "results" / f"{mode}-{range_name}-02-dynamic-high-cardinality-r{repetition}.jsonl"
+            checks.append((mode, range_name, "02-dynamic-high-cardinality", repetition,
+                           __import__("hashlib").sha256(accelerated.read_bytes()).hexdigest() == raw_high[range_name]))
+
+            fixture = "04-duration-heatmap"
+            accelerated = json.loads((run / "results" / f"{mode}-{range_name}-{fixture}-r{repetition}.jsonl").read_text())
+            baseline = json.loads((raw / "results" / f"{mode}-{range_name}-06-duration-heatmap-r{repetition}.jsonl").read_text())
+            checks.append((mode, range_name, fixture, repetition,
+                           (accelerated["samples"], accelerated["duration_sum"]) ==
+                           (baseline["samples"], baseline["duration_sum"])))
+
+            fixture = "05-percentiles-by-caller"
+            accelerated = run / "results" / f"{mode}-{range_name}-{fixture}-r{repetition}.jsonl"
+            baseline = raw / "results" / f"{mode}-{range_name}-07-percentiles-by-caller-r{repetition}.jsonl"
+            checks.append((mode, range_name, fixture, repetition, anchors(accelerated) == anchors(baseline)))
+
+with (run / "correctness.tsv").open("w", encoding="utf-8") as output:
+    output.write("cache_mode\trange\tfixture\trepetition\tpassed\n")
+    for check in checks:
+        output.write("\t".join(map(str, check[:-1])) + "\t" + str(check[-1]).lower() + "\n")
+failed = [check for check in checks if not check[-1]]
+if failed:
+    raise SystemExit(f"distributed acceleration correctness checks failed: {failed}")
+PY
+
+for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
+  if [[ "${node}" == coordinator ]]; then
+    log_client=("${client[@]}")
+  else
+    log_client=("${cluster[@]}" leaf-client "${node#leaf-}")
+  fi
+  "${log_client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null
+  "${log_client[@]}" --query "
+    SELECT query_id, initial_query_id, query_duration_ms, read_rows, read_bytes,
+           written_rows, written_bytes, result_rows, memory_usage,
+           ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us,
+           ProfileEvents['SelectedParts'] AS selected_parts,
+           ProfileEvents['SelectedMarks'] AS selected_marks,
+           ProfileEvents['NetworkSendBytes'] AS network_send_bytes,
+           ProfileEvents['NetworkReceiveBytes'] AS network_receive_bytes
+    FROM system.query_log
+    WHERE type = 'QueryFinish'
+      AND (startsWith(query_id, '${query_prefix}_')
+        OR startsWith(initial_query_id, '${query_prefix}_'))
+    ORDER BY event_time_microseconds FORMAT JSONEachRow" \
+    > "${run_dir}/evidence/${node}-query-metrics.jsonl"
+done
+
+stop_sampler
+date -u +%FT%TZ > "${run_dir}/completed-at"
+"${cluster[@]}" stop "${shards}" >/dev/null
+trap - EXIT
+echo "completed" > "${run_dir}/status"
+completed=1
+echo "distributed acceleration run completed: ${run_dir}"

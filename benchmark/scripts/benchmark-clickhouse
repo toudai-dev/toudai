@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+clickhouse_root="${benchmark_root}/clickhouse"
+config_file="${repo_root}/benchmark/clickhouse/config.xml"
+
+data_dir="${clickhouse_root}/data"
+tmp_dir="${clickhouse_root}/tmp"
+user_files_dir="${clickhouse_root}/user_files"
+format_schema_dir="${clickhouse_root}/format_schemas"
+log_dir="${clickhouse_root}/logs"
+run_dir="${clickhouse_root}/run"
+pid_file="${run_dir}/clickhouse.pid"
+log_file="${log_dir}/clickhouse-server.log"
+error_log_file="${log_dir}/clickhouse-server.err.log"
+
+tcp_port="${LIGHTHOUSE_CLICKHOUSE_TCP_PORT:-19000}"
+http_port="${LIGHTHOUSE_CLICKHOUSE_HTTP_PORT:-18123}"
+
+usage() {
+    cat <<'EOF'
+Usage: benchmark/scripts/benchmark-clickhouse <command> [client arguments]
+
+Commands:
+  prepare  Create benchmark server directories.
+  start    Start the isolated native ClickHouse server.
+  stop     Stop the benchmark server.
+  status   Show process and ClickHouse health status.
+  client   Run clickhouse-client against the benchmark server.
+  smoke    Create, query, and remove a small smoke-test database.
+
+Environment:
+  LIGHTHOUSE_BENCH_ROOT             Data root (default: /mnt/fast-storage/lighthouse)
+  LIGHTHOUSE_CLICKHOUSE_TCP_PORT    Native port (default: 19000)
+  LIGHTHOUSE_CLICKHOUSE_HTTP_PORT   HTTP port (default: 18123)
+  LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH
+                                      Optional local overflow disk path
+  LIGHTHOUSE_CLICKHOUSE_ARCHIVE_PATH  Optional bulk archive disk path
+EOF
+}
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        printf 'required command not found: %s\n' "$1" >&2
+        exit 1
+    fi
+}
+
+prepare() {
+    mkdir -p \
+        "${data_dir}" \
+        "${tmp_dir}" \
+        "${user_files_dir}" \
+        "${format_schema_dir}" \
+        "${log_dir}" \
+        "${run_dir}"
+}
+
+is_running() {
+    [[ -f "${pid_file}" ]] || return 1
+    local pid
+    pid="$(cat "${pid_file}")"
+    [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+client() {
+    clickhouse client \
+        --host 127.0.0.1 \
+        --port "${tcp_port}" \
+        "$@"
+}
+
+start() {
+    if is_running; then
+        printf 'benchmark ClickHouse is already running with PID %s\n' "$(cat "${pid_file}")"
+        return
+    fi
+
+    prepare
+    rm -f "${pid_file}"
+
+    clickhouse server \
+        --config-file="${config_file}" \
+        --daemon \
+        --pid-file="${pid_file}" \
+        --log-file="${log_file}" \
+        --errorlog-file="${error_log_file}" \
+        -- \
+        --path="${data_dir}/" \
+        --tmp_path="${tmp_dir}/" \
+        --user_files_path="${user_files_dir}/" \
+        --format_schema_path="${format_schema_dir}/" \
+        --tcp_port="${tcp_port}" \
+        --http_port="${http_port}"
+
+    for _ in $(seq 1 60); do
+        if client --query 'SELECT 1' >/dev/null 2>&1; then
+            printf 'benchmark ClickHouse started with PID %s\n' "$(cat "${pid_file}")"
+            return
+        fi
+        sleep 0.5
+    done
+
+    printf 'benchmark ClickHouse did not become ready\n' >&2
+    tail -100 "${error_log_file}" >&2 || true
+    exit 1
+}
+
+stop() {
+    if ! is_running; then
+        rm -f "${pid_file}"
+        printf 'benchmark ClickHouse is not running\n'
+        return
+    fi
+
+    local pid
+    pid="$(cat "${pid_file}")"
+    kill "${pid}"
+    for _ in $(seq 1 60); do
+        if ! kill -0 "${pid}" 2>/dev/null; then
+            rm -f "${pid_file}"
+            printf 'benchmark ClickHouse stopped\n'
+            return
+        fi
+        sleep 0.5
+    done
+
+    printf 'benchmark ClickHouse did not stop within 30 seconds (PID %s)\n' "${pid}" >&2
+    exit 1
+}
+
+status() {
+    if ! is_running; then
+        printf 'process: stopped\n'
+        return 1
+    fi
+
+    printf 'process: running (PID %s)\n' "$(cat "${pid_file}")"
+    client --query 'SELECT version() AS version, uptime() AS uptime_seconds'
+}
+
+smoke() {
+    local started_here=0
+    if ! is_running; then
+        start
+        started_here=1
+    fi
+
+    client --multiquery --query '
+        DROP DATABASE IF EXISTS lighthouse_benchmark_smoke;
+        CREATE DATABASE lighthouse_benchmark_smoke;
+        CREATE TABLE lighthouse_benchmark_smoke.events
+        (
+            timestamp DateTime64(3),
+            service LowCardinality(String),
+            duration_ms UInt32
+        )
+        ENGINE = MergeTree
+        ORDER BY (service, timestamp);
+        INSERT INTO lighthouse_benchmark_smoke.events VALUES
+            (now64(3), '\''api'\'', 12),
+            (now64(3), '\''api'\'', 24),
+            (now64(3), '\''worker'\'', 8);
+        SELECT count() AS rows, sum(duration_ms) AS duration_ms
+        FROM lighthouse_benchmark_smoke.events;
+        DROP DATABASE lighthouse_benchmark_smoke;
+    '
+
+    if [[ "${started_here}" -eq 1 ]]; then
+        stop
+    fi
+}
+
+require_command clickhouse
+
+case "${1:-}" in
+prepare)
+    prepare
+    ;;
+start)
+    start
+    ;;
+stop)
+    stop
+    ;;
+status)
+    status
+    ;;
+client)
+    shift
+    client "$@"
+    ;;
+smoke)
+    smoke
+    ;;
+*)
+    usage >&2
+    exit 2
+    ;;
+esac

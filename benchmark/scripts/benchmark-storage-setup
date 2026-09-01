@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Keep benchmark data isolated from the source corpus and operating-system disk.
+
+fast_dataset="${LIGHTHOUSE_FAST_DATASET:-fast-storage/lighthouse}"
+fast_mount="${LIGHTHOUSE_FAST_MOUNT:-/mnt/fast-storage/lighthouse}"
+fast_refquota="${LIGHTHOUSE_FAST_REFQUOTA:-750G}"
+
+capacity_dataset="${LIGHTHOUSE_CAPACITY_DATASET:-storage/lighthouse-bench}"
+capacity_mount="${LIGHTHOUSE_CAPACITY_MOUNT:-/mnt/storage/lighthouse-bench}"
+capacity_refquota="${LIGHTHOUSE_CAPACITY_REFQUOTA:-4T}"
+
+owner="${SUDO_USER:-${USER}}"
+group="$(id -gn "${owner}")"
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        printf 'required command not found: %s\n' "$1" >&2
+        exit 1
+    fi
+}
+
+ensure_dataset() {
+    local dataset="$1"
+    local mountpoint="$2"
+    local refquota="$3"
+
+    if ! sudo zfs list -H -o name "${dataset}" >/dev/null 2>&1; then
+        sudo zfs create \
+            -o mountpoint="${mountpoint}" \
+            -o compression=off \
+            -o atime=off \
+            -o recordsize=128K \
+            -o refquota="${refquota}" \
+            "${dataset}"
+    fi
+
+    # Reassert benchmark-critical properties so reruns cannot silently drift.
+    sudo zfs set mountpoint="${mountpoint}" "${dataset}"
+    sudo zfs set compression=off "${dataset}"
+    sudo zfs set atime=off "${dataset}"
+    sudo zfs set recordsize=128K "${dataset}"
+    sudo zfs set refquota="${refquota}" "${dataset}"
+    sudo chown "${owner}:${group}" "${mountpoint}"
+}
+
+require_command sudo
+require_command zfs
+
+ensure_dataset "${fast_dataset}" "${fast_mount}" "${fast_refquota}"
+ensure_dataset "${capacity_dataset}" "${capacity_mount}" "${capacity_refquota}"
+
+printf '%-32s %-10s %-10s %-10s %-12s %s\n' \
+    'DATASET' 'USED' 'AVAIL' 'REFER' 'REFQUOTA' 'MOUNTPOINT'
+zfs list -o name,used,avail,refer,refquota,mountpoint \
+    "${fast_dataset}" "${capacity_dataset}"
+
+printf '\nBenchmark storage is owned by %s:%s.\n' "${owner}" "${group}"

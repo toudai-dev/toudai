@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_run="${LIGHTHOUSE_DISTRIBUTED_SOURCE_RUN:-experiment-017-rebuild-007-map-v1}"
+source_table="${LIGHTHOUSE_DISTRIBUTED_SOURCE_TABLE:-benchmark.events_map}"
+expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
+min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+shards="${1:-}"
+run_id="${2:-}"
+
+if [[ -z "${shards}" || -z "${run_id}" ]]; then
+  echo "usage: $0 SHARDS RUN_ID" >&2
+  exit 2
+fi
+case "${shards}" in
+  1|2|4) ;;
+  *) echo "SHARDS must be 1, 2, or 4" >&2; exit 2 ;;
+esac
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+for value in "${expected_rows}" "${min_free_bytes}"; do
+  if [[ ! "${value}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "row and free-space settings must be positive integers" >&2
+    exit 2
+  fi
+done
+
+source_run_dir="${runs_root}/${source_run}"
+windows_file="${source_run_dir}/windows.tsv"
+if [[ "$(cat "${source_run_dir}/status" 2>/dev/null || true)" != "completed" || ! -f "${windows_file}" ]]; then
+  echo "completed source run with windows.tsv not found: ${source_run_dir}" >&2
+  exit 1
+fi
+window_rows="$(awk -F '\t' '{ rows += $2 } END { printf "%.0f", rows }' "${windows_file}")"
+if [[ "${window_rows}" != "${expected_rows}" || "$(wc -l < "${windows_file}")" != "24" ]]; then
+  echo "source windows expected 24 windows and ${expected_rows} rows; found $(wc -l < "${windows_file}") and ${window_rows}" >&2
+  exit 1
+fi
+
+run_dir="${runs_root}/${run_id}"
+state_dir="${run_dir}/state/windows"
+config="shards=${shards}\nsource_run=${source_run}\nsource_table=${source_table}\nexpected_rows=${expected_rows}\n"
+new_run=0
+if [[ ! -e "${run_dir}" ]]; then
+  new_run=1
+  mkdir -p "${state_dir}" "${run_dir}/evidence"
+  printf '%b' "${config}" > "${run_dir}/config.txt"
+  date -u +%FT%TZ > "${run_dir}/started-at"
+else
+  if [[ "$(cat "${run_dir}/config.txt" 2>/dev/null || true)" != "$(printf '%b' "${config}")" ]]; then
+    echo "run configuration does not match ${run_dir}/config.txt" >&2
+    exit 1
+  fi
+  if [[ "$(cat "${run_dir}/status" 2>/dev/null || true)" == "completed" ]]; then
+    echo "run is already complete: ${run_dir}"
+    exit 0
+  fi
+fi
+echo "starting" > "${run_dir}/status"
+
+cluster=("${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster")
+source_client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
+completed=0
+sampler_pid=""
+stop_sampler() {
+  if [[ -n "${sampler_pid}" ]] && kill -0 "${sampler_pid}" 2>/dev/null; then
+    kill "${sampler_pid}"
+    wait "${sampler_pid}" 2>/dev/null || true
+  fi
+  sampler_pid=""
+}
+cleanup() {
+  local exit_status=$?
+  stop_sampler
+  "${cluster[@]}" stop "${shards}" >/dev/null 2>&1 || true
+  if [[ "${completed}" != "1" ]]; then
+    echo "failed" > "${run_dir}/status"
+    date -u +%FT%TZ > "${run_dir}/failed-at"
+  fi
+  return "${exit_status}"
+}
+trap cleanup EXIT
+
+"${cluster[@]}" start "${shards}"
+"${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
+sampler_pid=$!
+
+local_schema="
+  CREATE DATABASE IF NOT EXISTS benchmark_distributed;
+  CREATE TABLE benchmark_distributed.events_local
+  (
+    tenant_id UInt64,
+    dataset LowCardinality(String),
+    timestamp DateTime64(6, 'UTC'),
+    observed_at DateTime64(6, 'UTC'),
+    event_id String,
+    event_kind Enum8('event' = 1, 'log' = 2, 'span' = 3),
+    event_name LowCardinality(String),
+    body String,
+    service_name LowCardinality(String),
+    environment LowCardinality(String),
+    severity LowCardinality(String),
+    status_code LowCardinality(String),
+    trace_id String,
+    span_id String,
+    parent_span_id String,
+    span_kind LowCardinality(String),
+    duration_ns UInt64,
+    resource Map(LowCardinality(String), String),
+    scope Map(LowCardinality(String), String),
+    attributes Map(LowCardinality(String), String)
+  )
+  ENGINE = MergeTree
+  PARTITION BY toDate(timestamp)
+  ORDER BY (tenant_id, dataset, timestamp, event_id);"
+
+if [[ "${new_run}" == "1" ]]; then
+  for index in $(seq 1 "${shards}"); do
+    "${cluster[@]}" leaf-client "${index}" --multiquery --query "
+      DROP DATABASE IF EXISTS benchmark_distributed;
+      ${local_schema}"
+  done
+  "${cluster[@]}" client --multiquery --query "
+    DROP DATABASE IF EXISTS benchmark_distributed;
+    CREATE DATABASE benchmark_distributed;
+    CREATE TABLE benchmark_distributed.events
+    (
+      tenant_id UInt64,
+      dataset LowCardinality(String),
+      timestamp DateTime64(6, 'UTC'),
+      observed_at DateTime64(6, 'UTC'),
+      event_id String,
+      event_kind Enum8('event' = 1, 'log' = 2, 'span' = 3),
+      event_name LowCardinality(String),
+      body String,
+      service_name LowCardinality(String),
+      environment LowCardinality(String),
+      severity LowCardinality(String),
+      status_code LowCardinality(String),
+      trace_id String,
+      span_id String,
+      parent_span_id String,
+      span_kind LowCardinality(String),
+      duration_ns UInt64,
+      resource Map(LowCardinality(String), String),
+      scope Map(LowCardinality(String), String),
+      attributes Map(LowCardinality(String), String)
+    )
+    ENGINE = Distributed(
+      lighthouse,
+      benchmark_distributed,
+      events_local,
+      cityHash64(tenant_id, dataset, event_id)
+    );"
+fi
+
+check_free_space() {
+  local available
+  available="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+  if [[ "${available}" -lt "${min_free_bytes}" ]]; then
+    echo "benchmark dataset has ${available} bytes free, below ${min_free_bytes}" >&2
+    return 1
+  fi
+}
+
+select_columns="tenant_id, dataset, timestamp, observed_at, event_id, event_kind,
+  event_name, body, service_name, environment, severity, status_code, trace_id,
+  span_id, parent_span_id, span_kind, duration_ns, resource, scope, attributes"
+printf 'window_start\texpected_rows\tduration_ms\n' > "${run_dir}/loads.tsv.tmp"
+[[ -f "${run_dir}/loads.tsv" ]] && tail -n +2 "${run_dir}/loads.tsv" >> "${run_dir}/loads.tsv.tmp"
+mv "${run_dir}/loads.tsv.tmp" "${run_dir}/loads.tsv"
+echo "loading" > "${run_dir}/status"
+
+while IFS=$'\t' read -r window_start expected_window_rows _source_checksum; do
+  window_id="$(date -u -d "${window_start} UTC" +%Y%m%dT%H)"
+  marker="${state_dir}/${window_id}"
+  [[ -f "${marker}" ]] && continue
+  window_end="$(date -u -d "${window_start} UTC +1 hour" '+%F %T')"
+  existing_rows="$("${cluster[@]}" client \
+    --param_start="${window_start}" --param_end="${window_end}" --query "
+      SELECT count() FROM benchmark_distributed.events
+      WHERE timestamp >= {start:DateTime64(6, 'UTC')}
+        AND timestamp < {end:DateTime64(6, 'UTC')} FORMAT TSVRaw")"
+  if [[ "${existing_rows}" == "${expected_window_rows}" ]]; then
+    printf 'recovered\t%s\n' "${existing_rows}" > "${marker}"
+    continue
+  fi
+  if [[ "${existing_rows}" != "0" ]]; then
+    echo "partial distributed window ${window_start}: expected ${expected_window_rows}, found ${existing_rows}" >&2
+    exit 1
+  fi
+  check_free_space
+  echo "loading ${shards}s ${window_start} (${expected_window_rows} rows)"
+  started_ns="$(date +%s%N)"
+  "${source_client[@]}" --receive_timeout=86400 --send_timeout=86400 \
+    --max_threads=2 \
+    --query_id="lighthouse_${run_id//-/_}_source_${window_id}" \
+    --param_start="${window_start}" --param_end="${window_end}" --query "
+      SELECT ${select_columns}
+      FROM ${source_table}
+      WHERE timestamp >= {start:DateTime64(6, 'UTC')}
+        AND timestamp < {end:DateTime64(6, 'UTC')}
+      FORMAT Native" |
+    "${cluster[@]}" client --receive_timeout=86400 --send_timeout=86400 \
+      --insert_distributed_sync=1 \
+      --query_id="lighthouse_${run_id//-/_}_load_${window_id}" \
+      --query "INSERT INTO benchmark_distributed.events FORMAT Native"
+  finished_ns="$(date +%s%N)"
+  duration_ms="$(((finished_ns - started_ns) / 1000000))"
+  actual_rows="$("${cluster[@]}" client \
+    --param_start="${window_start}" --param_end="${window_end}" --query "
+      SELECT count() FROM benchmark_distributed.events
+      WHERE timestamp >= {start:DateTime64(6, 'UTC')}
+        AND timestamp < {end:DateTime64(6, 'UTC')} FORMAT TSVRaw")"
+  if [[ "${actual_rows}" != "${expected_window_rows}" ]]; then
+    echo "distributed window ${window_start}: expected ${expected_window_rows}, found ${actual_rows}" >&2
+    exit 1
+  fi
+  printf '%s\t%s\n' "${actual_rows}" "${duration_ms}" > "${marker}"
+  printf '%s\t%s\t%s\n' "${window_start}" "${expected_window_rows}" "${duration_ms}" >> "${run_dir}/loads.tsv"
+done < "${windows_file}"
+
+echo "validating" > "${run_dir}/status"
+distributed_rows="$("${cluster[@]}" client --query "SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw")"
+if [[ "${distributed_rows}" != "${expected_rows}" ]]; then
+  echo "distributed total expected ${expected_rows}, found ${distributed_rows}" >&2
+  exit 1
+fi
+
+"${source_client[@]}" --query "
+  SELECT count(), sum(sipHash64(event_id, timestamp))
+  FROM ${source_table} FORMAT TSVRaw" > "${run_dir}/source-identity.tsv"
+"${cluster[@]}" client --query "
+  SELECT count(), sum(sipHash64(event_id, timestamp))
+  FROM benchmark_distributed.events FORMAT TSVRaw" > "${run_dir}/distributed-identity.tsv"
+cmp "${run_dir}/source-identity.tsv" "${run_dir}/distributed-identity.tsv"
+
+printf 'leaf\trows\tbytes_on_disk\tactive_parts\n' > "${run_dir}/leaf-storage.tsv"
+for index in $(seq 1 "${shards}"); do
+  "${cluster[@]}" leaf-client "${index}" --query "
+    SELECT ${index}, sum(rows), sum(bytes_on_disk), count()
+    FROM system.parts
+    WHERE active AND database = 'benchmark_distributed' AND table = 'events_local'
+    FORMAT TSVRaw" >> "${run_dir}/leaf-storage.tsv"
+  "${cluster[@]}" leaf-client "${index}" --query "
+    SELECT table, partition, name, rows, bytes_on_disk, marks, level
+    FROM system.parts
+    WHERE active AND database = 'benchmark_distributed'
+    ORDER BY partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/leaf-${index}-parts.jsonl"
+done
+awk -F '\t' 'NR > 1 { total += $2 } END { exit total == '"${expected_rows}"' ? 0 : 1 }' "${run_dir}/leaf-storage.tsv"
+
+"${source_client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null
+"${source_client[@]}" --query "
+  SELECT query_id, query_duration_ms, read_rows, read_bytes, memory_usage,
+         ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us,
+         ProfileEvents['NetworkSendBytes'] AS network_send_bytes
+  FROM system.query_log
+  WHERE type = 'QueryFinish'
+    AND startsWith(query_id, 'lighthouse_${run_id//-/_}_source_')
+  ORDER BY event_time_microseconds FORMAT JSONEachRow" \
+  > "${run_dir}/evidence/source-query-metrics.jsonl"
+
+for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
+  if [[ "${node}" == "coordinator" ]]; then
+    node_client=("${cluster[@]}" client)
+  else
+    node_client=("${cluster[@]}" leaf-client "${node#leaf-}")
+  fi
+  "${node_client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null
+  "${node_client[@]}" --query "
+    SELECT query_id, query_duration_ms, read_rows, read_bytes, written_rows,
+           written_bytes, memory_usage,
+           ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us,
+           ProfileEvents['NetworkSendBytes'] AS network_send_bytes,
+           ProfileEvents['NetworkReceiveBytes'] AS network_receive_bytes
+    FROM system.query_log
+    WHERE type = 'QueryFinish'
+      AND (startsWith(query_id, 'lighthouse_${run_id//-/_}_')
+        OR startsWith(initial_query_id, 'lighthouse_${run_id//-/_}_'))
+    ORDER BY event_time_microseconds FORMAT JSONEachRow" \
+    > "${run_dir}/evidence/${node}-query-metrics.jsonl"
+done
+
+revision="$(jj log -r @- --no-graph -T 'commit_id')"
+cat > "${run_dir}/manifest.json" <<EOF
+{
+  "run_id": "${run_id}",
+  "repository_revision": "${revision}",
+  "clickhouse_version": "$("${cluster[@]}" client --query 'SELECT version() FORMAT TSVRaw')",
+  "source_run": "${source_run}",
+  "source_table": "${source_table}",
+  "source_windows_sha256": "$(sha256sum "${windows_file}" | cut -d' ' -f1)",
+  "rows": ${expected_rows},
+  "shards": ${shards},
+  "replicas": 1,
+  "sharding_expression": "cityHash64(tenant_id, dataset, event_id)",
+  "sort_key": "(tenant_id, dataset, timestamp, event_id)",
+  "payload_included": false
+}
+EOF
+
+date -u +%FT%TZ > "${run_dir}/completed-at"
+stop_sampler
+"${cluster[@]}" stop "${shards}" >/dev/null
+trap - EXIT
+echo "completed" > "${run_dir}/status"
+completed=1
+echo "distributed day load completed: ${run_dir}"

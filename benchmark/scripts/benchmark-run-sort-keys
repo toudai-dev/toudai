@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_table="${LIGHTHOUSE_BENCH_SOURCE_TABLE:-events_map_hot}"
+source_day="${LIGHTHOUSE_BENCH_SOURCE_DAY:-2026-08-05}"
+expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-548954103}"
+repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-3}"
+min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+dynamic_value="${LIGHTHOUSE_BENCH_DYNAMIC_VALUE:-event_lifecycle}"
+candidate_spec="${LIGHTHOUSE_BENCH_CANDIDATES:-hour_service time hour_time}"
+reference_run="${LIGHTHOUSE_BENCH_REFERENCE_RUN:-}"
+reference_candidate="${LIGHTHOUSE_BENCH_REFERENCE_CANDIDATE:-time}"
+run_id="${1:-}"
+read -r -a candidates <<< "${candidate_spec}"
+ranges=(5m 1h 6h 24h)
+range_seconds=(300 3600 21600 86400)
+
+if [[ -z "${run_id}" ]]; then
+  echo "usage: $0 RUN_ID" >&2
+  exit 2
+fi
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+if [[ ! "${source_table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+  echo "LIGHTHOUSE_BENCH_SOURCE_TABLE must be an unqualified table name" >&2
+  exit 2
+fi
+if [[ ! "${source_day}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "LIGHTHOUSE_BENCH_SOURCE_DAY must use YYYY-MM-DD" >&2
+  exit 2
+fi
+if [[ "${#candidates[@]}" == "0" ]]; then
+  echo "LIGHTHOUSE_BENCH_CANDIDATES must select at least one candidate" >&2
+  exit 2
+fi
+for candidate in "${candidates[@]}"; do
+  case "${candidate}" in
+    hour_service|time|hour_time|date_service|date_first_service) ;;
+    *) echo "unsupported sort-key candidate: ${candidate}" >&2; exit 2 ;;
+  esac
+done
+case "${reference_candidate}" in
+  hour_service|time|hour_time|date_service|date_first_service) ;;
+  *) echo "unsupported reference candidate: ${reference_candidate}" >&2; exit 2 ;;
+esac
+if [[ -n "${reference_run}" && ! -f "${reference_run}/timings.tsv" ]]; then
+  echo "reference run has no timings.tsv: ${reference_run}" >&2
+  exit 2
+fi
+for value in "${expected_rows}" "${repetitions}" "${min_free_bytes}"; do
+  if [[ ! "${value}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "numeric benchmark settings must be positive integers" >&2
+    exit 2
+  fi
+done
+
+run_dir="${runs_root}/${run_id}"
+state_dir="${run_dir}/state"
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
+source="benchmark.${source_table}"
+safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
+query_prefix="lighthouse_sort_${safe_run_id}"
+day_start="${source_day} 00:00:00"
+day_end="$(date -u -d "${source_day} +1 day" '+%F %T')"
+
+check_free_space() {
+  local available
+  available="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+  if [[ "${available}" -lt "${min_free_bytes}" ]]; then
+    echo "benchmark dataset has ${available} bytes free, below the ${min_free_bytes}-byte guardrail" >&2
+    return 1
+  fi
+}
+
+capture_logs() {
+  "${client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
+  "${client[@]}" --query "SELECT * FROM system.query_log WHERE startsWith(query_id, '${query_prefix}_') ORDER BY event_time_microseconds FORMAT JSONEachRow" > "${run_dir}/query-log.jsonl" 2>/dev/null || true
+  "${client[@]}" --query "
+    SELECT query_id, query_duration_ms, read_rows, read_bytes, written_rows,
+           written_bytes, result_rows, memory_usage,
+           ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us,
+           ProfileEvents['SelectedParts'] AS selected_parts,
+           ProfileEvents['SelectedMarks'] AS selected_marks
+    FROM system.query_log
+    WHERE type = 'QueryFinish' AND startsWith(query_id, '${query_prefix}_')
+    ORDER BY event_time_microseconds FORMAT TSVWithNames
+  " > "${run_dir}/query-metrics.tsv" 2>/dev/null || true
+}
+
+on_exit() {
+  local exit_status=$?
+  if [[ "${exit_status}" != "0" && -d "${run_dir}" ]]; then
+    echo "failed" > "${run_dir}/status"
+    date -u +%FT%TZ > "${run_dir}/failed-at"
+    capture_logs
+  fi
+}
+trap on_exit EXIT
+
+"${client[@]}" --query "SELECT 1" >/dev/null
+source_rows="$("${client[@]}" --param_start="${day_start}" --param_end="${day_end}" --query "SELECT count() FROM ${source} WHERE timestamp >= {start:DateTime64(6, 'UTC')} AND timestamp < {end:DateTime64(6, 'UTC')} FORMAT TSVRaw")"
+if [[ "${source_rows}" != "${expected_rows}" ]]; then
+  echo "expected ${expected_rows} source rows on ${source_day}; found ${source_rows}" >&2
+  exit 1
+fi
+
+config=$(printf 'source_table=%s\nsource_day=%s\nexpected_rows=%s\nrepetitions=%s\ndynamic_value=%s\ncandidates=%s\nreference_run=%s\nreference_candidate=%s\n' \
+  "${source_table}" "${source_day}" "${expected_rows}" "${repetitions}" "${dynamic_value}" \
+  "${candidate_spec}" "${reference_run}" "${reference_candidate}")
+if [[ ! -e "${run_dir}" ]]; then
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+    echo "a new sort-key run requires LIGHTHOUSE_BENCH_RESET=1" >&2
+    exit 1
+  fi
+  mkdir -p "${state_dir}/windows" "${run_dir}/evidence" "${run_dir}/queries" "${run_dir}/results"
+  printf '%s' "${config}" > "${run_dir}/config.txt"
+  date -u +%FT%TZ > "${run_dir}/started-at"
+  echo "initializing" > "${run_dir}/status"
+  for candidate in "${candidates[@]}"; do
+    "${client[@]}" --query "DROP TABLE IF EXISTS benchmark.sort_${candidate} SYNC"
+  done
+  "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/sort-key-candidates.sql"
+else
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" == "1" ]]; then
+    echo "refusing to reset existing resumable run: ${run_dir}" >&2
+    exit 1
+  fi
+  if [[ "$(cat "${run_dir}/config.txt")" != "${config}" ]]; then
+    echo "run configuration does not match ${run_dir}/config.txt" >&2
+    exit 1
+  fi
+  if [[ "$(cat "${run_dir}/status")" == "completed" ]]; then
+    echo "run is already complete: ${run_dir}" >&2
+    exit 0
+  fi
+  echo "resuming" > "${run_dir}/status"
+fi
+
+revision_rev="@"
+if [[ -z "$(jj diff --summary 2>/dev/null)" ]]; then revision_rev="@-"; fi
+revision="$(jj log -r "${revision_rev}" --no-graph -T 'commit_id' 2>/dev/null || true)"
+change_id="$(jj log -r "${revision_rev}" --no-graph -T 'change_id' 2>/dev/null || true)"
+clickhouse_version="$("${client[@]}" --query "SELECT version() FORMAT TSVRaw")"
+
+export RUN_ID="${run_id}" REVISION="${revision}" CHANGE_ID="${change_id}"
+export CLICKHOUSE_VERSION="${clickhouse_version}" SOURCE_TABLE="${source_table}"
+export SOURCE_DAY="${source_day}" ROWS="${source_rows}" REPETITIONS="${repetitions}"
+export CANDIDATES="${candidate_spec}" REFERENCE_RUN="${reference_run}"
+export REFERENCE_CANDIDATE="${reference_candidate}"
+python3 - "${run_dir}/manifest.json" <<'PY'
+import json, os, sys
+manifest = {
+    "run_id": os.environ["RUN_ID"],
+    "repository": {"commit_id": os.environ["REVISION"], "change_id": os.environ["CHANGE_ID"]},
+    "clickhouse_version": os.environ["CLICKHOUSE_VERSION"],
+    "dataset": {"source_table": os.environ["SOURCE_TABLE"], "day": os.environ["SOURCE_DAY"], "rows": int(os.environ["ROWS"])},
+    "candidates": os.environ["CANDIDATES"].split(),
+    "ranges": ["5m", "1h", "6h", "24h"],
+    "cache_modes": ["clickhouse-cold", "warm"],
+    "repetitions": int(os.environ["REPETITIONS"]),
+    "part_policy": "24 checksum-validated hourly inserts, then OPTIMIZE FINAL to one active part per candidate before measured queries",
+}
+if os.environ["REFERENCE_RUN"]:
+    manifest["result_reference"] = {
+        "run": os.environ["REFERENCE_RUN"],
+        "candidate": os.environ["REFERENCE_CANDIDATE"],
+    }
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump(manifest, output, indent=2, sort_keys=True)
+    output.write("\n")
+PY
+
+{
+  date -u +%FT%TZ
+  uname -a
+  lscpu
+  free -h
+  df -h "${benchmark_root}"
+  zfs list fast-storage/lighthouse
+  zfs get compression,recordsize,atime,refquota,mountpoint fast-storage/lighthouse
+} > "${run_dir}/evidence/host-storage.txt"
+jj status > "${run_dir}/evidence/jj-status.txt" 2>&1 || true
+"${client[@]}" --query "SELECT name, value, changed FROM system.settings WHERE changed OR name IN ('max_threads', 'max_memory_usage', 'use_query_cache', 'use_query_condition_cache') ORDER BY name FORMAT JSONEachRow" > "${run_dir}/evidence/settings.jsonl"
+
+if [[ ! -f "${run_dir}/windows.tsv" ]]; then
+  "${client[@]}" --param_start="${day_start}" --param_end="${day_end}" --query "
+    SELECT toString(toStartOfHour(timestamp)), count(),
+           sum(sipHash64(event_id, timestamp, service_name, severity, body))
+    FROM ${source}
+    WHERE timestamp >= {start:DateTime64(6, 'UTC')} AND timestamp < {end:DateTime64(6, 'UTC')}
+    GROUP BY toStartOfHour(timestamp) ORDER BY toStartOfHour(timestamp) FORMAT TSVRaw" > "${run_dir}/windows.tsv"
+fi
+if [[ "$(wc -l < "${run_dir}/windows.tsv")" != "24" ]]; then
+  echo "expected 24 source windows" >&2
+  exit 1
+fi
+
+echo "building" > "${run_dir}/status"
+printf 'query_id\tcandidate\twindow_start\texpected_rows\n' > "${run_dir}/builds.tsv.tmp"
+[[ -f "${run_dir}/builds.tsv" ]] && tail -n +2 "${run_dir}/builds.tsv" >> "${run_dir}/builds.tsv.tmp"
+mv "${run_dir}/builds.tsv.tmp" "${run_dir}/builds.tsv"
+for candidate in "${candidates[@]}"; do
+  mkdir -p "${state_dir}/windows/${candidate}"
+  while IFS=$'\t' read -r window_start window_rows window_checksum; do
+    window_end="$(date -u -d "${window_start} UTC +1 hour" '+%F %T')"
+    window_id="$(date -u -d "${window_start} UTC" +%Y%m%dT%H)"
+    marker="${state_dir}/windows/${candidate}/${window_id}"
+    [[ -f "${marker}" ]] && continue
+    check_free_space
+    existing="$("${client[@]}" --param_start="${window_start}" --param_end="${window_end}" --query "SELECT count(), coalesce(sum(sipHash64(event_id, timestamp, service_name, severity, body)), 0) FROM benchmark.sort_${candidate} WHERE timestamp >= {start:DateTime64(6, 'UTC')} AND timestamp < {end:DateTime64(6, 'UTC')} FORMAT TSVRaw")"
+    if [[ "${existing}" != $'0\t0' ]]; then
+      if [[ "${existing}" == "${window_rows}"$'\t'"${window_checksum}" ]]; then
+        printf 'recovered\n' > "${marker}"
+        continue
+      fi
+      echo "partial or invalid ${candidate} window ${window_start}: ${existing}" >&2
+      exit 1
+    fi
+    query_id="${query_prefix}_build_${candidate}_${window_id}"
+    "${client[@]}" --query_id="${query_id}" --receive_timeout=86400 --send_timeout=86400 \
+      --param_start="${window_start}" --param_end="${window_end}" --query "
+        INSERT INTO benchmark.sort_${candidate}
+        SELECT * FROM ${source}
+        WHERE timestamp >= {start:DateTime64(6, 'UTC')} AND timestamp < {end:DateTime64(6, 'UTC')}"
+    actual="$("${client[@]}" --param_start="${window_start}" --param_end="${window_end}" --query "SELECT count(), coalesce(sum(sipHash64(event_id, timestamp, service_name, severity, body)), 0) FROM benchmark.sort_${candidate} WHERE timestamp >= {start:DateTime64(6, 'UTC')} AND timestamp < {end:DateTime64(6, 'UTC')} FORMAT TSVRaw")"
+    if [[ "${actual}" != "${window_rows}"$'\t'"${window_checksum}" ]]; then
+      echo "${candidate} validation mismatch for ${window_start}: ${actual}" >&2
+      exit 1
+    fi
+    printf '%s\n' "${actual}" > "${marker}"
+    printf '%s\t%s\t%s\t%s\n' "${query_id}" "${candidate}" "${window_start}" "${window_rows}" >> "${run_dir}/builds.tsv"
+  done < "${run_dir}/windows.tsv"
+  candidate_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.sort_${candidate} FORMAT TSVRaw")"
+  [[ "${candidate_rows}" == "${source_rows}" ]] || { echo "sort_${candidate} row mismatch" >&2; exit 1; }
+
+  optimized_marker="${state_dir}/optimized-${candidate}"
+  if [[ ! -f "${optimized_marker}" ]]; then
+    check_free_space
+    optimize_id="${query_prefix}_optimize_${candidate}"
+    "${client[@]}" --query_id="${optimize_id}" --receive_timeout=86400 --send_timeout=86400 \
+      --query "OPTIMIZE TABLE benchmark.sort_${candidate} FINAL"
+    active_parts="$("${client[@]}" --query "SELECT count() FROM system.parts WHERE active AND database='benchmark' AND table='sort_${candidate}' FORMAT TSVRaw")"
+    if [[ "${active_parts}" != "1" ]]; then
+      echo "sort_${candidate} expected one active part after OPTIMIZE FINAL; found ${active_parts}" >&2
+      exit 1
+    fi
+    printf 'completed\n' > "${optimized_marker}"
+  fi
+done
+candidate_table_list="$(printf "'sort_%s'," "${candidates[@]}")"
+candidate_table_list="${candidate_table_list%,}"
+"${client[@]}" --query "SELECT table, sum(rows) rows, sum(bytes_on_disk) bytes_on_disk, count() active_parts, max(level) max_level FROM system.parts WHERE active AND database='benchmark' AND table IN (${candidate_table_list}) GROUP BY table ORDER BY table FORMAT JSONEachRow" > "${run_dir}/evidence/table-storage.jsonl"
+
+IFS=$'\t' read -r service severity < <("${client[@]}" --param_start="${day_start}" --param_end="${day_end}" --query "SELECT service_name, severity FROM ${source} WHERE timestamp >= {start:DateTime64(6, 'UTC')} AND timestamp < {end:DateTime64(6, 'UTC')} AND notEmpty(service_name) AND notEmpty(severity) GROUP BY service_name, severity ORDER BY count() DESC LIMIT 1 FORMAT TSVRaw")
+printf 'query_id\tcandidate\tcache_mode\trange\tfixture\trepetition\twall_ms\tresult_file\tresult_sha256\n' > "${run_dir}/timings.tsv"
+echo "querying" > "${run_dir}/status"
+for mode in clickhouse-cold warm; do
+  for range_index in "${!ranges[@]}"; do
+    range_name="${ranges[${range_index}]}"
+    seconds="${range_seconds[${range_index}]}"
+    range_start="$(date -u -d "${day_end} UTC -${seconds} seconds" '+%F %T')"
+    for source_query in "${repo_root}/benchmark/queries/sort-key/"*.sql; do
+      fixture="$(basename "${source_query}" .sql)"
+      for candidate in "${candidates[@]}"; do
+        mkdir -p "${run_dir}/queries/${candidate}"
+        rendered="${run_dir}/queries/${candidate}/${fixture}.sql"
+        sed "s|{{table}}|benchmark.sort_${candidate}|g" "${source_query}" > "${rendered}"
+        if [[ "${mode}" == warm ]]; then
+          "${client[@]}" --query_id="${query_prefix}_prewarm_${candidate}_${range_name}_${fixture//-/_}" \
+            --param_start="${range_start}" --param_end="${day_end}" --param_service="${service}" \
+            --param_severity="${severity}" --param_dynamic_value="${dynamic_value}" --queries-file "${rendered}" >/dev/null
+        fi
+      done
+      for repetition in $(seq 1 "${repetitions}"); do
+        # Rotate candidate order so each layout occupies each cold-cache order once.
+        offset="$(((repetition - 1) % ${#candidates[@]}))"
+        for position in "${!candidates[@]}"; do
+          candidate="${candidates[$(((position + offset) % ${#candidates[@]}))]}"
+          rendered="${run_dir}/queries/${candidate}/${fixture}.sql"
+          if [[ "${mode}" == clickhouse-cold ]]; then
+            "${client[@]}" --multiquery --query "SYSTEM DROP MARK CACHE; SYSTEM DROP UNCOMPRESSED CACHE; SYSTEM DROP QUERY CACHE; SYSTEM DROP QUERY CONDITION CACHE; SYSTEM DROP FILESYSTEM CACHE;" >/dev/null
+          fi
+          query_id="${query_prefix}_${mode//-/_}_${candidate}_${range_name}_${fixture//-/_}_${repetition}"
+          result_file="results/${mode}-${candidate}-${range_name}-${fixture}-r${repetition}.jsonl"
+          started_ns="$(date +%s%N)"
+          "${client[@]}" --query_id="${query_id}" --param_start="${range_start}" --param_end="${day_end}" \
+            --param_service="${service}" --param_severity="${severity}" --param_dynamic_value="${dynamic_value}" \
+            --queries-file "${rendered}" > "${run_dir}/${result_file}"
+          finished_ns="$(date +%s%N)"
+          hash="$(sha256sum "${run_dir}/${result_file}" | cut -d' ' -f1)"
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${query_id}" "${candidate}" "${mode}" \
+            "${range_name}" "${fixture}" "${repetition}" "$(((finished_ns-started_ns)/1000000))" "${result_file}" "${hash}" >> "${run_dir}/timings.tsv"
+        done
+      done
+    done
+  done
+done
+
+python3 - "${run_dir}/timings.tsv" "${reference_run}" "${reference_candidate}" <<'PY'
+import csv, os, sys
+rows = list(csv.DictReader(open(sys.argv[1], encoding="utf-8"), delimiter="\t"))
+groups = {}
+for row in rows:
+    key = row["cache_mode"], row["range"], row["fixture"], row["repetition"]
+    groups.setdefault(key, {})[row["candidate"]] = row["result_sha256"]
+candidate_count = len({row["candidate"] for row in rows})
+failures = [key for key, hashes in groups.items() if len(hashes) != candidate_count or len(set(hashes.values())) != 1]
+if failures:
+    raise SystemExit(f"sort-key result mismatches: {failures}")
+if sys.argv[2]:
+    reference_rows = csv.DictReader(
+        open(os.path.join(sys.argv[2], "timings.tsv"), encoding="utf-8"),
+        delimiter="\t",
+    )
+    reference = {
+        (row["cache_mode"], row["range"], row["fixture"], row["repetition"]): row["result_sha256"]
+        for row in reference_rows if row["candidate"] == sys.argv[3]
+    }
+    mismatches = [
+        (row["cache_mode"], row["range"], row["fixture"], row["repetition"])
+        for row in rows
+        if reference.get((row["cache_mode"], row["range"], row["fixture"], row["repetition"])) != row["result_sha256"]
+    ]
+    if mismatches:
+        raise SystemExit(f"reference result mismatches: {mismatches}")
+PY
+
+mkdir -p "${run_dir}/evidence/explain"
+for candidate in "${candidates[@]}"; do
+  for source_query in "${repo_root}/benchmark/queries/sort-key/"*.sql; do
+    fixture="$(basename "${source_query}" .sql)"
+    {
+      printf 'EXPLAIN indexes = 1\n'
+      sed -e "s|{{table}}|benchmark.sort_${candidate}|g" -e '/^FORMAT JSONEachRow;$/d' "${source_query}"
+    } | "${client[@]}" --multiquery --param_start="${day_start}" --param_end="${day_end}" \
+      --param_service="${service}" --param_severity="${severity}" --param_dynamic_value="${dynamic_value}" \
+      > "${run_dir}/evidence/explain/${candidate}-${fixture}.txt"
+  done
+done
+
+capture_logs
+"${client[@]}" --query "SELECT table, partition, name, rows, bytes_on_disk, marks, level FROM system.parts WHERE active AND database='benchmark' AND table IN (${candidate_table_list}) ORDER BY table, name FORMAT JSONEachRow" > "${run_dir}/evidence/parts-after-query.jsonl"
+date -u +%FT%TZ > "${run_dir}/completed-at"
+echo "completed" > "${run_dir}/status"
+trap - EXIT
+echo "sort-key benchmark completed: ${run_dir}"

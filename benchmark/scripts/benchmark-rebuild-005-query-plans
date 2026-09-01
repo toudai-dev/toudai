@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_path="${LIGHTHOUSE_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet}"
+historical_revision="e1a2fc8b3ba3d4a84017f3b3d7838528fa595c4b"
+expected_version="26.3.17.110"
+expected_rows="3629077"
+run_id="${1:-experiment-017-rebuild-005-v1}"
+resume="${LIGHTHOUSE_BENCH_RESUME:-0}"
+
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+if [[ ! -f "${source_path}" ]]; then
+  echo "Parquet source does not exist: ${source_path}" >&2
+  exit 1
+fi
+
+run_dir="${runs_root}/${run_id}"
+if [[ -e "${run_dir}" ]]; then
+  if [[ "${resume}" != "1" ]]; then
+    echo "run directory already exists: ${run_dir}" >&2
+    exit 1
+  fi
+  prior_status="$(cat "${run_dir}/status" 2>/dev/null || true)"
+  if [[ "${prior_status}" != "failed" && "${prior_status}" != "running" ]]; then
+    echo "cannot resume run with status '${prior_status}': ${run_dir}" >&2
+    exit 1
+  fi
+elif [[ "${resume}" == "1" ]]; then
+  echo "cannot resume missing run directory: ${run_dir}" >&2
+  exit 1
+fi
+
+mkdir -p "${run_dir}/evidence/historical/benchmark/clickhouse" \
+  "${run_dir}/evidence/historical/benchmark/queries" \
+  "${run_dir}/evidence/ddl" "${run_dir}/plans"
+echo "running" > "${run_dir}/status"
+
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
+
+on_error() {
+  echo "failed" > "${run_dir}/status"
+}
+trap on_error ERR
+
+fail() {
+  echo "$1" >&2
+  echo "failed" > "${run_dir}/status"
+  exit 1
+}
+
+current_version="$("${client[@]}" --query "SELECT version() FORMAT TSVRaw")"
+if [[ "${current_version}" != "${expected_version}" ]]; then
+  fail "Experiment 005 used ClickHouse ${expected_version}; current version is ${current_version}"
+fi
+
+# Recover source-controlled inputs from the measured revision rather than using
+# current fixtures that may have evolved since the original experiment.
+recover_file() {
+  local source="$1"
+  local destination="${run_dir}/evidence/historical/${source}"
+  mkdir -p "$(dirname -- "${destination}")"
+  jj file show -r "${historical_revision}" "${source}" > "${destination}"
+}
+
+recover_file benchmark/clickhouse/candidates.sql
+recover_file benchmark/clickhouse/load-candidates.sql
+while IFS= read -r fixture; do
+  recover_file "${fixture}"
+done < <(jj file list -r "${historical_revision}" | rg '^benchmark/queries/.+\.sql$' | sort)
+
+historical_root="${run_dir}/evidence/historical"
+candidate_sql="${historical_root}/benchmark/clickhouse/candidates.sql"
+load_sql="${historical_root}/benchmark/clickhouse/load-candidates.sql"
+
+# These names are disposable historical candidates. Refuse to replace data so
+# this reconstruction cannot accidentally destroy another active experiment.
+if [[ "${resume}" != "1" ]]; then
+  existing_rows="$("${client[@]}" --query "
+    SELECT sum(total_rows)
+    FROM system.tables
+    WHERE database = 'benchmark'
+      AND name IN ('gcp_source', 'events_json', 'events_map', 'events_typed')
+    FORMAT TSVRaw")"
+  if [[ "${existing_rows}" != "0" && "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+    fail "historical candidate tables contain ${existing_rows} rows; set LIGHTHOUSE_BENCH_RESET=1 to replace them"
+  fi
+
+  "${client[@]}" --multiquery --query "
+    DROP VIEW IF EXISTS benchmark.gcp_events;
+    DROP TABLE IF EXISTS benchmark.events_json;
+    DROP TABLE IF EXISTS benchmark.events_map;
+    DROP TABLE IF EXISTS benchmark.events_typed;
+    DROP TABLE IF EXISTS benchmark.gcp_source;
+  " >/dev/null
+  "${client[@]}" --multiquery < "${candidate_sql}"
+
+  structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
+  echo "staging Experiment 005 source"
+  clickhouse local \
+    --param_source="${source_path}" \
+    --param_structure="${structure}" \
+    --query "SELECT * FROM file({source:String}, Parquet, {structure:String}) FORMAT Native" |
+    "${client[@]}" --query "INSERT INTO benchmark.gcp_source FORMAT Native"
+
+  echo "loading Experiment 005 candidates"
+  "${client[@]}" --multiquery < "${load_sql}"
+else
+  source_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+  if [[ "${source_rows}" != "${expected_rows}" ]]; then
+    fail "expected ${expected_rows} staged rows when resuming; found ${source_rows}"
+  fi
+  echo "resuming Experiment 005 from loaded candidates"
+fi
+
+table_state="$("${client[@]}" --query "
+  SELECT count(), uniqExact(total_rows), min(total_rows)
+  FROM system.tables
+  WHERE database = 'benchmark'
+    AND name IN ('events_json', 'events_map', 'events_typed')
+  FORMAT TSVRaw")"
+if [[ "${table_state}" != $'3\t1\t'"${expected_rows}" ]]; then
+  fail "expected three candidate tables with ${expected_rows} rows; found: ${table_state}"
+fi
+
+# The original measurement recorded one active part per candidate. Parallel
+# inserts initially produce multiple parts on this host, so force the same
+# documented layout before capturing plans rather than racing background merges.
+for table in events_json events_map events_typed; do
+  "${client[@]}" --receive_timeout=86400 --send_timeout=86400 \
+    --query "OPTIMIZE TABLE benchmark.${table} FINAL"
+done
+
+part_state="$("${client[@]}" --query "
+  SELECT count(), uniqExact(table)
+  FROM system.parts
+  WHERE active AND database = 'benchmark'
+    AND table IN ('events_json', 'events_map', 'events_typed')
+  FORMAT TSVRaw")"
+if [[ "${part_state}" != $'3\t3' ]]; then
+  fail "expected one active part per candidate after FINAL compaction; found: ${part_state}"
+fi
+
+start="$("${client[@]}" --query "SELECT min(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
+end="$("${client[@]}" --query "SELECT max(timestamp) FROM benchmark.events_map FORMAT TSVRaw")"
+IFS=$'\t' read -r service severity < <("${client[@]}" --query "
+  SELECT service_name, severity
+  FROM benchmark.events_map
+  WHERE notEmpty(service_name) AND notEmpty(severity)
+  GROUP BY service_name, severity
+  ORDER BY count() DESC, service_name, severity
+  LIMIT 1 FORMAT TSVRaw")
+IFS=$'\t' read -r dynamic_low_value caller < <("${client[@]}" --query "
+  SELECT attributes['type'], attributes['caller']
+  FROM benchmark.events_map
+  WHERE notEmpty(attributes['type']) AND notEmpty(attributes['caller'])
+  GROUP BY attributes['type'], attributes['caller']
+  ORDER BY count() DESC, attributes['type'], attributes['caller']
+  LIMIT 1 FORMAT TSVRaw")
+dynamic_high_value="$("${client[@]}" --query "
+  SELECT attributes['workspace_id']
+  FROM benchmark.events_map
+  WHERE notEmpty(attributes['workspace_id'])
+  GROUP BY attributes['workspace_id']
+  ORDER BY count() DESC, attributes['workspace_id']
+  LIMIT 1 FORMAT TSVRaw")"
+body_term="error"
+
+query_args=(
+  --param_start="${start}"
+  --param_end="${end}"
+  --param_service="${service}"
+  --param_severity="${severity}"
+  --param_dynamic_low_value="${dynamic_low_value}"
+  --param_dynamic_high_value="${dynamic_high_value}"
+  --param_caller="${caller}"
+  --param_body_term="${body_term}"
+)
+
+"${client[@]}" --query "
+  SELECT table, partition, name, rows, bytes_on_disk, data_compressed_bytes,
+         data_uncompressed_bytes, marks, level
+  FROM system.parts
+  WHERE active AND database = 'benchmark'
+    AND table IN ('gcp_source', 'events_json', 'events_map', 'events_typed')
+  ORDER BY table, partition, name FORMAT JSONEachRow
+" > "${run_dir}/evidence/parts.jsonl"
+for table in gcp_source events_json events_map events_typed; do
+  "${client[@]}" --query "SHOW CREATE TABLE benchmark.${table}" \
+    > "${run_dir}/evidence/ddl/${table}.sql"
+done
+
+printf 'candidate\tfixture\tclassification\tquery_file\texplain_file\tquery_sha256\texplain_sha256\n' \
+  > "${run_dir}/plans.tsv"
+for candidate in json map typed; do
+  mkdir -p "${run_dir}/plans/${candidate}"
+  for fixture_path in \
+    "${historical_root}/benchmark/queries/common/"*.sql \
+    "${historical_root}/benchmark/queries/${candidate}/"*.sql; do
+    fixture="$(basename "${fixture_path}" .sql)"
+    query_file="plans/${candidate}/${fixture}.sql"
+    explain_file="plans/${candidate}/${fixture}.explain.txt"
+    sed "s|{{table}}|benchmark.events_${candidate}|g" "${fixture_path}" \
+      > "${run_dir}/${query_file}"
+    # FORMAT belongs to query execution rather than EXPLAIN's syntax.
+    query="$(python3 - "${run_dir}/${query_file}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+query = Path(sys.argv[1]).read_text()
+print(re.sub(r"\s+FORMAT\s+JSONEachRow\s*;?\s*$", "", query, flags=re.IGNORECASE))
+PY
+)"
+    "${client[@]}" "${query_args[@]}" --query "EXPLAIN indexes = 1 ${query}" \
+      > "${run_dir}/${explain_file}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "${candidate}" "${fixture}" "reconstructed-unverifiable-original-part-checksum" \
+      "${query_file}" "${explain_file}" \
+      "$(sha256sum "${run_dir}/${query_file}" | cut -d' ' -f1)" \
+      "$(sha256sum "${run_dir}/${explain_file}" | cut -d' ' -f1)" \
+      >> "${run_dir}/plans.tsv"
+  done
+done
+
+source_bytes="$(stat -c %s "${source_path}")"
+source_sha256="$(sha256sum "${source_path}" | cut -d' ' -f1)"
+current_revision="$(jj log -r @- --no-graph -T 'commit_id')"
+export RUN_ID="${run_id}" HISTORICAL_REVISION="${historical_revision}"
+export CURRENT_VERSION="${current_version}" SOURCE_PATH="${source_path}"
+export SOURCE_BYTES="${source_bytes}" SOURCE_SHA256="${source_sha256}"
+export START="${start}" END="${end}" SERVICE="${service}" SEVERITY="${severity}"
+export DYNAMIC_LOW_VALUE="${dynamic_low_value}" DYNAMIC_HIGH_VALUE="${dynamic_high_value}"
+export CALLER="${caller}" BODY_TERM="${body_term}"
+export CURRENT_REVISION="${current_revision}"
+python3 - "${run_dir}/manifest.json" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+manifest = {
+    "run_id": os.environ["RUN_ID"],
+    "started_at": datetime.now(timezone.utc).isoformat(),
+    "capture_revision": os.environ["CURRENT_REVISION"],
+    "historical_revision": os.environ["HISTORICAL_REVISION"],
+    "clickhouse_version": os.environ["CURRENT_VERSION"],
+    "classification": "reconstructed-unverifiable-original-part-checksum",
+    "classification_reason": (
+        "Source, source hash, DDL, fixtures, parameter-selection logic, row count, "
+        "one-part-per-candidate layout, and ClickHouse version were reproduced. "
+        "The original run artifacts and part checksums no longer exist, so physical "
+        "identity with the measured parts cannot be proven."
+    ),
+    "plan_count": 30,
+    "dataset": {
+        "source_path": os.environ["SOURCE_PATH"],
+        "source_bytes": int(os.environ["SOURCE_BYTES"]),
+        "source_sha256": os.environ["SOURCE_SHA256"],
+        "rows": 3629077,
+        "event_time_start": os.environ["START"],
+        "event_time_end": os.environ["END"],
+    },
+    "parameters": {
+        "service": os.environ["SERVICE"],
+        "severity": os.environ["SEVERITY"],
+        "dynamic_low_value": os.environ["DYNAMIC_LOW_VALUE"],
+        "dynamic_high_value": os.environ["DYNAMIC_HIGH_VALUE"],
+        "caller": os.environ["CALLER"],
+        "body_term": os.environ["BODY_TERM"],
+    },
+}
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump(manifest, output, indent=2, sort_keys=True)
+    output.write("\n")
+PY
+
+date -u +%FT%TZ > "${run_dir}/completed-at"
+echo "completed" > "${run_dir}/status"
+trap - ERR
+echo "Experiment 005 reconstruction completed: ${run_dir}"

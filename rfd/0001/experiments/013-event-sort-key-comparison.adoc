@@ -1,0 +1,245 @@
+= Experiment 013: Event Sort-Key Comparison
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed
+- *Started:* 2026-08-27T07:28:00Z
+- *Completed:* 2026-08-28T09:14:27Z
+- *Source mutation:* None; the experiment creates disposable candidate tables
+
+:benchmark-storage-context: Source and sort-key candidate tables on the striped hot SSD ZFS tier.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
+== Question
+
+Given that every interactive event query must constrain tenant, dataset, and
+time, should the normalized event table order the full timestamp immediately
+after tenant and dataset instead of placing hour and service before timestamp?
+
+== Candidates
+
+All candidates retain daily partitions and identical columns, codecs, storage,
+index granularity, source rows, and final compacted part count.
+
+. *Hour/service baseline:* `(tenant_id, dataset,
+   toStartOfHour(timestamp), service_name, timestamp, event_id)`.
+. *Timestamp-first within tenant:* `(tenant_id, dataset, timestamp,
+   event_id)`.
+. *Hour/timestamp compromise:* `(tenant_id, dataset,
+   toStartOfHour(timestamp), timestamp, service_name, event_id)`.
+
+Placing `toDate(timestamp)` first is not a candidate because the table is
+already partitioned by that expression; it is constant within each candidate
+part. Placing timestamp before tenant is also excluded because the product
+contract requires tenant and dataset equality and must not interleave every
+tenant in the primary query range.
+
+== Dataset and capacity boundary
+
+Use the natural 2026-08-05 partition from `events_map_hot`: 548,954,103 rows,
+approximately 1.04 TB of provisional logical input, and 103.96 GiB in the
+current physical layout.
+
+The host has 765 GiB free before this experiment. Three additional ten-day
+copies would require roughly 3 TiB and cannot fit. Three one-day candidates are
+expected to consume approximately 312 GiB, leaving more than the 100 GiB safety
+guardrail. This experiment can select the local ordering mechanics but cannot
+alone prove ten-day part counts, cluster fanout, or long-retention merge cost.
+
+== Method
+
+. Copy the same source day into each candidate through 24 serial hourly
+   inserts.
+. Load through 24 checksum-validated hourly inserts, then run `OPTIMIZE FINAL`
+   and require one active part per candidate before measurement. This prevents
+   merge timing or part layout from confounding the sort-order comparison.
+. Validate each candidate window against source row counts and a checksum over
+   event identity, timestamp, service, severity, and body.
+. Test 5-minute, 1-hour, 6-hour, and full-day ranges for:
++
+--
+* latest 100 events ordered by timestamp;
+* exact time-range count and event checksum;
+* the dominant service/severity predicate; and
+* `attributes['type'] = 'event_lifecycle'` as a raw dynamic predicate.
+--
+. Run three ClickHouse-cold and three warm repetitions. Rotate candidate order
+   across repetitions so each occupies every execution position once.
+. Require byte-identical results across all three layouts and record latency,
+   rows and bytes read, marks, CPU, memory, build cost, compression, and parts.
+
+ClickHouse-cold resets ClickHouse-managed caches but does not evict Linux page
+cache or ZFS ARC, so it is not a host-cold measurement.
+
+== Interpretation rules
+
+- Prefer `(tenant_id, dataset, timestamp, event_id)` if it materially improves
+  latest-event and narrow time-bound queries without unacceptable regression on
+  service filtering or compression.
+- Retain an hour bucket only if measured coarse-range pruning or compression
+  justifies it.
+- Do not retain `service_name` ahead of timestamp merely because one promoted
+  predicate benefits; dashboards already have aggregate-state acceleration and
+  selective service access can use a projection or bounded secondary path.
+- Do not extrapolate full-day scans to narrow time ranges or infer ten-day
+  retained performance linearly.
+
+== Guardrails
+
+- Preserve `events_map_hot`, `event_payloads`, and Experiment 012 acceleration
+  tables unchanged.
+- Preserve at least 100 GiB free on the benchmark SSD.
+- Stop on a partial window, checksum mismatch, final part-count mismatch, or
+  source row-count mismatch.
+
+== Results
+
+The controlled run completed all 72 checksum-validated load windows and all
+288 query measurements. All 96 cache/range/fixture/repetition groups produced
+byte-identical results across the three candidates. Raw artifacts remain at
+`/mnt/fast-storage/lighthouse/runs/experiment-013-sort-keys-v1`.
+
+The run used ClickHouse 26.3.17.110 at repository revision `d5669569`, with 12
+query threads, a 40 GiB query memory limit, and one final active part per
+candidate. Each number below is the median of three repetitions. ClickHouse-cold
+means ClickHouse caches were reset; it does not mean Linux page cache or ZFS ARC
+was evicted.
+
+=== Storage and build cost
+
+[options="header",cols="5*"]
+|===
+
+|Candidate
+|Compressed size
+|Difference from baseline
+|Hourly inserts
+|Successful final compaction
+
+|Hour/service baseline
+|103.95 GiB
+|—
+|51.2 min
+|35.4 min
+
+|Timestamp-first
+|145.61 GiB
+|+40.1%
+|55.2 min
+|47.3 min
+
+|Hour/timestamp
+|145.61 GiB
+|+40.1%
+|55.8 min
+|52.4 min
+
+|===
+
+Clustering by service therefore provided a substantial compression benefit for
+this corpus. Merely retaining the hour expression without placing service
+before timestamp did not preserve that benefit.
+
+=== ClickHouse-cold latency
+
+Values are median wall-clock milliseconds in candidate order
+*hour/service · timestamp-first · hour/timestamp*.
+
+[options="header",cols="5*"]
+|===
+
+|Fixture
+|5 min
+|1 hour
+|6 hours
+|24 hours
+
+|Latest 100 events
+|158 · *125* · 133
+|315 · *130* · 302
+|1,387 · *119* · 1,351
+|5,793 · *124* · 5,788
+
+|Time-range count
+|126 · 111 · *105*
+|264 · *248* · 249
+|1,154 · *1,118* · 1,151
+|5,003 · *4,815* · 4,915
+
+|Service and severity
+|125 · *121* · 133
+|*164* · 286 · 293
+|*366* · 1,250 · 1,303
+|*1,760* · 5,577 · 5,749
+
+|Dynamic `Map` filter
+|749 · 341 · *340*
+|4,043 · 4,319 · *3,628*
+|*24,492* · 31,953 · 30,164
+|*129,310* · 161,898 · 166,078
+
+|===
+
+Timestamp-first changed the latest-event path qualitatively: at 24 hours it
+read about 75,700 rows and 3 MiB instead of about 549 million rows and 21.18
+GiB, reducing the median from 5.79 seconds to 124 milliseconds. Its benefit to
+ordinary range aggregates was modest: 3.8% at 24 hours and no more than 12% in
+this matrix.
+
+The hour/service layout retained the expected selective-field advantage. For
+the 24-hour service/severity query it read 142.7 million rows and 4.71 GiB,
+versus 549.0 million rows and 18.11 GiB for timestamp-first, and was 3.2 times
+faster. It was also 1.25 times faster for the 24-hour cold dynamic predicate,
+consistent with its smaller representation even though the dynamic field was
+not in the ordering key.
+
+Warm results supported the same broad trade-off. Timestamp-first served the
+24-hour latest tail in 74 ms versus 4.69 seconds for hour/service, while
+hour/service served the 24-hour service predicate in 1.55 seconds versus 4.83
+seconds. Warm dynamic-filter results also exercised ClickHouse's query-condition
+cache and must not be interpreted as storage-only pruning.
+
+=== Operational observations
+
+The first attempt stopped safely at hour 20 of the hour/service candidate after
+ClickHouse rejected a new insert with `TOO_MANY_PARTS`. Holding background
+merges while parallel `INSERT SELECT` blocks accumulated created 3,041 parts,
+crossing the 3,000-part guardrail. The source was unchanged and all 20 completed
+windows retained row-count and checksum markers. The harness now allows normal
+build merges and normalizes every completed candidate with `OPTIMIZE FINAL`
+before measured queries; the same immutable run selection resumed from its
+validated markers.
+
+Two resumed `OPTIMIZE FINAL` calls returned without compacting after waiting 120
+seconds for existing background merges. The harness rejected the remaining
+multi-part layouts, retained all validated windows, and resumed compaction once
+the background merges had stopped. This did not affect measured queries: every
+candidate had exactly one active part before the matrix began.
+
+== Interpretation
+
+- The hour/timestamp compromise is not useful for this corpus. It has the same
+  storage cost as timestamp-first, behaves like hour/service for broad latest
+  queries, and does not gain service pruning because service follows timestamp.
+- Timestamp-first is the strongest general raw exploration key when rapid
+  newest-event retrieval is part of the contract. Its cost here is 40.1% more
+  compressed storage and approximately three-times slower broad
+  service/severity filtering than the hour/service baseline.
+- Hour/service remains credible if storage efficiency and promoted service
+  predicates dominate. It should not be chosen on the assumption that strict
+  time bounds alone make recent-tail retrieval cheap; this experiment directly
+  contradicts that assumption.
+- The provisional MVP recommendation is `(tenant_id, dataset, timestamp,
+  event_id)`, with service dashboards handled by aggregate states and selective
+  service access tested through projections or configured attribute indexes.
+  This remains an RFD input rather than a finalized architecture decision.
+
+== Follow-ups
+
+. Compare a service-oriented projection or bounded secondary table against the
+   40.1% base-table storage increase and service-filter regression.
+. Repeat the selected base layout in Experiment 014's local distributed
+   topology to measure leaf pruning, fanout, and coordinator merge cost.
+. Validate ingestion and merge behavior without `OPTIMIZE FINAL`; production
+   cannot depend on forced single-part normalization.

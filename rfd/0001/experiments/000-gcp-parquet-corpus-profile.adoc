@@ -1,0 +1,331 @@
+= Experiment 000: GCP Parquet Corpus Profile
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed
+- *Date:* 2026-08-16
+- *Data mutation:* None; all commands were read-only
+
+:benchmark-storage-context: Parquet corpus reads from the striped bulk HDD ZFS tier; no ClickHouse serving table was loaded.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
+== Question
+
+What volume, event-time coverage, schema shape, and approximate logical JSON
+size does the available `~/storage/lighthouse` corpus represent?
+
+== Environment
+
+- Host: Linux x86-64, 12 logical CPUs, 62 GiB RAM
+- Source storage: approximately 6 TiB available during profiling
+- DuckDB: v1.5.2
+- ClickHouse available for later tests: 26.3.15.4 LTS
+- Source path: `/home/darwin/storage/lighthouse`
+
+The corpus was previously retrieved from GCP Logging as JSON and compacted into
+Parquet. It contains logs, not a representative trace or native-metrics corpus.
+
+== Method
+
+Parquet footer metadata supplied file sizes, row counts, row groups, and
+timestamp bounds without decoding every event. A representative file was then
+scanned to profile event width, field counts, cardinality, and canonical JSON
+reconstruction size:
+
+[source,text]
+----
+/home/darwin/storage/lighthouse/2026-08-01/compact-0000.parquet
+----
+
+Representative-value cardinalities use DuckDB's approximate distinct-count
+function and should not be interpreted as exact counts.
+
+== Commands
+
+Inventory files and physical bytes:
+
+[source,bash]
+----
+find /home/darwin/storage/lighthouse -type f -name '*.parquet' -printf '%h %s\n'
+du -sh /home/darwin/storage/lighthouse
+----
+
+Read exact file and row counts from Parquet footers:
+
+[source,sql]
+----
+SELECT
+  regexp_extract(file_name, '/(2026-[0-9]{2}-[0-9]{2})/', 1) AS day,
+  count(*) AS file_count,
+  sum(num_rows) AS row_count,
+  sum(file_size_bytes) AS byte_count
+FROM parquet_file_metadata('/home/darwin/storage/lighthouse/*/*.parquet')
+GROUP BY day
+ORDER BY day;
+----
+
+Verify event-time coverage from row-group statistics:
+
+[source,sql]
+----
+SELECT
+  regexp_extract(file_name, '/(2026-[0-9]{2}-[0-9]{2})/', 1) AS directory_day,
+  min(try_cast(stats_min_value AS TIMESTAMPTZ)) AS min_timestamp,
+  max(try_cast(stats_max_value AS TIMESTAMPTZ)) AS max_timestamp,
+  count(DISTINCT file_name) AS file_count
+FROM parquet_metadata('/home/darwin/storage/lighthouse/*/*.parquet')
+WHERE path_in_schema = 'timestamp'
+GROUP BY directory_day
+ORDER BY directory_day;
+----
+
+The representative profile queried row counts, timestamp bounds, distinct
+resource/log/severity values, trace-field population, string lengths, JSON key
+counts, and a reconstructed JSON object containing all Parquet columns.
+
+== Results
+
+=== Complete corpus
+
+[options="header",cols="2*"]
+|===
+
+|Measurement
+|Result
+
+|Files
+|2,685
+
+|Parquet bytes
+|1,332,877,136,312
+
+|Rows
+|6,674,704,383
+
+|Covered periods
+|12 complete 24-hour windows
+
+|Average rows/day
+|556M
+
+|Minimum rows/day
+|433,515,030
+
+|Maximum rows/day
+|734,357,124
+
+|Average event rate
+|approximately 6,437 events/sec
+
+|===
+
+Daily footer counts:
+
+[options="header",cols="4*"]
+|===
+
+|Directory
+|Files
+|Rows
+|Parquet GiB
+
+|2026-08-01
+|224
+|638,620,872
+|105.50
+
+|2026-08-02
+|224
+|594,845,618
+|101.85
+
+|2026-08-03
+|256
+|734,357,124
+|121.60
+
+|2026-08-04
+|240
+|556,031,961
+|110.25
+
+|2026-08-05
+|238
+|547,356,173
+|107.90
+
+|2026-08-06
+|240
+|567,535,970
+|110.19
+
+|2026-08-07
+|231
+|582,743,387
+|107.13
+
+|2026-08-08
+|187
+|433,515,030
+|85.15
+
+|2026-08-09
+|179
+|439,817,903
+|84.24
+
+|2026-08-10
+|226
+|594,430,321
+|106.12
+
+|2026-08-11
+|219
+|493,776,502
+|100.47
+
+|2026-08-12
+|221
+|491,673,522
+|100.95
+
+|===
+
+Each directory spans a complete UTC day, displayed by the local client as 21:00
+on the previous date through 20:59:59 on the named date.
+
+=== Parquet schema
+
+The corpus contains these top-level columns:
+
+[source,text]
+----
+timestamp                         TIMESTAMPTZ
+timestamp_unix_nanos              BIGINT
+receive_timestamp                 TIMESTAMPTZ
+receive_timestamp_unix_nanos      BIGINT
+severity                          VARCHAR
+severity_number                   BIGINT
+log_name                          VARCHAR
+resource_type                     VARCHAR
+resource_labels                   JSON
+labels                            JSON
+insert_id                         VARCHAR
+trace                             VARCHAR
+span_id                           VARCHAR
+trace_sampled                     BOOLEAN
+raw_entry                         VARCHAR
+----
+
+=== Representative file
+
+[options="header",cols="2*"]
+|===
+
+|Measurement
+|Result
+
+|Rows
+|3,629,077
+
+|Parquet bytes
+|514,981,183
+
+|Resource types
+|9
+
+|Log names
+|4
+
+|Severities
+|5
+
+|Populated trace IDs
+|0
+
+|Populated span IDs
+|0
+
+|Average resource keys/event
+|5.00
+
+|Average label keys/event
+|22.56
+
+|Average raw-entry bytes
+|3,577
+
+|Raw-entry p50/p90/p99 bytes
+|3,404 / 3,919 / 5,662
+
+|Average reconstructed JSON bytes
+|5,462
+
+|Reconstructed NDJSON bytes
+|19,826,424,759
+
+|===
+
+The representative file was dominated by `generic_task` resources and the
+OpenTelemetry collector-export log. Approximate selected cardinalities were 28
+services, 427 pod UIDs, 328 task IDs, 25 shard values, and 16 `type` values.
+
+Parsing and expanding every `raw_entry` as JSON did not complete within three
+minutes for this single file and was stopped. This is not a ClickHouse benchmark,
+but it supports parsing and normalizing source content once at ingestion rather
+than repeatedly parsing raw text in interactive queries.
+
+== GCP Volume Calibration
+
+The workload reportedly accounts for approximately 32 TB/month in GCP Logging.
+Projecting the observed 12-day row rate to 30 days yields approximately 16.7B
+events/month and a provisional GCP-equivalent size of 1.9 KB/event:
+
+[options="header",cols="2*"]
+|===
+
+|Logical threshold
+|Provisional events
+
+|1 TB
+|520M
+
+|10 TB
+|5.2B
+
+|32 TB
+|16.7B
+
+|100 TB
+|52B
+
+|1 PB
+|520B
+
+|===
+
+This calibration must be verified against the exact GCP metric, log bucket
+scope, exclusions, and calendar period. The reconstructed 5.46 KB JSON object is
+not equivalent to GCP's pre-index entry measurement because reconstruction adds
+field names and escapes the embedded raw entry.
+
+== Interpretation
+
+- The corpus provides natural contiguous subsets for provisional 1 TB and 10 TB
+  tests.
+- A provisional 100 TB test requires roughly eight time-shifted corpus passes.
+- Event width and dynamic field count are large enough to expose attribute
+  representation and storage-amplification problems.
+- This corpus cannot validate trace-waterfall behavior or native metrics. Those
+  require separate deterministic fixtures.
+- Parquet compression cannot predict ClickHouse storage after indexes,
+  projections, and materialized views are added.
+
+== Follow-ups
+
+- Verify the GCP monthly measurement before finalizing logical-byte accounting.
+- Version the Parquet-to-event transformation and scaled-corpus generator.
+- Run the 1 TB attribute-schema bakeoff from the unified event storage plan.
+- Record all candidate results as new experiment records rather than editing
+  this baseline.

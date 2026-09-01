@@ -1,0 +1,648 @@
+= Experiment 014: Local Distributed-Cluster Simulation
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed — serial topology and acceleration scope; synthetic
+  multi-tenant concurrency and slow-leaf cancellation deferred
+- *Date:* 2026-08-27
+- *Started:* 2026-08-30
+- *Completed:* 2026-09-01
+- *Source mutation:* None; the experiment creates disposable shard copies
+
+:benchmark-storage-context: All simulated coordinator and leaf processes share the striped hot SSD ZFS tier, CPU socket, memory channels, and ZFS ARC.
+include::_local-hardware-baseline.adoc[]
+:benchmark-storage-context!:
+
+== Question
+
+Can Lighthouse use ClickHouse's standard `Distributed` engine with stable
+event-hash sharding while keeping fanout latency, coordinator work, shard skew,
+query correctness, and failure semantics observable and bounded?
+
+== Scope
+
+Run one coordinator and multiple native ClickHouse leaf processes on this host,
+each with isolated ports, data, temporary, user-file, log, and run directories.
+Use the same Nix-pinned ClickHouse binary, user settings, table schema, and local
+MergeTree configuration as the single-node experiments.
+
+Test 1-, 2-, and 4-shard topologies sequentially. Each topology stores one total
+copy of the selected source corpus divided by:
+
+[source,text]
+----
+cityHash64(tenant_id, dataset, event_id) % shard_count
+----
+
+The exact production hash remains a schema decision; the experiment requires
+only one recorded stable expression for all compared topologies.
+
+Do not add replicas initially. Sharding/fanout and replication/recovery are
+different questions and should not be confounded in the first simulation.
+
+== Why native multi-instance processes
+
+Separate server processes exercise actual ClickHouse network protocol,
+`Distributed` query planning, leaf-local partial aggregation, coordinator
+merging, timeout, and unavailable-shard behavior. Multiple databases or tables
+inside one server would not reproduce those boundaries. Containers add image,
+overlay, mount, and ownership differences without making the shared hardware a
+real cluster, so the first harness should extend the existing native benchmark
+server pattern.
+
+Each leaf will receive explicit CPU affinity and memory limits where the host
+supports them. All leaves still share one CPU socket, memory subsystem, ZFS ARC,
+and striped SSD pool; those limitations must remain visible in every result.
+
+== Dataset profiles
+
+Start with one natural approximately 1 TB logical day using the sort key
+selected by Experiment 013. One distributed physical copy should require about
+the same total bytes as the existing one-day table, regardless of shard count.
+
+The natural corpus contains one benchmark tenant and dataset, which represents
+an elephant tenant spread across all shards by event identity. Add a
+deterministic synthetic tenant mapping in a separate load to model:
+
+- one dominant tenant plus several medium tenants;
+- many small tenants;
+- a highly skewed tenant/dataset distribution; and
+- a small tenant whose ordinary query still fans out to every shard.
+
+The mapping must preserve event values and identity checksums within each
+logical tenant assignment and remain reproducible from source event identity.
+
+== Query workloads
+
+For every topology, run matching single-node and `Distributed` queries over:
+
+. latest-event retrieval over narrow and full-day ranges;
+. raw time-range counts and rates;
+. selective and prevalent configured attribute predicates;
+. dashboard count, heatmap, and percentile aggregate states;
+. bounded raw-event retrieval from an attribute index;
+. one large tenant and one small tenant; and
+. serial, dashboard-concurrent, raw-concurrent, and mixed workloads.
+
+The coordinator must receive aggregate states or bounded event rows, not all
+matching raw rows. Record normalized SQL, result hashes or approximation
+anchors, participating shards, leaf and coordinator query IDs, and execution
+settings.
+
+== Measurements
+
+- End-to-end p50 and p95 latency and throughput by topology and workload.
+- Coordinator queue, CPU, peak memory, result rows, and network bytes.
+- Per-leaf rows, bytes, marks, CPU, memory, and query duration.
+- Insert acknowledgement latency, throughput, pending distributed sends, and
+  per-shard row/byte skew.
+- Fixed fanout cost for small tenants and narrow time ranges.
+- Local partial-aggregation reduction ratio before coordinator merge.
+- Result correctness and expected-versus-participating shard coverage.
+- Query cancellation and deadline propagation.
+
+== Failure tests
+
+Stop one leaf during controlled read-only queries and compare:
+
+- complete execution with `skip_unavailable_shards = 0`, which must fail rather
+  than return an apparently complete result;
+- bounded-latency execution with `skip_unavailable_shards = 1`, where Lighthouse
+  must report expected shards, participating shards, missing coverage, and a
+  partial result; and
+- cancellation or timeout while one leaf is slow.
+
+ClickHouse does not by itself provide the full product-level coverage contract.
+The experiment should identify the metadata the Lighthouse coordinator must add
+instead of treating a successful partial response as complete.
+
+== Interpretation limits
+
+This mechanism is a distributed-systems simulation, not a scale-out capacity
+measurement:
+
+- loopback networking understates real network latency and failure modes;
+- shared disks, ARC, memory bandwidth, and CPUs create contention that separate
+  machines would not share;
+- adding local shards may reduce performance even when real independent nodes
+  would add capacity; and
+- it cannot validate rack/AZ placement, replica reconstruction, or 100 TB
+  recovery behavior.
+
+It can still validate query semantics, sharding correctness, fanout overhead,
+coordinator scaling trends, skew, observability, cancellation, and unavailable-
+shard behavior before paying for a real cluster.
+
+== Guardrails
+
+- Run after Experiment 013 and remove its disposable sort-key candidate tables
+  before loading distributed copies.
+- Preserve the ten-day hot events, exact payloads, and immutable run artifacts.
+- Run topologies sequentially and retain only one disposable distributed corpus
+  at a time.
+- Preserve at least 100 GiB free on the SSD dataset.
+- Use high unprivileged ports and isolated directories; never reuse production
+  service ports or data paths.
+- Stop all coordinator and leaf processes on normal or failed harness exit.
+
+== Results
+
+=== Protocol smoke matrix
+
+The native-process harness passed sequential 1-, 2-, and 4-shard smoke tests
+with one coordinator, no replicas, explicit CPU affinity, and 100,000 generated
+events. Every topology used
+`cityHash64(tenant_id, dataset, event_id)` for placement and
+`(tenant_id, dataset, timestamp, event_id)` for leaf ordering. Distributed row
+counts and identity checksums matched the generated source exactly.
+
+[options="header",cols="1,3,2,2"]
+|===
+|Shards |Rows per leaf |Largest deviation from mean |Rows with final leaf down
+
+|1
+|100,000
+|0%
+|No result row
+
+|2
+|49,915 · 50,085
+|0.17%
+|49,915
+
+|4
+|25,039 · 25,181 · 24,876 · 24,904
+|0.72%
+|75,096
+|===
+
+With `skip_unavailable_shards = 0`, every topology failed rather than returning
+an apparently complete result after its final leaf stopped. With
+`skip_unavailable_shards = 1`, two and four shards returned the expected
+surviving rows; a one-shard topology returned no result row when no shard was
+available. Restarting the leaf restored the exact 100,000-row result. This
+confirms ClickHouse's mechanism, but also confirms that Lighthouse must add
+expected-shard and participating-shard metadata: the partial values alone do
+not disclose coverage, and zero available shards is not represented as a
+normal zero count.
+
+Coordinator EXPLAIN output showed `ReadFromRemote` and, for multi-shard
+topologies, `MergingAggregated`. It did not expose each leaf's primary-key
+granule selection. The full-day harness must therefore retain coordinator and
+leaf query logs plus leaf-local EXPLAIN output rather than treating the
+coordinator plan as complete index evidence.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-cluster-smoke-v1-{1,2,4}s`.
+All cluster processes stopped after each run.
+
+=== One- and two-shard full-day loads
+
+The first two topologies each loaded the same 547,356,173-row natural day
+through 24 checksum-validated hourly windows. Distributed row counts and
+`sum(sipHash64(event_id, timestamp))` matched the source exactly.
+
+[options="header",cols="1,2,2,2,3"]
+|===
+|Shards |Summed load wall time |Physical bytes |Active parts |Rows per leaf
+
+|1
+|64.4 minutes
+|142,418,425,474 (132.6 GiB)
+|44
+|547,356,173
+
+|2
+|78.0 minutes
+|154,835,103,954 (144.2 GiB)
+|54
+|273,668,661 · 273,687,512
+|===
+
+The two-shard placement differs from an exact 50/50 split by only 18,851 rows,
+or 0.0034% of the total corpus. Its 21% slower load and 8.7% larger physical
+footprint are local-host outcomes: both leaves contend for the same CPU,
+memory, and SSDs, and retained different part counts. They are not evidence
+that a two-node production cluster would ingest more slowly or consume the same
+extra space after equivalent compaction.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-distributed-day-v1-{1,2}s`.
+
+=== One- and two-shard raw query matrix
+
+Both topologies completed 168 serial measurements: seven fixtures, four bounded
+time ranges, ClickHouse-cold and warm modes, and three repetitions. The runner
+retained a coordinator and every leaf's `EXPLAIN indexes = 1` plan, query-log
+CPU, memory, rows, bytes, marks, and network counters. ClickHouse-cold resets
+ClickHouse-managed caches on every process but not Linux page cache or the
+shared ZFS ARC.
+
+Selected full-day medians are:
+
+[options="header",cols="2,2,2,2,2,2"]
+|===
+|Fixture |1-shard cold |2-shard cold |2s/1s |1-shard warm |2-shard warm
+
+|Recent tail
+|365 ms
+|473 ms
+|1.30
+|340 ms
+|291 ms
+
+|Time-range count
+|9.01 s
+|7.00 s
+|0.78
+|8.20 s
+|5.21 s
+
+|Service/severity
+|11.60 s
+|8.53 s
+|0.73
+|10.85 s
+|6.60 s
+
+|Dynamic `Map` filter
+|230.75 s
+|224.41 s
+|0.97
+|45.20 s
+|56.52 s
+
+|Rate by service
+|14.30 s
+|9.78 s
+|0.68
+|12.99 s
+|7.90 s
+
+|Duration heatmap
+|197.83 s
+|176.27 s
+|0.89
+|196.17 s
+|127.84 s
+
+|Percentiles by caller
+|211.16 s
+|138.65 s
+|0.66
+|205.86 s
+|134.14 s
+|===
+
+All exact fixture hashes match across cache modes, repetitions, and topologies.
+Approximate histogram and t-digest byte encodings can differ with merge order,
+so correctness uses stable anchors instead: both topologies report 133,820,058
+heatmap samples with a duration sum of 581,514,702,978,425, and the top-100
+percentile output reports 63,567,432 samples with a duration sum of
+581,503,123,071,702 across nine returned caller groups.
+
+=== CPU utilization interpretation
+
+Leaf query-log CPU counters do not show sustained CPU saturation. The one-shard
+topology allowed eight query threads and the two-shard topology allowed five per
+leaf, ten total. Median summed leaf CPU seconds per wall second for full-day
+queries were only 1.28-1.83 on one shard and 1.65-3.50 on two shards. The
+coordinator used less than 0.01 CPU seconds per wall second for the measured
+full-day heatmap, so coordinator CPU was not the limiting resource.
+
+For the representative two-shard warm full-day heatmap, each leaf ran for
+approximately 124-129 seconds, consumed 187-191 CPU seconds, and spent a summed
+33 seconds in ClickHouse's disk-read timing while reading approximately 57 GB
+through file descriptors. Together the leaves averaged 2.96 CPU cores during
+the 127.84-second coordinator wall time, well below their ten-thread ceiling.
+The speedup came from increasing useful parallel work, not from relieving a
+previously saturated CPU.
+
+The dynamic Map filter's warm regression also does not correlate with CPU
+saturation. Two shards averaged 2.26 CPU seconds per wall second versus 1.54 on
+one shard, but selected 36,794 marks versus 26,364 and read more data due to the
+different uncompacted part layouts. Part layout and shared storage/cache effects
+therefore confound that comparison.
+
+These are per-query ClickHouse counters, not a host-wide sampled CPU trace. They
+can establish that the queries did not sustain their available query-thread
+capacity, but cannot exclude brief core saturation, frequency throttling, ZFS
+work outside ClickHouse's query CPU counter, or contention from another host
+process. The four-shard phase below adds host-level CPU, iowait, frequency, and
+per-device counters; the cloud experiment must retain equivalent evidence.
+
+The result separates useful parallelism from fixed fanout cost. Two local
+leaves reduced most scan-and-aggregate warm latencies by 35-39%, despite sharing
+one machine. Recent-tail queries gained little or regressed because the
+coordinator must contact and merge both leaves. The full-day dynamic Map filter
+did not improve reliably and every raw full-day distribution remains far above
+the interactive target. Standard distributed partial aggregation works, but it
+does not replace the tenant attribute index and materialized aggregate states
+validated by Experiments 008 and 012.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-distributed-query-v1-{1,2,4}s`.
+
+=== Distributed acceleration
+
+The one- and two-shard topologies built the same configured `type` and
+`workspace_id` attribute rows, service-count rollup, and duration aggregate
+states as Experiments 008 and 012. Each leaf built from its local event subset;
+two-shard phases ran concurrently across both leaves. Distributed queries then
+merged matching index rows or aggregate states at the coordinator.
+
+[options="header",cols="2,2,2,2,2"]
+|===
+|Build phase |1-shard wall |2-shard wall |4-shard wall |Best result
+
+|`type` attribute index
+|177.1 s
+|148.2 s
+|185.6 s
+|2 shards
+
+|`workspace_id` attribute index
+|207.3 s
+|160.6 s
+|191.1 s
+|2 shards
+
+|Service five-minute counts
+|9.4 s
+|8.4 s
+|9.9 s
+|2 shards
+
+|Duration states
+|189.2 s
+|186.5 s
+|200.9 s
+|2 shards
+
+|*Total*
+|*9.72 minutes*
+|*8.40 minutes*
+|*9.79 minutes*
+|*2 shards*
+|===
+
+Parallel leaves improved the attribute backfills by 16-23%, but the duration
+state build did not improve on the shared host. Four shards regressed to roughly
+the one-shard total because they shared the same CPU and SSD stripe. The derived
+tables used 3,283,218,153 bytes (3.06 GiB), 3,499,112,554 bytes (3.26 GiB), and
+3,744,155,793 bytes (3.49 GiB) on one, two, and four shards respectively.
+Attribute rows account for effectively all storage. More leaves retain separate
+partial aggregate rows and more unmerged parts, explaining the physical
+amplification; distributed queries merge those rows exactly.
+
+Both topologies completed 120 accelerated measurements across four time ranges,
+two cache modes, and three repetitions. All 120 correctness checks per topology
+passed. Exact index and rate outputs matched raw queries byte-for-byte. Heatmap
+and percentile sample-count and duration-sum anchors matched the raw topology;
+approximate state encoding was not required to be byte-identical.
+
+[options="header",cols="2,2,2,2,2,2"]
+|===
+|Full-day fixture |1s raw |1s accelerated warm |Speedup |2s raw |2s accelerated warm
+
+|Dynamic `type`
+|45.20 s
+|1.122 s
+|40×
+|56.52 s
+|706 ms
+
+|Dynamic `workspace_id`
+|184.51 s
+|439 ms
+|420×
+|121.57 s
+|304 ms
+
+|Rate by service
+|12.99 s
+|77 ms
+|169×
+|7.90 s
+|81 ms
+
+|Duration heatmap
+|196.17 s
+|75 ms
+|2,616×
+|127.84 s
+|74 ms
+
+|Percentiles by caller
+|205.86 s
+|98 ms
+|2,101×
+|134.14 s
+|100 ms
+|===
+
+Raw values are controlled warm medians except `workspace_id`, which was a
+single correctness-validation scan after progressively wider shorter ranges.
+Its speedup is an observed comparison, not a controlled cache-mode ratio.
+
+Once leaf work falls below roughly 100 ms, adding a second local shard does not
+improve dashboard aggregate latency because fixed network-protocol, fanout, and
+coordinator merge costs dominate. Attribute indexes still benefit because their
+matching event-ID rows require more leaf work. This supports standard
+`Distributed` merge behavior for shared acceleration tables without requiring a
+custom query engine.
+
+The new one-second host sampler also resolves the earlier disk-saturation
+ambiguity for these runs. Across the complete two-shard acceleration run, host
+CPU averaged 55.6% busy (75.4% p95) and iowait averaged 0.9% (2.9% p95). The
+Samsung 870 QVO averaged 61.9% block-device utilization, reached 95.4% at p95,
+and averaged a queue depth of 2.01; the 870 EVO averaged 48.3% utilization,
+75.0% p95, and a queue depth of 1.34. The QVO was therefore near saturation
+during high-load intervals, but neither CPU nor both striped devices were
+sustained at saturation over the run. Unequal device behavior is a material
+limit of this local stripe.
+
+Artifacts are stored under
+`/mnt/fast-storage/lighthouse/runs/experiment-014-distributed-acceleration-v1-{1,2,4}s`.
+Each contains 600 or more host snapshots, coordinator and leaf query metrics,
+and 40, 60, or 100 retained EXPLAIN plans.
+
+=== Four-shard completion
+
+The four-shard topology loaded all 547,356,173 rows through the same 24 hourly
+windows in 64.6 minutes. Its identity checksum matched the source exactly. Leaf
+rows ranged from 136,831,082 to 136,843,760, only 0.0058% maximum deviation from
+the mean. The leaves used 162,929,549,322 bytes (151.7 GiB) across 79 active
+parts. This is 14.4% more physical storage than one shard because no equivalent
+final compaction normalized their different part layouts.
+
+Four shards completed the same 168 raw and 120 accelerated measurements. Every
+exact result hash matches the one- and two-shard topologies. Heatmap and
+percentile sample-count and duration-sum anchors also match exactly.
+
+[options="header",cols="2,2,2,2,2"]
+|===
+|Full-day warm raw fixture |1 shard |2 shards |4 shards |4s/2s
+
+|Recent tail
+|340 ms
+|291 ms
+|402 ms
+|1.38
+
+|Time-range count
+|8.20 s
+|5.21 s
+|4.17 s
+|0.80
+
+|Service/severity
+|10.85 s
+|6.60 s
+|5.04 s
+|0.76
+
+|Dynamic `Map` filter
+|45.20 s
+|56.52 s
+|81.54 s
+|1.44
+
+|Rate by service
+|12.99 s
+|7.90 s
+|5.83 s
+|0.74
+
+|Duration heatmap
+|196.17 s
+|127.84 s
+|119.02 s
+|0.93
+
+|Percentiles by caller
+|205.86 s
+|134.14 s
+|122.84 s
+|0.92
+|===
+
+The second pair of leaves still helps straightforward scans and partial
+aggregations, but gains diminish sharply for the heaviest distribution queries.
+Recent-tail latency exposes fixed fanout and merge overhead. The raw dynamic
+`Map` filter becomes progressively slower because extra fanout and fragmented
+part layouts outweigh local parallelism. Sharding is therefore not a substitute
+for an attribute index.
+
+[options="header",cols="2,2,2,2"]
+|===
+|Full-day warm accelerated fixture |1 shard |2 shards |4 shards
+
+|Dynamic `type`
+|1.122 s
+|706 ms
+|550 ms
+
+|Dynamic `workspace_id`
+|439 ms
+|304 ms
+|258 ms
+
+|Rate by service
+|77 ms
+|81 ms
+|78 ms
+
+|Duration heatmap
+|75 ms
+|74 ms
+|86 ms
+
+|Percentiles by caller
+|98 ms
+|100 ms
+|104 ms
+|===
+
+Attribute indexes continue to gain from leaf parallelism. Materialized
+dashboard states remain roughly flat at 74-104 ms because their leaf scans are
+already tiny and coordinator/fanout latency dominates. This is the desired
+result: bounded shared derived tables preserve interactive latency as shards
+increase while full-resolution raw events remain available for fallback.
+
+=== Four-shard host limits
+
+The one-second host sampler retained 2,964 load, 2,783 raw-query, and 671
+acceleration snapshots. It establishes which local results were hardware-bound:
+
+[options="header",cols="2,2,2,2,2,2,2"]
+|===
+|Phase |CPU average / p95 |Iowait average / p95 |QVO utilization average / p95 |QVO queue average |EVO utilization average / p95 |EVO queue average
+
+|Load
+|81.9% / 94.7%
+|5.5% / 15.9%
+|70.0% / 90.4%
+|3.60
+|18.5% / 29.5%
+|0.49
+
+|Raw queries
+|50.6% / 66.0%
+|8.2% / 25.4%
+|57.1% / 88.0%
+|3.25
+|49.1% / 82.9%
+|1.41
+
+|Acceleration build and queries
+|52.7% / 75.2%
+|5.3% / 26.0%
+|56.4% / 89.6%
+|2.80
+|43.5% / 76.8%
+|1.23
+|===
+
+The four-shard load approached both host CPU and QVO limits. The QVO briefly
+reached 100% utilization while the EVO peaked at 66%, showing severe stripe
+asymmetry. Raw and acceleration phases were not continuously CPU-saturated, but
+their high iowait and p95 device utilization show that the shared local storage
+path materially limits scale-out interpretation. Four local processes cannot
+predict four independent production nodes.
+
+=== Deferred profiles
+
+The initial plan also proposed synthetic tenant distributions, concurrent raw
+and dashboard workloads, and cancellation while a leaf is deliberately slow.
+Those profiles were not executed in this run. The natural corpus has one tenant,
+and the four-process load already approached the shared host's CPU and QVO
+limits; adding synthetic copies or concurrency would primarily measure this
+machine's contention rather than independent-node scaling. The smoke matrix did
+validate complete failure versus explicit partial results with a leaf down, but
+not slow-leaf deadline propagation. These items remain explicit cloud-test or
+focused follow-up requirements rather than implied completed evidence.
+
+=== Current conclusion
+
+The measured path supports the proposed initial architecture:
+
+* Standard ClickHouse `Distributed` fanout preserved exact results and correctly
+  merged aggregate states at one, two, and four shards.
+* `cityHash64(tenant_id, dataset, event_id)` placed the elephant tenant evenly
+  without a virtual-partition metadata layer.
+* Fixed fanout is visible for small tail queries, but remains sub-second at four
+  local shards.
+* Raw dynamic-field scans do not scale acceptably; configured shared attribute
+  indexes are required.
+* Materialized count, histogram, and t-digest states keep dashboard queries near
+  100 ms with negligible storage compared with raw events.
+* Lighthouse still needs expected-versus-participating shard metadata because
+  ClickHouse partial results do not disclose product-level coverage.
+
+This local experiment establishes semantics and relative fanout behavior, not
+production capacity. Synthetic multi-tenant concurrency, cancellation under a
+slow leaf, replicas, network latency, and independent-node throughput remain for
+the cloud experiment or focused follow-up runs. The current evidence does not
+justify implementing virtual partitions or a custom distributed query layer
+before standard ClickHouse deployment is measured on independent hosts.

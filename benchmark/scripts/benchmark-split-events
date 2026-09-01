@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+run_id="${1:-}"
+
+if [[ -z "${run_id}" ]]; then
+  echo "usage: $0 RUN_ID" >&2
+  exit 2
+fi
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+  echo "split-event rebuild requires LIGHTHOUSE_BENCH_RESET=1" >&2
+  exit 1
+fi
+
+run_dir="${runs_root}/${run_id}"
+if [[ -e "${run_dir}" ]]; then
+  echo "run directory already exists: ${run_dir}" >&2
+  exit 1
+fi
+mkdir -p "${run_dir}/evidence" "${run_dir}/state"
+echo "initializing" > "${run_dir}/status"
+
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
+"${client[@]}" --query "SELECT 1" >/dev/null
+rows="$("${client[@]}" --query "SELECT count() FROM benchmark.events_map FORMAT TSVRaw")"
+if [[ "${rows}" != "547356173" && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
+  echo "expected 547,356,173 Map rows; found ${rows}" >&2
+  exit 1
+fi
+archive_path="$("${client[@]}" --query "SELECT path FROM system.disks WHERE name = 'bulk_archive' FORMAT TSVRaw")"
+if [[ -z "${archive_path}" ]]; then
+  echo "bulk_archive ClickHouse disk is not configured" >&2
+  exit 1
+fi
+
+safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
+query_prefix="lighthouse_split_${safe_run_id}"
+capture_logs() {
+  "${client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null 2>&1 || true
+  "${client[@]}" --query "SELECT * FROM system.query_log WHERE startsWith(query_id, '${query_prefix}_') ORDER BY event_time_microseconds FORMAT JSONEachRow" > "${run_dir}/query-log.jsonl" 2>/dev/null || true
+  "${client[@]}" --query "
+    SELECT query_id, query_duration_ms, read_rows, read_bytes, written_rows,
+           written_bytes, memory_usage,
+           ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us
+    FROM system.query_log
+    WHERE type = 'QueryFinish' AND startsWith(query_id, '${query_prefix}_')
+    ORDER BY event_time_microseconds FORMAT TSVWithNames
+  " > "${run_dir}/query-metrics.tsv" 2>/dev/null || true
+}
+on_error() {
+  echo "failed" > "${run_dir}/status"
+  capture_logs
+}
+trap on_error ERR
+
+revision_rev="@"
+if [[ -z "$(jj diff --summary 2>/dev/null)" ]]; then
+  revision_rev="@-"
+fi
+revision="$(jj log -r "${revision_rev}" --no-graph -T 'commit_id' 2>/dev/null || true)"
+change_id="$(jj log -r "${revision_rev}" --no-graph -T 'change_id' 2>/dev/null || true)"
+clickhouse_version="$("${client[@]}" --query "SELECT version() FORMAT TSVRaw")"
+
+export RUN_ID="${run_id}" REVISION="${revision}" CHANGE_ID="${change_id}"
+export CLICKHOUSE_VERSION="${clickhouse_version}" ROWS="${rows}" ARCHIVE_PATH="${archive_path}"
+python3 - "${run_dir}/manifest.json" <<'PY'
+import json
+import os
+import sys
+
+manifest = {
+    "run_id": os.environ["RUN_ID"],
+    "repository": {
+        "commit_id": os.environ["REVISION"],
+        "change_id": os.environ["CHANGE_ID"],
+    },
+    "clickhouse_version": os.environ["CLICKHOUSE_VERSION"],
+    "rows": int(os.environ["ROWS"]),
+    "archive_path": os.environ["ARCHIVE_PATH"],
+}
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump(manifest, output, indent=2, sort_keys=True)
+    output.write("\n")
+PY
+
+{
+  date -u +%FT%TZ
+  uname -a
+  df -h "${benchmark_root}" "${archive_path}"
+  zpool list fast-storage storage
+  zfs list fast-storage/lighthouse storage/lighthouse-bench
+} > "${run_dir}/evidence/host-storage.txt"
+jj status > "${run_dir}/evidence/jj-status.txt" 2>&1 || true
+
+for table in events_map_hot event_payloads; do
+  "${client[@]}" --max_table_size_to_drop=0 --query "DROP TABLE IF EXISTS benchmark.${table} SYNC"
+done
+"${client[@]}" --multiquery --query "
+  CREATE TABLE benchmark.events_map_hot AS benchmark.events_map
+  ENGINE = MergeTree
+  PARTITION BY toDate(timestamp)
+  ORDER BY (tenant_id, dataset, toStartOfHour(timestamp), service_name, timestamp, event_id)
+  SETTINGS storage_policy = 'benchmark_overflow';
+"
+"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/event-payloads.sql"
+
+"${client[@]}" --query "
+  SELECT DISTINCT partition_id
+  FROM system.parts
+  WHERE active AND database = 'benchmark' AND table = 'events_map'
+  ORDER BY partition_id FORMAT TSVRaw" > "${run_dir}/partitions.tsv"
+printf 'path\tunit\n' > "${run_dir}/builds.tsv"
+
+echo "building" > "${run_dir}/status"
+while read -r partition_id; do
+  query_id="${query_prefix}_attach_hot_${partition_id}"
+  "${client[@]}" --query_id="${query_id}" --query "
+    ALTER TABLE benchmark.events_map_hot
+    ATTACH PARTITION ID '${partition_id}' FROM benchmark.events_map"
+  printf 'hot\t%s\n' "${partition_id}" >> "${run_dir}/builds.tsv"
+done < "${run_dir}/partitions.tsv"
+
+"${client[@]}" --query_id="${query_prefix}_drop_hot_payload" --query "
+  ALTER TABLE benchmark.events_map_hot DROP COLUMN source_raw"
+
+"${client[@]}" --query "
+  SELECT toString(toStartOfHour(timestamp)), count()
+  FROM benchmark.events_map
+  GROUP BY toStartOfHour(timestamp)
+  ORDER BY toStartOfHour(timestamp)
+  FORMAT TSVRaw" > "${run_dir}/windows.tsv"
+while IFS=$'\t' read -r window_start window_rows; do
+  window_id="$(date -u -d "${window_start}" +%Y%m%dT%H)"
+  window_end="$(date -u -d "${window_start} UTC +1 hour" '+%F %T')"
+  query_id="${query_prefix}_build_payload_${window_id}"
+  "${client[@]}" --query_id="${query_id}" \
+    --receive_timeout=86400 --send_timeout=86400 \
+    --param_window_start="${window_start}" --param_window_end="${window_end}" \
+    --queries-file "${repo_root}/benchmark/clickhouse/insert-payload-window.sql"
+  printf 'payload\t%s:%s\n' "${window_start}" "${window_rows}" >> "${run_dir}/builds.tsv"
+done < "${run_dir}/windows.tsv"
+
+echo "validating" > "${run_dir}/status"
+"${client[@]}" --query "
+  SELECT table, sum(rows) AS rows, sum(bytes_on_disk) AS bytes_on_disk,
+         sum(data_uncompressed_bytes) AS data_uncompressed_bytes, count() AS active_parts
+  FROM system.parts WHERE active AND database = 'benchmark'
+  GROUP BY table ORDER BY table FORMAT JSONEachRow" > "${run_dir}/evidence/table-storage.jsonl"
+
+"${client[@]}" --query "
+  SELECT 'source' AS path, count() AS rows,
+         sum(sipHash64(event_id, timestamp, attributes, resource, body)) AS normalized_checksum,
+         sum(sipHash64(event_id, timestamp, source_raw)) AS payload_checksum
+  FROM benchmark.events_map
+  UNION ALL
+  SELECT 'hot', count(),
+         sum(sipHash64(event_id, timestamp, attributes, resource, body)), NULL
+  FROM benchmark.events_map_hot
+  UNION ALL
+  SELECT 'payload', count(), NULL,
+         sum(sipHash64(event_id, timestamp, source_raw))
+  FROM benchmark.event_payloads
+  FORMAT JSONEachRow" > "${run_dir}/checksums.jsonl"
+python3 - "${run_dir}/checksums.jsonl" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+rows = {
+    row["path"]: row
+    for row in map(json.loads, Path(sys.argv[1]).read_text().splitlines())
+}
+if not rows["source"]["rows"] == rows["hot"]["rows"] == rows["payload"]["rows"]:
+    raise SystemExit(f"split table row mismatch: {rows}")
+if rows["source"]["normalized_checksum"] != rows["hot"]["normalized_checksum"]:
+    raise SystemExit(f"normalized checksum mismatch: {rows}")
+if rows["source"]["payload_checksum"] != rows["payload"]["payload_checksum"]:
+    raise SystemExit(f"payload checksum mismatch: {rows}")
+PY
+
+event_id="$("${client[@]}" --query "SELECT event_id FROM benchmark.events_map ORDER BY timestamp DESC, event_id DESC LIMIT 1 FORMAT TSVRaw")"
+IFS=$'\t' read -r timestamp service_name < <("${client[@]}" --param_event_id="${event_id}" --query "SELECT timestamp, service_name FROM benchmark.events_map WHERE event_id = {event_id:String} ORDER BY timestamp DESC LIMIT 1 FORMAT TSVRaw")
+for path in source payload; do
+  if [[ "${path}" == "source" ]]; then
+    table="events_map"
+  else
+    table="event_payloads"
+  fi
+  "${client[@]}" --query_id="${query_prefix}_lookup_${path}" \
+    --param_event_id="${event_id}" --param_timestamp="${timestamp}" \
+    --param_service_name="${service_name}" --query "
+      SELECT source_raw FROM benchmark.${table}
+      WHERE tenant_id = 1 AND dataset = 'gcp-logging'
+        AND timestamp = {timestamp:DateTime64(6, 'UTC')}
+        AND service_name = {service_name:String}
+        AND event_id = {event_id:String}
+      FORMAT JSONEachRow" > "${run_dir}/lookup-${path}.jsonl"
+done
+if ! cmp -s "${run_dir}/lookup-source.jsonl" "${run_dir}/lookup-payload.jsonl"; then
+  echo "deterministic payload lookup mismatch" >&2
+  exit 1
+fi
+
+capture_logs
+date -u +%FT%TZ > "${run_dir}/completed-at"
+echo "completed" > "${run_dir}/status"
+trap - ERR
+
+echo "split-event benchmark completed: ${run_dir}"

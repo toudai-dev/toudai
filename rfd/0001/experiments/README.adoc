@@ -1,0 +1,115 @@
+= Experiment Records
+
+link:../README.adoc[RFD 0001]
+
+Experiment records preserve enough context to reproduce and interpret a result.
+Use a zero-padded sequence and descriptive name, for example
+`001-json-vs-map-1tb.adoc`.
+
+Each record should contain:
+
+. *Status and date* — planned, running, completed, invalidated, or superseded.
+. *Question* — the specific uncertainty being tested.
+. *Hypothesis* — optional, but written before inspecting results.
+. *Environment* — CPU model, core/thread count and frequency; RAM capacity and
+   configured speed; disk models, topology, filesystem, capacity, and measured
+   throughput/IOPS; ClickHouse version/settings; caches; and relevant repository
+   revision. Include `_local-hardware-baseline.adoc` for runs on the local host
+   and state which storage path the experiment exercised. Never substitute a
+   device's advertised limit for a measured speed or apply a later topology's
+   measurement retroactively.
+. *Dataset* — source, time range, transformation revision, rows, logical input
+   bytes, and expected limitations.
+. *Method* — schema revision, load procedure, query fixture IDs, repetitions,
+   and cold/warm cache policy.
+. *Commands* — runnable commands or links to versioned scripts.
+. *Results* — raw measurements and artifact locations, not only conclusions.
+. *Interpretation* — what the results support and what they do not prove.
+. *Follow-ups* — unresolved questions and the decision records that consume
+    the evidence.
+
+Do not overwrite prior measurements when rerunning an experiment under different
+conditions. Add a new run or record and link the relationship.
+
+== Index
+
+[options="header",cols="3*"]
+|===
+
+|ID
+|Status
+|Experiment
+
+|000
+|Completed
+|link:000-gcp-parquet-corpus-profile.adoc[GCP Parquet corpus profile]
+
+|001
+|Completed
+|link:001-local-benchmark-host-profile.adoc[Local benchmark host profile]
+
+|002
+|Completed
+|link:002-native-clickhouse-harness-smoke.adoc[Native ClickHouse harness smoke test]
+
+|003
+|In progress
+|link:003-gcp-parquet-source-adapter.adoc[GCP Parquet source adapter calibration]
+
+|004
+|Completed
+|link:004-clickhouse-26-3-17-comparison.adoc[ClickHouse 26.3.17 patch comparison]
+
+|005
+|Completed
+|link:005-representative-query-calibration.adoc[Representative query calibration]
+
+|006
+|Completed
+|link:006-one-day-map-json-scale-load.adoc[One-day Map versus JSON scale load]
+
+|007
+|Completed
+|link:007-full-day-map-query-baseline.adoc[Full-day Map query baseline]
+
+|008
+|Completed
+|link:008-tenant-attribute-acceleration.adoc[Tenant attribute acceleration]
+
+|009
+|Completed
+|link:009-split-hot-events-payload.adoc[Split hot events and raw payloads]
+
+|010
+|Completed
+|link:010-ten-day-split-storage-load.adoc[Ten-day split-storage load]
+
+|011
+|Completed
+|link:011-ten-day-query-baseline.adoc[Ten-day query baseline]
+
+|012
+|Completed
+|link:012-ten-day-acceleration-validation.adoc[Ten-day acceleration validation]
+
+|013
+|Completed
+|link:013-event-sort-key-comparison.adoc[Event sort-key comparison]
+
+|014
+|Completed
+|link:014-local-distributed-cluster-simulation.adoc[Local distributed-cluster simulation]
+
+|015
+|Planned
+|link:015-cloud-production-capacity-and-cost.adoc[Cloud production capacity and cost]
+
+|016
+|Completed
+|link:016-date-service-sort-key.adoc[Date/service sort-key comparison]
+
+|017
+|Completed
+|link:017-query-index-efficiency-audit.adoc[Query and index efficiency audit]
+
+|===

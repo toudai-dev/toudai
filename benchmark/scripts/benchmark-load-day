@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_dir="${1:-}"
+run_id="${2:-}"
+candidate_order="${LIGHTHOUSE_BENCH_CANDIDATES:-map,json}"
+expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-}"
+max_files="${LIGHTHOUSE_BENCH_MAX_FILES:-0}"
+row_limit_per_file="${LIGHTHOUSE_BENCH_ROW_LIMIT_PER_FILE:-0}"
+gcp_bytes_per_event="${LIGHTHOUSE_GCP_BYTES_PER_EVENT:-1900}"
+min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+
+if [[ -z "${source_dir}" || -z "${run_id}" ]]; then
+  echo "usage: $0 PARQUET_DAY_DIRECTORY RUN_ID" >&2
+  exit 2
+fi
+if [[ ! -d "${source_dir}" ]]; then
+  echo "source directory does not exist: ${source_dir}" >&2
+  exit 1
+fi
+if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+  exit 2
+fi
+for value in "${max_files}" "${row_limit_per_file}" "${gcp_bytes_per_event}" "${min_free_bytes}"; do
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    echo "numeric benchmark settings must be non-negative integers" >&2
+    exit 2
+  fi
+done
+if [[ -n "${expected_rows}" && ! "${expected_rows}" =~ ^[0-9]+$ ]]; then
+  echo "LIGHTHOUSE_BENCH_EXPECTED_ROWS must be a non-negative integer" >&2
+  exit 2
+fi
+
+IFS=',' read -r -a candidates <<< "${candidate_order}"
+declare -A seen_candidates=()
+for candidate in "${candidates[@]}"; do
+  case "${candidate}" in
+    json|map) ;;
+    *) echo "day-scale loader supports only map and json candidates: ${candidate}" >&2; exit 2 ;;
+  esac
+  if [[ -n "${seen_candidates[${candidate}]:-}" ]]; then
+    echo "candidate may be listed only once: ${candidate}" >&2
+    exit 2
+  fi
+  seen_candidates["${candidate}"]=1
+done
+
+run_dir="${runs_root}/${run_id}"
+staged_dir="${run_dir}/state/staged"
+client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
+"${client[@]}" --query "SELECT 1" >/dev/null
+"${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/candidates.sql"
+
+config=$(printf 'source_dir=%s\ncandidates=%s\nexpected_rows=%s\nmax_files=%s\nrow_limit_per_file=%s\ngcp_bytes_per_event=%s\n' \
+  "$(realpath "${source_dir}")" "${candidate_order}" "${expected_rows}" "${max_files}" "${row_limit_per_file}" "${gcp_bytes_per_event}")
+
+capture_failure() {
+  local exit_status=$?
+  if [[ "${exit_status}" != "0" && -d "${run_dir}" ]]; then
+    echo "failed" > "${run_dir}/status"
+    date -u +%FT%TZ > "${run_dir}/failed-at"
+  fi
+}
+trap capture_failure EXIT
+
+build_inventory() {
+  mapfile -t files < <(find "${source_dir}" -maxdepth 1 -type f -name '*.parquet' -print | sort)
+  if [[ "${max_files}" != "0" ]]; then
+    files=("${files[@]:0:${max_files}}")
+  fi
+  if [[ "${#files[@]}" -eq 0 ]]; then
+    echo "no Parquet files found in ${source_dir}" >&2
+    return 1
+  fi
+
+  files_tmp="${run_dir}/files.tsv.tmp"
+  printf 'source_file\tpath\tphysical_bytes\texpected_rows\n' > "${files_tmp}"
+  for source_file in "${files[@]}"; do
+    rows="$(clickhouse local --param_source="${source_file}" --query "SELECT count() FROM file({source:String}, Parquet) FORMAT TSVRaw")"
+    if [[ "${row_limit_per_file}" != "0" && "${rows}" -gt "${row_limit_per_file}" ]]; then
+      rows="${row_limit_per_file}"
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$(basename "${source_file}")" "${source_file}" "$(stat -c %s "${source_file}")" "${rows}" >> "${files_tmp}"
+  done
+  mv "${files_tmp}" "${run_dir}/files.tsv"
+}
+
+if [[ ! -e "${run_dir}" ]]; then
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
+    echo "a new day-scale run requires LIGHTHOUSE_BENCH_RESET=1" >&2
+    exit 1
+  fi
+  mkdir -p "${staged_dir}" "${run_dir}/state/windows" "${run_dir}/evidence"
+  printf '%s' "${config}" > "${run_dir}/config.txt"
+  date -u +%FT%TZ > "${run_dir}/started-at"
+  echo "initializing" > "${run_dir}/status"
+
+  for table in gcp_source events_json events_map events_typed; do
+    "${client[@]}" --query "TRUNCATE TABLE benchmark.${table}"
+  done
+else
+  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" == "1" ]]; then
+    echo "refusing to reset existing resumable run: ${run_dir}" >&2
+    exit 1
+  fi
+  if [[ "$(cat "${run_dir}/config.txt")" != "${config}" ]]; then
+    echo "run configuration does not match ${run_dir}/config.txt" >&2
+    exit 1
+  fi
+  if [[ "$(cat "${run_dir}/status")" == "completed" ]]; then
+    echo "run is already complete: ${run_dir}" >&2
+    exit 0
+  fi
+  echo "resuming" > "${run_dir}/status"
+fi
+
+if [[ ! -f "${run_dir}/files.tsv" ]]; then
+  existing_source_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+  if [[ "${existing_source_rows}" != "0" ]]; then
+    echo "cannot rebuild missing file inventory after staging has begun" >&2
+    exit 1
+  fi
+  build_inventory
+fi
+
+structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
+safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
+query_prefix="lighthouse_load_${safe_run_id}"
+printf 'phase\tunit\texpected_rows\twritten_rows\tduration_ms\tpeak_memory\n' > "${run_dir}/phases.tsv.tmp"
+if [[ -f "${run_dir}/phases.tsv" ]]; then
+  tail -n +2 "${run_dir}/phases.tsv" >> "${run_dir}/phases.tsv.tmp"
+fi
+mv "${run_dir}/phases.tsv.tmp" "${run_dir}/phases.tsv"
+
+capture_metric() {
+  local query_id="$1"
+  "${client[@]}" --query "SYSTEM FLUSH LOGS" >/dev/null
+  "${client[@]}" --param_query_id="${query_id}" --query "
+    SELECT written_rows, query_duration_ms, memory_usage
+    FROM system.query_log
+    WHERE type = 'QueryFinish' AND query_id = {query_id:String}
+    ORDER BY event_time_microseconds DESC
+    LIMIT 1 FORMAT TSVRaw"
+}
+
+check_free_space() {
+  local available
+  available="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+  if [[ "${available}" -lt "${min_free_bytes}" ]]; then
+    echo "benchmark dataset has ${available} bytes free, below the ${min_free_bytes}-byte guardrail" >&2
+    return 1
+  fi
+}
+
+echo "staging" > "${run_dir}/status"
+while IFS=$'\t' read -r source_name source_path _physical_bytes source_rows; do
+  [[ "${source_name}" == "source_file" ]] && continue
+  marker="${staged_dir}/${source_name}"
+  [[ -f "${marker}" ]] && continue
+
+  existing_rows="$("${client[@]}" --param_source_name="${source_name}" --query "SELECT count() FROM benchmark.gcp_source WHERE source_file = {source_name:String} FORMAT TSVRaw")"
+  if [[ "${existing_rows}" == "${source_rows}" ]]; then
+    printf 'recovered\t%s\n' "${source_rows}" > "${marker}"
+    continue
+  fi
+  if [[ "${existing_rows}" != "0" ]]; then
+    echo "partial staged file ${source_name}: expected ${source_rows}, found ${existing_rows}" >&2
+    exit 1
+  fi
+
+  check_free_space
+  limit_clause=""
+  local_settings=()
+  if [[ "${row_limit_per_file}" != "0" ]]; then
+    limit_clause="LIMIT {row_limit:UInt64}"
+    local_settings+=(--max_threads=1)
+  fi
+  unit_id="${source_name//[^A-Za-z0-9]/_}"
+  query_id="${query_prefix}_stage_${unit_id}"
+  echo "staging ${source_name}"
+  clickhouse local \
+    "${local_settings[@]}" \
+    --param_source="${source_path}" \
+    --param_source_name="${source_name}" \
+    --param_row_limit="${row_limit_per_file}" \
+    --param_structure="${structure}" \
+    --query "SELECT *, CAST({source_name:String} AS LowCardinality(String)) AS source_file FROM file({source:String}, Parquet, {structure:String}) ${limit_clause} FORMAT Native" |
+    "${client[@]}" --receive_timeout=3600 --query_id="${query_id}" --query "INSERT INTO benchmark.gcp_source FORMAT Native"
+
+  metric="$(capture_metric "${query_id}")"
+  IFS=$'\t' read -r written_rows duration_ms peak_memory <<< "${metric}"
+  if [[ "${written_rows}" != "${source_rows}" ]]; then
+    echo "staged row mismatch for ${source_name}: expected ${source_rows}, wrote ${written_rows}" >&2
+    exit 1
+  fi
+  printf '%s\n' "${metric}" > "${marker}"
+  printf 'stage\t%s\t%s\t%s\t%s\t%s\n' "${source_name}" "${source_rows}" "${written_rows}" "${duration_ms}" "${peak_memory}" >> "${run_dir}/phases.tsv"
+done < "${run_dir}/files.tsv"
+
+source_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_source FORMAT TSVRaw")"
+inventory_rows="$(awk -F '\t' 'NR > 1 { rows += $4 } END { print rows + 0 }' "${run_dir}/files.tsv")"
+if [[ "${source_rows}" != "${inventory_rows}" ]]; then
+  echo "staged row count mismatch: inventory ${inventory_rows}, table ${source_rows}" >&2
+  exit 1
+fi
+if [[ -n "${expected_rows}" && "${source_rows}" != "${expected_rows}" ]]; then
+  echo "expected ${expected_rows} source rows, staged ${source_rows}" >&2
+  exit 1
+fi
+missing_event_timestamps="$("${client[@]}" --query "SELECT count() FROM benchmark.gcp_events WHERE event_timestamp IS NULL FORMAT TSVRaw")"
+if [[ "${missing_event_timestamps}" != "0" ]]; then
+  echo "source contains ${missing_event_timestamps} rows without an event timestamp" >&2
+  exit 1
+fi
+
+"${client[@]}" --query "
+  SELECT toString(toStartOfHour(event_timestamp)), count(),
+         sum(sipHash64(event_id, event_timestamp, source_raw))
+  FROM benchmark.gcp_events
+  GROUP BY toStartOfHour(event_timestamp)
+  ORDER BY toStartOfHour(event_timestamp)
+  FORMAT TSVRaw" > "${run_dir}/windows.tsv"
+
+revision_rev="@"
+if [[ -z "$(jj diff --summary 2>/dev/null)" ]]; then
+  revision_rev="@-"
+fi
+revision="$(jj log -r "${revision_rev}" --no-graph -T 'commit_id' 2>/dev/null || true)"
+change_id="$(jj log -r "${revision_rev}" --no-graph -T 'change_id' 2>/dev/null || true)"
+source_bytes="$(awk -F '\t' 'NR > 1 { bytes += $3 } END { printf "%.0f", bytes }' "${run_dir}/files.tsv")"
+logical_input_bytes="$((source_rows * gcp_bytes_per_event))"
+event_start="$("${client[@]}" --query "SELECT min(event_timestamp) FROM benchmark.gcp_events FORMAT TSVRaw")"
+event_end="$("${client[@]}" --query "SELECT max(event_timestamp) FROM benchmark.gcp_events FORMAT TSVRaw")"
+clickhouse_version="$("${client[@]}" --query "SELECT version() FORMAT TSVRaw")"
+source_dir_real="$(realpath "${source_dir}")"
+inventory_sha256="$(sha256sum "${run_dir}/files.tsv" | cut -d' ' -f1)"
+export RUN_ID="${run_id}" REVISION="${revision}" CHANGE_ID="${change_id}"
+export CLICKHOUSE_VERSION="${clickhouse_version}"
+export CANDIDATES="${candidate_order}" SOURCE_DIR="${source_dir_real}"
+export FILES="$(($(wc -l < "${run_dir}/files.tsv") - 1))" SOURCE_BYTES="${source_bytes}"
+export SOURCE_ROWS="${source_rows}" GCP_BYTES_PER_EVENT="${gcp_bytes_per_event}"
+export LOGICAL_INPUT_BYTES="${logical_input_bytes}" EVENT_START="${event_start}" EVENT_END="${event_end}"
+export INVENTORY_SHA256="${inventory_sha256}"
+export MAX_FILES="${max_files}" ROW_LIMIT_PER_FILE="${row_limit_per_file}"
+python3 - "${run_dir}/manifest.json" <<'PY'
+import json
+import os
+import sys
+
+manifest = {
+    "run_id": os.environ["RUN_ID"],
+    "repository": {
+        "commit_id": os.environ["REVISION"],
+        "change_id": os.environ["CHANGE_ID"],
+    },
+    "clickhouse_version": os.environ["CLICKHOUSE_VERSION"],
+    "candidate_order": os.environ["CANDIDATES"].split(","),
+    "dataset": {
+        "source_directory": os.environ["SOURCE_DIR"],
+        "files": int(os.environ["FILES"]),
+        "file_inventory_sha256": os.environ["INVENTORY_SHA256"],
+        "source_physical_bytes": int(os.environ["SOURCE_BYTES"]),
+        "rows": int(os.environ["SOURCE_ROWS"]),
+        "event_time_start": os.environ["EVENT_START"],
+        "event_time_end": os.environ["EVENT_END"],
+        "logical_input_method": "provisional GCP-equivalent bytes per event",
+        "gcp_equivalent_bytes_per_event": int(os.environ["GCP_BYTES_PER_EVENT"]),
+        "logical_input_bytes": int(os.environ["LOGICAL_INPUT_BYTES"]),
+        "max_files": int(os.environ["MAX_FILES"]),
+        "row_limit_per_file": int(os.environ["ROW_LIMIT_PER_FILE"]),
+    },
+}
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump(manifest, output, indent=2, sort_keys=True)
+    output.write("\n")
+PY
+
+{
+  date -u +%FT%TZ
+  uname -a
+  lscpu
+  free -h
+  df -h "${benchmark_root}" "${source_dir}"
+  zfs list fast-storage/lighthouse storage/lighthouse-bench
+  zfs get compression,recordsize,atime,refquota,mountpoint fast-storage/lighthouse storage/lighthouse-bench
+} > "${run_dir}/evidence/host-storage.txt"
+"${client[@]}" --query "SELECT name, value, changed, description FROM system.settings WHERE changed OR name IN ('max_threads', 'max_memory_usage', 'use_query_cache') ORDER BY name FORMAT JSONEachRow" > "${run_dir}/evidence/settings.jsonl"
+"${client[@]}" --query "SELECT name, value FROM system.merge_tree_settings WHERE name LIKE 'object_%' OR name IN ('index_granularity', 'max_bytes_to_merge_at_max_space_in_pool') ORDER BY name FORMAT JSONEachRow" > "${run_dir}/evidence/merge-tree-settings.jsonl"
+
+for candidate in "${candidates[@]}"; do
+  echo "loading-${candidate}" > "${run_dir}/status"
+  window_dir="${run_dir}/state/windows/${candidate}"
+  mkdir -p "${window_dir}"
+  while IFS=$'\t' read -r window_start window_rows window_checksum; do
+    window_id="$(date -u -d "${window_start}" +%Y%m%dT%H)"
+    marker="${window_dir}/${window_id}"
+    [[ -f "${marker}" ]] && continue
+    window_end="$(date -u -d "${window_start} UTC +1 hour" '+%F %T')"
+    target_table="benchmark.events_${candidate}"
+    existing_rows="$("${client[@]}" --param_window_start="${window_start}" --param_window_end="${window_end}" --query "
+      SELECT count() FROM ${target_table}
+      WHERE tenant_id = 1 AND dataset = 'gcp-logging'
+        AND timestamp >= {window_start:DateTime64(6, 'UTC')}
+        AND timestamp < {window_end:DateTime64(6, 'UTC')}
+      FORMAT TSVRaw")"
+    if [[ "${existing_rows}" != "0" ]]; then
+      if [[ "${existing_rows}" != "${window_rows}" ]]; then
+        echo "partial ${candidate} window ${window_start}: expected ${window_rows}, found ${existing_rows}" >&2
+        exit 1
+      fi
+      existing_checksum="$("${client[@]}" --param_window_start="${window_start}" --param_window_end="${window_end}" --query "
+        SELECT sum(sipHash64(event_id, timestamp, source_raw)) FROM ${target_table}
+        WHERE tenant_id = 1 AND dataset = 'gcp-logging'
+          AND timestamp >= {window_start:DateTime64(6, 'UTC')}
+          AND timestamp < {window_end:DateTime64(6, 'UTC')}
+        FORMAT TSVRaw")"
+      if [[ "${existing_checksum}" != "${window_checksum}" ]]; then
+        echo "${candidate} checksum mismatch for recovered window ${window_start}" >&2
+        exit 1
+      fi
+      printf 'recovered\t%s\t%s\n' "${window_rows}" "${window_checksum}" > "${marker}"
+      continue
+    fi
+
+    check_free_space
+    query_id="${query_prefix}_${candidate}_${window_id}"
+    echo "loading ${candidate} ${window_start} (${window_rows} rows)"
+    "${client[@]}" \
+      --receive_timeout=86400 \
+      --send_timeout=86400 \
+      --query_id="${query_id}" \
+      --param_window_start="${window_start}" \
+      --param_window_end="${window_end}" \
+      --queries-file "${repo_root}/benchmark/clickhouse/insert-${candidate}-window.sql"
+
+    metric="$(capture_metric "${query_id}")"
+    IFS=$'\t' read -r written_rows duration_ms peak_memory <<< "${metric}"
+    if [[ "${written_rows}" != "${window_rows}" ]]; then
+      echo "${candidate} row mismatch for ${window_start}: expected ${window_rows}, wrote ${written_rows}" >&2
+      exit 1
+    fi
+    loaded_checksum="$("${client[@]}" --param_window_start="${window_start}" --param_window_end="${window_end}" --query "
+      SELECT sum(sipHash64(event_id, timestamp, source_raw)) FROM ${target_table}
+      WHERE tenant_id = 1 AND dataset = 'gcp-logging'
+        AND timestamp >= {window_start:DateTime64(6, 'UTC')}
+        AND timestamp < {window_end:DateTime64(6, 'UTC')}
+      FORMAT TSVRaw")"
+    if [[ "${loaded_checksum}" != "${window_checksum}" ]]; then
+      echo "${candidate} checksum mismatch for ${window_start}" >&2
+      exit 1
+    fi
+    printf '%s\t%s\n' "${metric}" "${loaded_checksum}" > "${marker}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${candidate}" "${window_start}" "${window_rows}" "${written_rows}" "${duration_ms}" "${peak_memory}" >> "${run_dir}/phases.tsv"
+    "${client[@]}" --query "
+      SELECT now64(3) AS captured_at, '${candidate}' AS candidate,
+             '${window_start}' AS window_start, table, sum(rows) AS rows,
+             sum(bytes_on_disk) AS bytes_on_disk, count() AS active_parts
+      FROM system.parts
+      WHERE active AND database = 'benchmark'
+      GROUP BY table ORDER BY table FORMAT JSONEachRow" >> "${run_dir}/progress.jsonl"
+  done < "${run_dir}/windows.tsv"
+
+  candidate_rows="$("${client[@]}" --query "SELECT count() FROM benchmark.events_${candidate} FORMAT TSVRaw")"
+  if [[ "${candidate_rows}" != "${source_rows}" ]]; then
+    echo "final ${candidate} row mismatch: expected ${source_rows}, found ${candidate_rows}" >&2
+    exit 1
+  fi
+done
+
+"${client[@]}" --query "SYSTEM FLUSH LOGS"
+"${client[@]}" --query "SELECT * FROM system.query_log WHERE startsWith(query_id, '${query_prefix}_') ORDER BY event_time_microseconds FORMAT JSONEachRow" > "${run_dir}/query-log.jsonl"
+"${client[@]}" --query "
+  SELECT table, partition, name, rows, bytes_on_disk, data_compressed_bytes,
+         data_uncompressed_bytes, marks, level
+  FROM system.parts
+  WHERE active AND database = 'benchmark'
+  ORDER BY table, partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/parts-after-load.jsonl"
+"${client[@]}" --query "SELECT * FROM system.merges WHERE database = 'benchmark' ORDER BY table FORMAT JSONEachRow" > "${run_dir}/evidence/merges-after-load.jsonl"
+date -u +%FT%TZ > "${run_dir}/completed-at"
+echo "completed" > "${run_dir}/status"
+trap - EXIT
+
+echo "day-scale load completed: ${run_dir}"

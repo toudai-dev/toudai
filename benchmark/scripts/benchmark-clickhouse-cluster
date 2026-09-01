@@ -1,0 +1,526 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+cluster_root="${LIGHTHOUSE_CLUSTER_ROOT:-${benchmark_root}/cluster}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+tcp_base="${LIGHTHOUSE_CLUSTER_TCP_BASE:-19200}"
+http_base="${LIGHTHOUSE_CLUSTER_HTTP_BASE:-18300}"
+active_file="${cluster_root}/active-topology"
+
+usage() {
+  cat <<'EOF'
+Usage: benchmark/scripts/benchmark-clickhouse-cluster COMMAND [arguments]
+
+Commands:
+  start SHARDS                 Start one coordinator and 1, 2, or 4 leaves.
+  stop [SHARDS]                Stop the active or selected topology.
+  status [SHARDS]              Show coordinator and leaf health.
+  client [client arguments]    Query the active topology's coordinator.
+  leaf-client INDEX [args]     Query one leaf in the active topology.
+  smoke SHARDS RUN_ID          Run and preserve a distributed correctness smoke test.
+  smoke-matrix RUN_ID_PREFIX   Run sequential 1-, 2-, and 4-shard smoke tests.
+EOF
+}
+
+validate_shards() {
+  case "$1" in
+    1|2|4) ;;
+    *) echo "SHARDS must be 1, 2, or 4" >&2; exit 2 ;;
+  esac
+}
+
+topology_dir() {
+  printf '%s/topology-%s' "${cluster_root}" "$1"
+}
+
+node_dir() {
+  local shards="$1"
+  local node="$2"
+  printf '%s/%s' "$(topology_dir "${shards}")" "${node}"
+}
+
+node_port() {
+  local node="$1"
+  if [[ "${node}" == "coordinator" ]]; then
+    printf '%s' "${tcp_base}"
+  else
+    printf '%s' "$((tcp_base + ${node#leaf-}))"
+  fi
+}
+
+node_http_port() {
+  local node="$1"
+  if [[ "${node}" == "coordinator" ]]; then
+    printf '%s' "${http_base}"
+  else
+    printf '%s' "$((http_base + ${node#leaf-}))"
+  fi
+}
+
+active_shards() {
+  if [[ ! -f "${active_file}" ]]; then
+    echo "no active cluster topology" >&2
+    exit 1
+  fi
+  cat "${active_file}"
+}
+
+is_node_running() {
+  local shards="$1"
+  local node="$2"
+  local pid_file
+  pid_file="$(node_dir "${shards}" "${node}")/run/clickhouse.pid"
+  [[ -f "${pid_file}" ]] || return 1
+  local pid
+  pid="$(cat "${pid_file}")"
+  [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+remote_servers_xml() {
+  local shards="$1"
+  local index
+  cat <<'EOF'
+    <remote_servers>
+        <lighthouse>
+EOF
+  for index in $(seq 1 "${shards}"); do
+    cat <<EOF
+            <shard>
+                <internal_replication>false</internal_replication>
+                <replica>
+                    <host>127.0.0.1</host>
+                    <port>$((tcp_base + index))</port>
+                    <user>default</user>
+                </replica>
+            </shard>
+EOF
+  done
+  cat <<'EOF'
+        </lighthouse>
+    </remote_servers>
+EOF
+}
+
+write_node_config() {
+  local shards="$1"
+  local node="$2"
+  local threads="$3"
+  local root
+  root="$(node_dir "${shards}" "${node}")"
+  mkdir -p "${root}"/{data,tmp,user_files,format_schemas,logs,run}
+
+  cat > "${root}/users.xml" <<EOF
+<?xml version="1.0"?>
+<clickhouse>
+    <profiles>
+        <default>
+            <max_memory_usage>8589934592</max_memory_usage>
+            <max_threads>${threads}</max_threads>
+            <use_uncompressed_cache>0</use_uncompressed_cache>
+        </default>
+    </profiles>
+    <users>
+        <default>
+            <password></password>
+            <networks><ip>127.0.0.1</ip><ip>::1</ip></networks>
+            <profile>default</profile>
+            <quota>default</quota>
+        </default>
+    </users>
+    <quotas><default><interval><duration>3600</duration></interval></default></quotas>
+</clickhouse>
+EOF
+
+  cat > "${root}/config.xml" <<EOF
+<?xml version="1.0"?>
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <console>false</console>
+        <size>100M</size>
+        <count>3</count>
+    </logger>
+    <http_port>$(node_http_port "${node}")</http_port>
+    <tcp_port>$(node_port "${node}")</tcp_port>
+    <listen_host>127.0.0.1</listen_host>
+    <max_connections>128</max_connections>
+    <max_concurrent_queries>16</max_concurrent_queries>
+    <max_server_memory_usage_to_ram_ratio>0.20</max_server_memory_usage_to_ram_ratio>
+    <mark_cache_size>536870912</mark_cache_size>
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+    <path>${root}/data/</path>
+    <tmp_path>${root}/tmp/</tmp_path>
+    <user_files_path>${root}/user_files/</user_files_path>
+    <format_schema_path>${root}/format_schemas/</format_schema_path>
+    <users_config>${root}/users.xml</users_config>
+    <user_directories><users_xml><path>${root}/users.xml</path></users_xml></user_directories>
+    <default_profile>default</default_profile>
+    <default_database>default</default_database>
+    <timezone>UTC</timezone>
+    <mlock_executable>false</mlock_executable>
+$(remote_servers_xml "${shards}")
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>1000</flush_interval_milliseconds>
+    </query_log>
+</clickhouse>
+EOF
+}
+
+node_cpus() {
+  local shards="$1"
+  local node="$2"
+  if [[ "${node}" == "coordinator" ]]; then
+    echo "0-1"
+    return
+  fi
+  local index="${node#leaf-}"
+  local start=$((2 + (index - 1) * 10 / shards))
+  local end=$((1 + index * 10 / shards))
+  printf '%s-%s' "${start}" "${end}"
+}
+
+start_node() {
+  local shards="$1"
+  local node="$2"
+  local root
+  root="$(node_dir "${shards}" "${node}")"
+  if is_node_running "${shards}" "${node}"; then
+    return
+  fi
+  rm -f "${root}/run/clickhouse.pid"
+  local command=(clickhouse server
+    --config-file="${root}/config.xml"
+    --daemon
+    --pid-file="${root}/run/clickhouse.pid"
+    --log-file="${root}/logs/clickhouse-server.log"
+    --errorlog-file="${root}/logs/clickhouse-server.err.log")
+  if command -v taskset >/dev/null 2>&1; then
+    taskset -c "$(node_cpus "${shards}" "${node}")" "${command[@]}"
+  else
+    "${command[@]}"
+  fi
+
+  local port
+  port="$(node_port "${node}")"
+  for _ in $(seq 1 120); do
+    if clickhouse client --host 127.0.0.1 --port "${port}" --query "SELECT 1" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.5
+  done
+  echo "${node} did not become ready on port ${port}" >&2
+  tail -100 "${root}/logs/clickhouse-server.err.log" >&2 || true
+  return 1
+}
+
+start_cluster() {
+  local shards="$1"
+  validate_shards "${shards}"
+  mkdir -p "${cluster_root}"
+  if [[ -f "${active_file}" ]]; then
+    local active
+    active="$(cat "${active_file}")"
+    if [[ "${active}" != "${shards}" ]]; then
+      echo "topology ${active} is active; stop it before starting ${shards}" >&2
+      return 1
+    fi
+  fi
+
+  local leaf_threads=$((10 / shards))
+  ((leaf_threads > 8)) && leaf_threads=8
+  ((leaf_threads < 2)) && leaf_threads=2
+  local index
+  for index in $(seq 1 "${shards}"); do
+    write_node_config "${shards}" "leaf-${index}" "${leaf_threads}"
+  done
+  write_node_config "${shards}" coordinator 2
+
+  for index in $(seq 1 "${shards}"); do
+    start_node "${shards}" "leaf-${index}"
+  done
+  start_node "${shards}" coordinator
+  printf '%s\n' "${shards}" > "${active_file}"
+  echo "started ${shards}-shard topology"
+}
+
+stop_node() {
+  local shards="$1"
+  local node="$2"
+  local pid_file
+  pid_file="$(node_dir "${shards}" "${node}")/run/clickhouse.pid"
+  if ! is_node_running "${shards}" "${node}"; then
+    rm -f "${pid_file}"
+    return
+  fi
+  local pid
+  pid="$(cat "${pid_file}")"
+  kill "${pid}"
+  for _ in $(seq 1 120); do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      rm -f "${pid_file}"
+      return
+    fi
+    sleep 0.5
+  done
+  echo "${node} did not stop within 60 seconds" >&2
+  return 1
+}
+
+stop_cluster() {
+  local shards="${1:-}"
+  if [[ -z "${shards}" ]]; then
+    shards="$(active_shards)"
+  fi
+  validate_shards "${shards}"
+  stop_node "${shards}" coordinator || true
+  local index
+  for index in $(seq 1 "${shards}"); do
+    stop_node "${shards}" "leaf-${index}" || true
+  done
+  if [[ -f "${active_file}" && "$(cat "${active_file}")" == "${shards}" ]]; then
+    rm -f "${active_file}"
+  fi
+  echo "stopped ${shards}-shard topology"
+}
+
+coordinator_client() {
+  local shards
+  shards="$(active_shards)"
+  validate_shards "${shards}"
+  clickhouse client --host 127.0.0.1 --port "${tcp_base}" "$@"
+}
+
+leaf_client() {
+  local index="$1"
+  shift
+  local shards
+  shards="$(active_shards)"
+  if [[ ! "${index}" =~ ^[1-9][0-9]*$ || "${index}" -gt "${shards}" ]]; then
+    echo "leaf index must be between 1 and ${shards}" >&2
+    exit 2
+  fi
+  clickhouse client --host 127.0.0.1 --port "$((tcp_base + index))" "$@"
+}
+
+status_cluster() {
+  local shards="${1:-}"
+  [[ -n "${shards}" ]] || shards="$(active_shards)"
+  validate_shards "${shards}"
+  local node port health
+  for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
+    port="$(node_port "${node}")"
+    health="stopped"
+    if is_node_running "${shards}" "${node}" && \
+      clickhouse client --host 127.0.0.1 --port "${port}" --query "SELECT 1" >/dev/null 2>&1; then
+      health="running"
+    fi
+    printf '%s\t%s\t%s\t%s\n' "${node}" "${port}" "$(node_cpus "${shards}" "${node}")" "${health}"
+  done
+}
+
+smoke_cluster() {
+  local shards="$1"
+  local run_id="$2"
+  validate_shards "${shards}"
+  if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
+    exit 2
+  fi
+  local run_dir="${runs_root}/${run_id}"
+  if [[ -e "${run_dir}" ]]; then
+    echo "run directory already exists: ${run_dir}" >&2
+    exit 1
+  fi
+  mkdir -p "${run_dir}/evidence"
+  echo "running" > "${run_dir}/status"
+
+  local completed=0
+  cleanup_smoke() {
+    local exit_status=$?
+    stop_cluster "${shards}" >/dev/null 2>&1 || true
+    if [[ "${completed}" != "1" ]]; then
+      echo "failed" > "${run_dir}/status"
+    fi
+    return "${exit_status}"
+  }
+  trap cleanup_smoke EXIT
+
+  start_cluster "${shards}"
+  status_cluster "${shards}" > "${run_dir}/evidence/nodes.tsv"
+  local index
+  for index in $(seq 1 "${shards}"); do
+    leaf_client "${index}" --multiquery --query "
+      DROP DATABASE IF EXISTS benchmark_distributed_smoke;
+      CREATE DATABASE benchmark_distributed_smoke;
+      CREATE TABLE benchmark_distributed_smoke.events_local
+      (
+        tenant_id UInt64,
+        dataset LowCardinality(String),
+        timestamp DateTime64(6, 'UTC'),
+        event_id String,
+        service_name LowCardinality(String),
+        duration Float64
+      )
+      ENGINE = MergeTree
+      PARTITION BY toDate(timestamp)
+      ORDER BY (tenant_id, dataset, timestamp, event_id);
+    "
+  done
+  coordinator_client --multiquery --query "
+    DROP DATABASE IF EXISTS benchmark_distributed_smoke;
+    CREATE DATABASE benchmark_distributed_smoke;
+    CREATE TABLE benchmark_distributed_smoke.events
+    (
+      tenant_id UInt64,
+      dataset LowCardinality(String),
+      timestamp DateTime64(6, 'UTC'),
+      event_id String,
+      service_name LowCardinality(String),
+      duration Float64
+    ) ENGINE = Distributed(
+      lighthouse,
+      benchmark_distributed_smoke,
+      events_local,
+      cityHash64(tenant_id, dataset, event_id)
+    );
+  "
+
+  coordinator_client --query_id="lighthouse_${run_id//-/_}_insert" --query "
+    INSERT INTO benchmark_distributed_smoke.events
+    SELECT
+      if(number % 10 = 0, 2, 1),
+      'smoke',
+      toDateTime64('2026-08-30 00:00:00', 6, 'UTC') + number / 1000000,
+      toString(number),
+      if(number % 3 = 0, 'api', 'worker'),
+      toFloat64(number % 1000)
+    FROM numbers(100000)
+    SETTINGS insert_distributed_sync = 1"
+
+  coordinator_client --query "
+    SELECT count(), sum(cityHash64(tenant_id, dataset, event_id))
+    FROM benchmark_distributed_smoke.events FORMAT TSVRaw" > "${run_dir}/distributed-result.tsv"
+  coordinator_client --query "
+    SELECT count(), sum(cityHash64(if(number % 10 = 0, 2, 1), 'smoke', toString(number)))
+    FROM numbers(100000) FORMAT TSVRaw" > "${run_dir}/expected-result.tsv"
+  cmp "${run_dir}/distributed-result.tsv" "${run_dir}/expected-result.tsv"
+
+  printf 'leaf\trows\n' > "${run_dir}/shard-rows.tsv"
+  for index in $(seq 1 "${shards}"); do
+    printf '%s\t%s\n' "${index}" "$(leaf_client "${index}" --query "SELECT count() FROM benchmark_distributed_smoke.events_local FORMAT TSVRaw")" \
+      >> "${run_dir}/shard-rows.tsv"
+  done
+  awk -F '\t' 'NR > 1 { total += $2 } END { exit total == 100000 ? 0 : 1 }' "${run_dir}/shard-rows.tsv"
+
+  coordinator_client --query "
+    EXPLAIN indexes = 1
+    SELECT service_name, count(), quantileTDigest(0.95)(duration)
+    FROM benchmark_distributed_smoke.events
+    WHERE tenant_id = 1
+      AND timestamp >= toDateTime64('2026-08-30 00:00:00', 6, 'UTC')
+      AND timestamp < toDateTime64('2026-08-30 00:00:00.050000', 6, 'UTC')
+    GROUP BY service_name ORDER BY service_name" > "${run_dir}/evidence/explain.txt"
+
+  stop_node "${shards}" "leaf-${shards}"
+  set +e
+  coordinator_client --skip_unavailable_shards=0 --query "SELECT count() FROM benchmark_distributed_smoke.events" \
+    > "${run_dir}/complete-with-leaf-down.out" 2> "${run_dir}/complete-with-leaf-down.err"
+  local complete_exit=$?
+  set -e
+  if [[ "${complete_exit}" == "0" ]]; then
+    echo "complete query unexpectedly succeeded with a leaf down" >&2
+    exit 1
+  fi
+  printf '%s\n' "${complete_exit}" > "${run_dir}/complete-with-leaf-down.exit"
+  coordinator_client --skip_unavailable_shards=1 --query "SELECT count() FROM benchmark_distributed_smoke.events FORMAT TSVRaw" \
+    > "${run_dir}/partial-with-leaf-down.tsv"
+
+  start_node "${shards}" "leaf-${shards}"
+  coordinator_client --query "SELECT count() FROM benchmark_distributed_smoke.events FORMAT TSVRaw" \
+    > "${run_dir}/recovered-result.tsv"
+  [[ "$(cat "${run_dir}/recovered-result.tsv")" == "100000" ]]
+
+  for node in coordinator $(seq -f 'leaf-%.0f' 1 "${shards}"); do
+    local port
+    port="$(node_port "${node}")"
+    clickhouse client --host 127.0.0.1 --port "${port}" --query "SYSTEM FLUSH LOGS" >/dev/null
+    clickhouse client --host 127.0.0.1 --port "${port}" --query "
+      SELECT query_id, query_duration_ms, read_rows, read_bytes, result_rows,
+             memory_usage, ProfileEvents['OSCPUVirtualTimeMicroseconds'] AS cpu_us
+      FROM system.query_log
+      WHERE type = 'QueryFinish' AND event_time > now() - INTERVAL 1 HOUR
+      ORDER BY event_time_microseconds FORMAT JSONEachRow" \
+      > "${run_dir}/evidence/${node}-query-metrics.jsonl"
+  done
+
+  local revision
+  revision="$(jj log -r @- --no-graph -T 'commit_id')"
+  cat > "${run_dir}/manifest.json" <<EOF
+{
+  "run_id": "${run_id}",
+  "repository_revision": "${revision}",
+  "clickhouse_version": "$(coordinator_client --query 'SELECT version() FORMAT TSVRaw')",
+  "shards": ${shards},
+  "replicas": 1,
+  "rows": 100000,
+  "sharding_expression": "cityHash64(tenant_id, dataset, event_id)",
+  "sort_key": "(tenant_id, dataset, timestamp, event_id)",
+  "cpu_affinity": "coordinator=0-1, leaves divide 2-11",
+  "failure_semantics_checked": true
+}
+EOF
+  date -u +%FT%TZ > "${run_dir}/completed-at"
+  stop_cluster "${shards}" >/dev/null
+  trap - EXIT
+  echo "completed" > "${run_dir}/status"
+  completed=1
+  echo "distributed smoke completed: ${run_dir}"
+}
+
+smoke_matrix() {
+  local prefix="$1"
+  local shards
+  for shards in 1 2 4; do
+    smoke_cluster "${shards}" "${prefix}-${shards}s"
+  done
+}
+
+case "${1:-}" in
+  start)
+    [[ $# == 2 ]] || { usage >&2; exit 2; }
+    start_cluster "$2"
+    ;;
+  stop)
+    [[ $# -le 2 ]] || { usage >&2; exit 2; }
+    stop_cluster "${2:-}"
+    ;;
+  status)
+    [[ $# -le 2 ]] || { usage >&2; exit 2; }
+    status_cluster "${2:-}"
+    ;;
+  client)
+    shift
+    coordinator_client "$@"
+    ;;
+  leaf-client)
+    [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+    index="$2"
+    shift 2
+    leaf_client "${index}" "$@"
+    ;;
+  smoke)
+    [[ $# == 3 ]] || { usage >&2; exit 2; }
+    smoke_cluster "$2" "$3"
+    ;;
+  smoke-matrix)
+    [[ $# == 2 ]] || { usage >&2; exit 2; }
+    smoke_matrix "$2"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

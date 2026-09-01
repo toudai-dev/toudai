@@ -1,0 +1,54 @@
+== Local Hardware Baseline
+
+- Experiment storage path: {benchmark-storage-context}
+- CPU: AMD Ryzen 5 3600, one socket and NUMA node, 6 physical cores / 12 SMT
+  threads, 32 MiB L3, with the host reporting a 0.558–4.208 GHz frequency
+  range.
+- RAM: 4 × 16 GiB DDR4 DIMMs (62.7 GiB OS-visible), configured at 2,133 MT/s;
+  69.0 GiB swap was present. No memory-bandwidth benchmark was captured.
+- OS disk: Samsung SSD 980 1 TB NVMe, LUKS-backed ext4.
+- Hot SSD tier before Experiment 010: Samsung 870 QVO 1 TB plus Samsung 870
+  EVO 1 TB in a ZFS mirror, 900 GiB usable. Its throughput was not measured
+  before the pool was replaced, so no later striped result is attributed to it.
+- Hot SSD tier from Experiment 010 onward: the same two SATA SSDs as independent
+  top-level ZFS vdevs, 1.81 TiB usable, with no redundancy.
+- Bulk/source tier: 2 × Seagate ST4000DM004 4 TB HDDs as independent top-level
+  ZFS vdevs, 7.25 TiB usable, with no redundancy.
+
+The following storage speed baseline was captured on 2026-08-30, after the
+historical experiments, with `fio` 3.41. Each tier used a temporary 8 GiB file,
+direct I/O, one job, 1 MiB sequential I/O at queue depth 8, and 4 KiB random
+reads for 30 seconds at queue depth 32. Sequential writes included
+`end_fsync=1`. These measurements characterize the current host and filesystem
+state; they are not retroactive measurements of a historical run. The hot pool
+was 79% allocated and the bulk pool was 74% allocated when captured.
+
+[options="header",cols="2,3,2,2,2"]
+|===
+|Tier |Filesystem and device layout |Sequential write |Sequential read |4 KiB random read
+
+|OS NVMe
+|ext4 on Samsung SSD 980
+|2,589 MiB/s
+|3,363 MiB/s
+|141,623 IOPS
+
+|Hot SSD
+|ZFS stripe on Samsung 870 QVO + 870 EVO
+|433 MiB/s
+|556 MiB/s
+|2,369 IOPS
+
+|Bulk/source HDD
+|ZFS stripe on 2 × Seagate ST4000DM004
+|207 MiB/s
+|205 MiB/s
+|99 IOPS
+|===
+
+The versioned procedure is
+`benchmark/scripts/benchmark-host-storage`; raw local evidence is under
+`/mnt/fast-storage/lighthouse/runs/experiment-001-host-storage-v1`. Query
+latencies in this record still include cache, occupancy, and concurrent-system
+effects specific to their run and must not be normalized from these standalone
+device measurements.
