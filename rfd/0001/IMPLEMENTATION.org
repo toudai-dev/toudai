@@ -761,7 +761,11 @@ criterion.
 - [ ] Run synthetic multi-tenant concurrency, dashboard/raw workload isolation,
   and slow-leaf cancellation on independent hosts; the shared local CPU and SSD
   stripe reached their limits before those profiles could represent scale-out.
-- [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, then run
+- [ ] Prepare the GCP Z3 Stage A OpenTofu plan, private-network harness, corpus
+  classification decision, six-hour cost envelope, and automatic teardown for
+  explicit approval; no cloud resources or uploads exist yet.
+- [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
+  with the approved same-cloud GCP run, then run
   10 TB scaling, replicated failure-domain, sustained-ingestion, failure, and
   24-to-72-hour soak tests only on finalists; compare full infrastructure,
   object storage, network, source-cloud egress, and operational cost.

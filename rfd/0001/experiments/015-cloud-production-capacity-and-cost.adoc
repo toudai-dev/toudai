@@ -3,7 +3,7 @@
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
 - *Status:* Planned
-- *Date:* 2026-08-27
+- *Date:* 2026-09-04
 - *External mutation:* Requires separate approval before provisioning cloud
   infrastructure, uploading data, or incurring cost
 
@@ -60,6 +60,77 @@ Compare x86 and ARM only when the same ClickHouse version, query semantics, and
 operational tooling are supported. Spot or preemptible capacity may prepare or
 transform data, but measured latency and soak runs use non-interruptible
 capacity unless interruption is itself the tested production policy.
+
+== Stage A planning snapshot
+
+The first proposed calibration is self-managed GCP in `us-central1`. This is a
+proposal for the approval gate, not a provisioned environment or a final
+provider decision. GCP is the first candidate because the production source is
+GCP Logging, so a viable same-cloud design avoids making recurring source-data
+egress a hidden requirement. AWS remains the first cross-cloud comparison once
+the harness and corpus transfer are proven.
+
+As of 2026-09-04, the smallest relevant GCP Z3 shapes are:
+
+[options="header",cols="5*"]
+|===
+|Machine type |vCPU |RAM |Local Titanium SSD |On-demand price in `us-central1`
+
+|`z3-highmem-8-highlssd`
+|8
+|64 GiB
+|3,000 GiB
+|$1.151931123/hour
+
+|`z3-highmem-14-standardlssd`
+|14
+|112 GiB
+|3,000 GiB
+|$1.769304123/hour
+|===
+
+Both shapes advertise up to 750,000 read IOPS, 500,000 write IOPS, 3,000
+MiB/s reads, 2,500 MiB/s writes, and 23 Gbps default egress for their single
+3,000 GiB Titanium SSD configuration. These are provider limits, not measured
+Lighthouse results. The 14-vCPU shape is the preferred first run because its
+CPU count is closer to the local 12-thread baseline and its additional memory
+reduces avoidable cache and merge differences. At its listed price, a six-hour
+database-node allowance is $10.62 before the load generator, boot disk, object
+storage, operations, taxes, and network charges.
+
+The first AWS x86 control should use `i7i.2xlarge` if it is available in the
+selected region: 8 vCPU, 64 GiB RAM, one 1,875 GB local NVMe SSD, and up to 12
+Gbps networking. Capture an authoritative regional quote immediately before
+approval; the EC2 instance specification page does not provide one stable
+regional price. Do not compare it to GCP until both runs use the same retained
+columns, ClickHouse settings, cache policy, and client topology.
+
+Official planning sources:
+
+- https://cloud.google.com/compute/docs/storage-optimized-machines
+- https://cloud.google.com/products/compute/pricing/storage-optimized
+- https://aws.amazon.com/ec2/instance-types/storage-optimized/
+
+=== Provisioning approval packet
+
+Before any Stage A resource is created, record and obtain approval for:
+
+. the cloud project and billing account, region, and hard dollar allowance;
+. the database and load-generator shapes and maximum wall-clock lifetime;
+. automatic teardown independent of benchmark success;
+. budget alerts and labels identifying the experiment and owner;
+. whether the source corpus is permitted to leave the current machine and, if
+  so, its approved bucket, region, encryption, retention, and deletion policy;
+. a redacted or synthetic corpus when the production-derived Parquet data is
+  not approved for cloud upload; and
+. the exact resources in an OpenTofu plan, including boot disks, object storage,
+  IP addresses, and estimated network transfer.
+
+Stage A must not depend on a publicly reachable ClickHouse port. Put the
+database and load generator on a private VPC, restrict SSH or IAP access, and
+run the query driver from the dedicated load generator. Local NVMe is
+disposable serving state; the immutable corpus and run artifacts require a
+separate approved durable location.
 
 == Staged test matrix
 
@@ -227,4 +298,7 @@ plans with secrets removed.
 
 == Results
 
-Pending.
+Pending. No cloud resources have been provisioned and no corpus has been
+uploaded. The local environment currently has Nix but not OpenTofu, Terraform,
+the AWS CLI, or the Google Cloud CLI; those reproducibility tools must be added
+and validated before presenting an infrastructure plan for approval.
