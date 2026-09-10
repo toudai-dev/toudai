@@ -312,6 +312,11 @@ Cost-free preparation completed on 2026-09-10:
 - the first on-demand request was also rejected before instance creation
   because E2 on-demand instances require their default live-migration host
   maintenance policy rather than `TERMINATE`;
+- the next request launched and connected through IAP, verified the pinned Flox
+  package, and then failed because an intermediate `.flox` directory was
+  root-owned; Packer deleted the instance and disk after 1 minute 59 seconds,
+  and the provisioner now assigns the complete environment tree to the
+  unprivileged runtime user;
 - the corrected Packer template uses on-demand capacity for this short build,
   retaining one-hour deletion and the E2 default maintenance policy, while the
   Stage A serving topology uses actual Spot VMs through OpenTofu; and

@@ -16,6 +16,7 @@ sudo apt-get install --yes "${flox_deb}"
 
 sudo useradd --create-home --shell /bin/bash lighthouse
 sudo install --directory --owner lighthouse --group lighthouse /opt/lighthouse/.flox/env
+sudo chown --recursive lighthouse:lighthouse /opt/lighthouse
 sudo install --owner lighthouse --group lighthouse --mode 0644 \
   /tmp/lighthouse-manifest.toml /opt/lighthouse/.flox/env/manifest.toml
 sudo install --owner lighthouse --group lighthouse --mode 0644 \
