@@ -370,6 +370,29 @@ and `aaabb75fa9a2d2256f4e45ffc3a7cd63c3b010b3a18032b2ff5aff0ca4405020`,
 respectively.
 
 The dependency image now exists and incurs image-storage cost until deleted.
-No benchmark compute is running and no corpus has been uploaded. Booting the
-image, provisioning the serving topology, creating the corpus bucket, and
-executing the benchmark remain behind their separate approval gates.
+An approved post-build boot test then launched the image on a private-IP-only
+`e2-standard-4` VM with a 15-minute automatic deletion limit. The first IAP
+request raced instance propagation and returned `Failed to lookup instance`;
+an API description confirmed the VM and a retry after ten seconds connected.
+Future automation must poll API and SSH readiness rather than treating initial
+IAP lookup failure as a terminal image failure.
+
+The booted image passed the following checks:
+
+- `/etc/lighthouse-benchmark-image` reported Flox 1.15.0 and ClickHouse
+  26.3.17.110;
+- activation as the unprivileged `lighthouse` user reproduced ClickHouse
+  26.3.17.110, OpenTofu 1.12.6, Packer 1.15.4, Google Cloud SDK 581.0.0,
+  `fio` 3.42, and `sysstat` 12.7.7;
+- no application-default credential, PEM, or private-key file was present under
+  `/root`, `/home/lighthouse`, or `/opt/lighthouse`;
+- the 100 GB boot filesystem used 6.7 GiB after boot; and
+- explicit deletion removed both the validation instance and its disk before
+  the automatic limit.
+
+The local boot-test log is `.tmp/experiment-015/image-smoke.log`, with SHA-256
+`2db3ae5094ccdd62ea61368f6bfaef111be3aecfb3a11fadccb9e10f4a205fcd`.
+
+No benchmark compute is running and no corpus has been uploaded. Provisioning
+the serving topology, creating the corpus bucket, and executing the benchmark
+remain behind their separate approval gates.
