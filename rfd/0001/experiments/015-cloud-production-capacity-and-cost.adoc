@@ -314,6 +314,11 @@ Cost-free preparation completed on 2026-09-10:
 - the dependency-only image provisioner pins and verifies Flox 1.15.0 before
   prefetching the locked environment as an unprivileged `lighthouse` user.
 
-No cloud resources have been provisioned and no corpus has been uploaded. The
-network apply, image build, serving topology, bucket, and benchmark execution
+The user applied the reviewed network plan on 2026-09-10. State inspection
+confirmed the expected VPC, subnet, and IAP-only firewall rule. The registered
+project-metadata SSH key matches the local `~/.ssh/gcp` public fingerprint, and
+the Packer template uses that key through IAP without copying it into the image.
+
+No image builder or benchmark compute has been launched and no corpus has been
+uploaded. The image build, serving topology, bucket, and benchmark execution
 remain behind the explicit cost and data-handling gates.

@@ -24,6 +24,16 @@ variable "subnetwork" {
   type = string
 }
 
+variable "ssh_username" {
+  type    = string
+  default = "wuddarwin"
+}
+
+variable "ssh_private_key_file" {
+  type    = string
+  default = "~/.ssh/gcp"
+}
+
 source "googlecompute" "benchmark" {
   project_id                  = var.project_id
   zone                        = var.zone
@@ -32,12 +42,12 @@ source "googlecompute" "benchmark" {
   machine_type                = "e2-standard-4"
   disk_size                   = 100
   disk_type                   = "pd-balanced"
-  ssh_username                = "packer"
+  ssh_username                = var.ssh_username
+  ssh_private_key_file        = pathexpand(var.ssh_private_key_file)
   network                     = var.network
   subnetwork                  = var.subnetwork
   tags                        = ["lighthouse-iap-ssh"]
   use_iap                     = true
-  use_os_login                = true
   preemptible                 = true
   on_host_maintenance         = "TERMINATE"
   max_run_duration_in_seconds = 3600
@@ -51,10 +61,6 @@ source "googlecompute" "benchmark" {
     managed_by  = "packer"
   }
 
-  metadata = {
-    block-project-ssh-keys = "true"
-    enable-oslogin         = "true"
-  }
 }
 
 build {

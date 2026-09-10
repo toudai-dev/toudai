@@ -33,6 +33,12 @@ flox activate -- packer validate \
   benchmark/cloud/gcp/image/image.pkr.hcl
 ----
 
+The template defaults to project-metadata user `wuddarwin` and private key
+`~/.ssh/gcp`. Override `ssh_username` and `ssh_private_key_file` when another
+operator builds the image. The private key is read from the workstation and is
+never copied into the image or repository. The current key's public fingerprint
+is `SHA256:8Va99u4/RSyII6p6Udi0a9tV44byqF6G3UjH/P79yf8`.
+
 `tofu plan` contacts GCP and must be reviewed before apply. Packer's GCP plugin
 currently exposes its legacy `preemptible` switch rather than the newer Spot
 provisioning-model field. The image builder therefore uses preemptible capacity;
@@ -43,7 +49,7 @@ last-resort cost guardrail rather than a substitute for supervising the build.
 == Approved execution order
 
 . Apply and preserve the reviewed network plan.
-. Build the golden image with the Spot builder.
+. Build the golden image with the preemptible builder.
 . Verify the image metadata and run the ClickHouse smoke test on a disposable
   instance.
 . Provision the Stage A Spot database and load-generator topology from the
