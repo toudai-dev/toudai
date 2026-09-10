@@ -37,4 +37,6 @@ rm -f "${flox_deb}" /tmp/lighthouse-manifest.toml \
   /tmp/lighthouse-manifest.lock /tmp/lighthouse-env.json
 sudo apt-get clean
 sudo rm -rf /var/lib/apt/lists/*
-sudo cloud-init clean --logs --machine-id
+if command -v cloud-init >/dev/null 2>&1; then
+  sudo cloud-init clean --logs --machine-id
+fi

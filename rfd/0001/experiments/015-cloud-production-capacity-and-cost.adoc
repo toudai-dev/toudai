@@ -317,6 +317,10 @@ Cost-free preparation completed on 2026-09-10:
   root-owned; Packer deleted the instance and disk after 1 minute 59 seconds,
   and the provisioner now assigns the complete environment tree to the
   unprivileged runtime user;
+- the following request built and smoke-tested every locked dependency, then
+  failed only because the Google Debian image does not install `cloud-init`;
+  Packer deleted the instance and disk after 11 minutes 37 seconds, and cleanup
+  now invokes `cloud-init` only on images that provide it;
 - the corrected Packer template uses on-demand capacity for this short build,
   retaining one-hour deletion and the E2 default maintenance policy, while the
   Stage A serving topology uses actual Spot VMs through OpenTofu; and
