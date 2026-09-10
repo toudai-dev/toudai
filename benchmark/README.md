@@ -209,3 +209,22 @@ metrics and host samples. Accelerated exact results are checked against the
 matching retained raw topology; heatmap and percentile results compare exact
 sample-count and duration-sum anchors because histogram and t-digest byte
 encodings can vary with distributed merge order.
+
+## GCP cloud benchmark
+
+Experiment 015's cost-free preparation lives under
+[`benchmark/cloud/gcp`](cloud/gcp/README.adoc). Activate the committed Flox
+environment to use the locked ClickHouse, OpenTofu, Packer, Google Cloud SDK,
+and host-profiling tools:
+
+```bash
+flox activate
+clickhouse local --version
+tofu version
+packer version
+```
+
+The OpenTofu network plan and Packer image template can be initialized and
+validated without creating cloud resources. Do not apply a plan, build an
+image, or upload a corpus until the Experiment 015 spend and data-handling gates
+are explicitly approved.

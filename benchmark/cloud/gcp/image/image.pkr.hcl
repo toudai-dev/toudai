@@ -1,0 +1,81 @@
+packer {
+  required_plugins {
+    googlecompute = {
+      source  = "github.com/hashicorp/googlecompute"
+      version = "~> 1.2"
+    }
+  }
+}
+
+variable "project_id" {
+  type = string
+}
+
+variable "zone" {
+  type    = string
+  default = "us-central1-a"
+}
+
+variable "network" {
+  type = string
+}
+
+variable "subnetwork" {
+  type = string
+}
+
+source "googlecompute" "benchmark" {
+  project_id                  = var.project_id
+  zone                        = var.zone
+  source_image_family         = "debian-12"
+  source_image_project_id     = ["debian-cloud"]
+  machine_type                = "e2-standard-4"
+  disk_size                   = 100
+  disk_type                   = "pd-balanced"
+  ssh_username                = "packer"
+  network                     = var.network
+  subnetwork                  = var.subnetwork
+  tags                        = ["lighthouse-iap-ssh"]
+  use_iap                     = true
+  use_os_login                = true
+  preemptible                 = true
+  on_host_maintenance         = "TERMINATE"
+  max_run_duration_in_seconds = 3600
+  instance_termination_action = "DELETE"
+
+  image_name   = "lighthouse-benchmark-${formatdate("YYYYMMDD-hhmmss", timestamp())}"
+  image_family = "lighthouse-benchmark"
+  image_labels = {
+    application = "lighthouse"
+    experiment  = "015"
+    managed_by  = "packer"
+  }
+
+  metadata = {
+    block-project-ssh-keys = "true"
+    enable-oslogin         = "true"
+  }
+}
+
+build {
+  sources = ["source.googlecompute.benchmark"]
+
+  provisioner "file" {
+    source      = ".flox/env/manifest.toml"
+    destination = "/tmp/lighthouse-manifest.toml"
+  }
+
+  provisioner "file" {
+    source      = ".flox/env/manifest.lock"
+    destination = "/tmp/lighthouse-manifest.lock"
+  }
+
+  provisioner "file" {
+    source      = ".flox/env.json"
+    destination = "/tmp/lighthouse-env.json"
+  }
+
+  provisioner "shell" {
+    script = "benchmark/cloud/gcp/image/provision.sh"
+  }
+}

@@ -1,0 +1,57 @@
+= GCP Benchmark Infrastructure
+
+This directory prepares Experiment 015 without creating infrastructure by
+default. The committed Flox lock provides the benchmark tools and the exact
+ClickHouse 26.3.17.110 binary used by the local baseline.
+
+== Boundaries
+
+- `network/` defines the private benchmark VPC, subnet, and IAP-only SSH rule.
+- `image/` builds a dependency-only Debian image on disposable discounted
+  capacity.
+- The image contains no corpus, credentials, ClickHouse data, or tenant state.
+- Applying OpenTofu or running `packer build` creates billable shared resources
+  and requires explicit approval.
+
+The image builder has an ephemeral external address for outbound package-cache
+access, but SSH is allowed only through Google's IAP range. Benchmark database
+nodes will use private addresses and are defined separately after the image is
+validated.
+
+== Cost-free validation
+
+[source,shell]
+----
+flox activate -- tofu -chdir=benchmark/cloud/gcp/network init -backend=false
+flox activate -- tofu -chdir=benchmark/cloud/gcp/network validate
+
+flox activate -- packer init benchmark/cloud/gcp/image/image.pkr.hcl
+flox activate -- packer validate \
+  -var project_id=lighthouse-508219 \
+  -var network=lighthouse-benchmark \
+  -var subnetwork=lighthouse-benchmark-us-central1 \
+  benchmark/cloud/gcp/image/image.pkr.hcl
+----
+
+`tofu plan` contacts GCP and must be reviewed before apply. Packer's GCP plugin
+currently exposes its legacy `preemptible` switch rather than the newer Spot
+provisioning-model field. The image builder therefore uses preemptible capacity;
+the Stage A serving topology will use actual Spot VMs. The builder also has a
+one-hour maximum runtime and deletion termination action, but that is a
+last-resort cost guardrail rather than a substitute for supervising the build.
+
+== Approved execution order
+
+. Apply and preserve the reviewed network plan.
+. Build the golden image with the Spot builder.
+. Verify the image metadata and run the ClickHouse smoke test on a disposable
+  instance.
+. Provision the Stage A Spot database and load-generator topology from the
+  validated image.
+. Upload only the explicitly approved corpus to the private regional bucket.
+. Run the Spot rehearsal, preserve artifacts, and destroy serving resources.
+. Repeat the accepted workload on on-demand capacity.
+
+See
+link:../../../rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[Experiment 015]
+for approval, privacy, cost, and decision gates.

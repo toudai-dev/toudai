@@ -298,7 +298,22 @@ plans with secrets removed.
 
 == Results
 
-Pending. No cloud resources have been provisioned and no corpus has been
-uploaded. The local environment currently has Nix but not OpenTofu, Terraform,
-the AWS CLI, or the Google Cloud CLI; those reproducibility tools must be added
-and validated before presenting an infrastructure plan for approval.
+Cost-free preparation completed on 2026-09-10:
+
+- a committed Flox manifest and lock resolve ClickHouse 26.3.17.110, OpenTofu,
+  Packer, the Google Cloud SDK, `fio`, and `sysstat` on `x86_64-linux`;
+- activation reproduced the exact ClickHouse version used by the local
+  benchmark and executed every infrastructure and profiling tool;
+- the initial OpenTofu plan contains only a custom VPC, a regional private
+  subnet with Private Google Access, and an IAP-source-only SSH firewall rule;
+- the plan contains three creates, no changes, and no destroys;
+- the Packer template validates with the GCP plugin and defines a disposable
+  one-hour preemptible image builder with deletion on timeout; the plugin does
+  not expose GCP's newer Spot provisioning-model field, which will instead be
+  used by the Stage A serving topology; and
+- the dependency-only image provisioner pins and verifies Flox 1.15.0 before
+  prefetching the locked environment as an unprivileged `lighthouse` user.
+
+No cloud resources have been provisioned and no corpus has been uploaded. The
+network apply, image build, serving topology, bucket, and benchmark execution
+remain behind the explicit cost and data-handling gates.

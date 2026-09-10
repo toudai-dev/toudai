@@ -1,0 +1,18 @@
+schema-version = "1.15.0"
+
+[install]
+clickhouse.pkg-path = "clickhouse-lts"
+clickhouse.version = "26.3.17.110-lts"
+clickhouse.pkg-group = "clickhouse"
+
+opentofu.pkg-path = "opentofu"
+packer.pkg-path = "packer"
+google-cloud-sdk.pkg-path = "google-cloud-sdk"
+jq.pkg-path = "jq"
+curl.pkg-path = "curl"
+fio.pkg-path = "fio"
+sysstat.pkg-path = "sysstat"
+
+[options]
+systems = ["x86_64-linux"]
+allow.unfree = true
