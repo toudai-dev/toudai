@@ -307,10 +307,11 @@ Cost-free preparation completed on 2026-09-10:
 - the initial OpenTofu plan contains only a custom VPC, a regional private
   subnet with Private Google Access, and an IAP-source-only SSH firewall rule;
 - the plan contains three creates, no changes, and no destroys;
-- the Packer template validates with the GCP plugin and defines a disposable
-  one-hour preemptible image builder with deletion on timeout; the plugin does
-  not expose GCP's newer Spot provisioning-model field, which will instead be
-  used by the Stage A serving topology; and
+- the first image-build request was rejected before instance creation because
+  GCP does not permit `maxRunDuration` with Packer's legacy `preemptible` flag;
+- the corrected Packer template uses on-demand capacity for this short build,
+  retaining one-hour deletion, while the Stage A serving topology uses actual
+  Spot VMs through OpenTofu; and
 - the dependency-only image provisioner pins and verifies Flox 1.15.0 before
   prefetching the locked environment as an unprivileged `lighthouse` user.
 

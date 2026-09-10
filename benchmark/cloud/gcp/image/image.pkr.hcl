@@ -48,7 +48,6 @@ source "googlecompute" "benchmark" {
   subnetwork                  = var.subnetwork
   tags                        = ["lighthouse-iap-ssh"]
   use_iap                     = true
-  preemptible                 = true
   on_host_maintenance         = "TERMINATE"
   max_run_duration_in_seconds = 3600
   instance_termination_action = "DELETE"

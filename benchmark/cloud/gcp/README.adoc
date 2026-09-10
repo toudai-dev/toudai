@@ -41,15 +41,16 @@ is `SHA256:8Va99u4/RSyII6p6Udi0a9tV44byqF6G3UjH/P79yf8`.
 
 `tofu plan` contacts GCP and must be reviewed before apply. Packer's GCP plugin
 currently exposes its legacy `preemptible` switch rather than the newer Spot
-provisioning-model field. The image builder therefore uses preemptible capacity;
-the Stage A serving topology will use actual Spot VMs. The builder also has a
-one-hour maximum runtime and deletion termination action, but that is a
-last-resort cost guardrail rather than a substitute for supervising the build.
+provisioning-model field. GCP rejects a maximum runtime on that legacy model, so
+the short image build uses on-demand capacity with a one-hour maximum runtime
+and deletion termination action. The Stage A serving topology will use actual
+Spot VMs through OpenTofu. Automatic deletion is a last-resort cost guardrail,
+not a substitute for supervising the build.
 
 == Approved execution order
 
 . Apply and preserve the reviewed network plan.
-. Build the golden image with the preemptible builder.
+. Build the golden image with the one-hour-capped on-demand builder.
 . Verify the image metadata and run the ClickHouse smoke test on a disposable
   instance.
 . Provision the Stage A Spot database and load-generator topology from the
