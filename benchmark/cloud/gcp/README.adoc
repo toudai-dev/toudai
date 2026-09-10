@@ -7,6 +7,7 @@ ClickHouse 26.3.17.110 binary used by the local baseline.
 == Boundaries
 
 - `network/` defines the private benchmark VPC, subnet, and IAP-only SSH rule.
+- `storage/` defines the private, temporary regional corpus bucket.
 - `image/` builds a dependency-only Debian image on disposable discounted
   capacity.
 - The image contains no corpus, credentials, ClickHouse data, or tenant state.
@@ -18,12 +19,20 @@ access, but SSH is allowed only through Google's IAP range. Benchmark database
 nodes will use private addresses and are defined separately after the image is
 validated.
 
+The corpus bucket enforces uniform access and public-access prevention, disables
+versioning and soft delete, and removes objects after 14 days. Google-managed
+encryption applies at rest. Shorter explicit cleanup remains required after the
+benchmark; lifecycle expiry is only a leak guardrail.
+
 == Cost-free validation
 
 [source,shell]
 ----
 flox activate -- tofu -chdir=benchmark/cloud/gcp/network init -backend=false
 flox activate -- tofu -chdir=benchmark/cloud/gcp/network validate
+
+flox activate -- tofu -chdir=benchmark/cloud/gcp/storage init -backend=false
+flox activate -- tofu -chdir=benchmark/cloud/gcp/storage validate
 
 flox activate -- packer init benchmark/cloud/gcp/image/image.pkr.hcl
 flox activate -- packer validate \
@@ -32,6 +41,22 @@ flox activate -- packer validate \
   -var subnetwork=lighthouse-benchmark-us-central1 \
   benchmark/cloud/gcp/image/image.pkr.hcl
 ----
+
+After the storage plan is approved and applied, upload the checksum-inventoried
+natural day before provisioning benchmark VMs:
+
+[source,shell]
+----
+LIGHTHOUSE_GCP_UPLOAD_APPROVED=1 \
+flox activate -- benchmark/scripts/benchmark-upload-gcp-corpus \
+  /mnt/storage/lighthouse/2026-08-05 \
+  gs://lighthouse-508219-lighthouse-exp015 \
+  experiment-015-gcp-corpus-2026-08-05-v1
+----
+
+The upload uses GCS's automatic transport hash validation, uploads the local
+SHA-256 manifest separately, and accepts completion only when remote object
+count and bytes match the checked local inventory.
 
 The template defaults to project-metadata user `wuddarwin` and private key
 `~/.ssh/gcp`. Override `ssh_username` and `ssh_private_key_file` when another
