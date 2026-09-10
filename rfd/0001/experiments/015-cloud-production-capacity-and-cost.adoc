@@ -332,6 +332,44 @@ confirmed the expected VPC, subnet, and IAP-only firewall rule. The registered
 project-metadata SSH key matches the local `~/.ssh/gcp` public fingerprint, and
 the Packer template uses that key through IAP without copying it into the image.
 
-No image builder or benchmark compute has been launched and no corpus has been
-uploaded. The image build, serving topology, bucket, and benchmark execution
-remain behind the explicit cost and data-handling gates.
+The approved on-demand image build completed in 11 minutes 27 seconds:
+
+[options="header",cols="2*"]
+|===
+|Measurement |Result
+
+|Base image
+|`debian-12-bookworm-v20260908`
+
+|Result image
+|`lighthouse-benchmark-20260910-213157`
+
+|Image status
+|`READY`
+
+|Provisioned disk size
+|100 GB
+
+|Compressed archive size
+|2,280,686,080 bytes (2.12 GiB)
+
+|Embedded ClickHouse smoke result
+|26.3.17.110
+
+|Builder cleanup
+|No matching Packer instance or disk remained
+|===
+
+The local successful-build log is
+`.tmp/experiment-015/packer-build-on-demand-v4.log`, with SHA-256
+`de9de40764a6357e11c17442fe094ef68caf6fdd2a66a1802902833cacb25549`.
+The committed manifest, lock, and provisioner SHA-256 values at build time were
+`756657e75f45fdcb19eda9e1074f8bb2f0a8200ec83189fb18930ac4193ccbfe`,
+`778bfe6e974e39ab5c0ad7560ff750be1a6fd725d24b6380d3df16e6ffbb241b`,
+and `aaabb75fa9a2d2256f4e45ffc3a7cd63c3b010b3a18032b2ff5aff0ca4405020`,
+respectively.
+
+The dependency image now exists and incurs image-storage cost until deleted.
+No benchmark compute is running and no corpus has been uploaded. Booting the
+image, provisioning the serving topology, creating the corpus bucket, and
+executing the benchmark remain behind their separate approval gates.
