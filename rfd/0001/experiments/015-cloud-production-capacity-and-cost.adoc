@@ -497,6 +497,171 @@ version change. The committed Flox manifest and lock now pin 26.8.2.7 LTS so
 the next golden image uses the fixed build; the existing image still contains
 26.3.17.110 and must not be reused for another Sapphire Rapids server run.
 
-The checksum-validated one-day load is in progress. The topology must be
-explicitly destroyed after artifacts are preserved rather than relying on the
-six-hour deletion limit.
+The checksum-validated one-day load completed in 2 hours 33 minutes, from
+`2026-09-11T00:50:45Z` through `2026-09-11T03:24:03Z`:
+
+[options="header",cols="2*"]
+|===
+|Measurement |Result
+
+|Rows in normalized hot table
+|547,356,173
+
+|Rows in exact-payload table
+|547,356,173
+
+|Logical input
+|1,039,976,728,700 bytes
+
+|Normalized hot table
+|111,642,636,835 bytes (103.98 GiB at load completion)
+
+|Exact-payload table
+|78,375,497,110 bytes (72.99 GiB at load completion)
+
+|Remaining Titanium SSD space
+|2,405,486,505,984 bytes
+|===
+
+The 60-run raw suite completed three repetitions of ten fixtures under both
+ClickHouse-cold and warm conditions. The first eight fixtures produced stable
+result hashes across repetitions; heatmap and percentile output hashes varied
+and are not treated as exact repeatability evidence. The following values are
+median client wall time in milliseconds:
+
+[options="header",cols="3*"]
+|===
+|Fixture |ClickHouse-cold |Warm
+
+|Recent tail |652 |644
+|Service and severity |732 |713
+|Body search |3,446 |3,227
+|Rate by service |2,440 |2,442
+|Low-cardinality dynamic predicate |28,013 |5,209
+|High-cardinality dynamic predicate |28,707 |9,130
+|Dynamic conjunction |31,502 |5,657
+|Field discovery |10,316 |10,200
+|Duration heatmap |31,371 |30,748
+|Percentiles by caller |32,182 |23,796
+|===
+
+The condition cache materially helped repeated dynamic predicates, but did not
+make full-day raw heatmaps, percentile calculations, or field discovery
+interactive. Static `EXPLAIN indexes = 1` plans show why the sort key alone
+cannot accelerate those query shapes. The measured full-day window crosses two
+UTC date partitions, so the date partition key retained all 22 parts and all
+91,806 granules. The primary key retained all granules for every raw fixture
+except service and severity, where the leading
+`(tenant_id, dataset, service_name, timestamp)` terms reduced selection to
+24,020 of 91,806 granules (26.2%). That query read 143,902,671 rows instead of
+547,356,173 and completed in a 732 ms cold median. The recent-tail plan also
+selected all granules, but lazy column reads limited its median physical input
+to approximately 4.40 GB and its cold median to 652 ms. These observations are
+plan and query-log measurements; they do not attribute unmeasured device-level
+causality.
+
+The configured acceleration build produced two bounded attribute entries and
+two dashboard aggregate tables:
+
+[options="header",cols="6*"]
+|===
+|Build |Wall time |Rows read |Rows written |Peak memory |Stored bytes
+
+|`type` attribute
+|42.060 s |467,306,681 |170,143,336 |1,631,229,674 |Included below
+
+|`workspace_id` attribute
+|52.641 s |547,356,173 |152,817,265 |2,313,106,182 |Included below
+
+|Service count, 5 minutes
+|4.795 s |547,356,173 |7,983 |130,825,329 |41,130
+
+|Duration states, 5 minutes
+|66.712 s |547,356,173 |2,341 |397,236,582 |4,561,600
+
+|Combined attribute table
+|94.701 s |1,014,662,854 |322,960,601 |2,313,106,182 maximum
+|3,282,949,400
+|===
+
+The attribute table occupied 2.94% of the normalized hot table. Both aggregate
+tables together occupied 4,602,730 bytes, or approximately 0.0041%. These are
+selected-field costs, not permission to invert every dynamic attribute.
+
+Two Spot load-generator VMs were preempted while the database leaf remained
+available. The first interruption occurred during the full three-repetition
+acceleration suite after all derived tables had been built. To finish before
+the database's six-hour deletion deadline, the replacement ran one measured
+repetition per raw and accelerated fixture. All six exact-result comparisons
+and all four aggregate count-and-sum anchor comparisons passed across the cold
+and warm modes. Because this is one repetition, the results below are
+observations rather than variance-qualified medians:
+
+[options="header",cols="7*"]
+|===
+|Fixture |Cold raw |Cold accelerated |Speedup |Warm raw |Warm accelerated |Speedup
+
+|Low-cardinality dynamic predicate
+|27,988 ms |339 ms |82.6x |5,340 ms |323 ms |16.5x
+
+|High-cardinality dynamic predicate
+|28,860 ms |201 ms |143.6x |16,150 ms |199 ms |81.2x
+
+|Rate by service
+|2,438 ms |121 ms |20.1x |2,426 ms |119 ms |20.4x
+
+|Duration heatmap
+|31,739 ms |119 ms |266.7x |30,831 ms |123 ms |250.7x
+
+|Percentiles by caller
+|32,855 ms |145 ms |226.6x |24,406 ms |131 ms |186.3x
+|===
+
+The accelerated query plans correlate the latency reduction with less input,
+not merely cache state. The low-cardinality attribute lookup used binary search
+to retain 2 of 15 parts and 7,230 of 39,431 granules; it read 59,228,160 rows
+and approximately 3.11 GB. The high-cardinality lookup retained all 15 parts
+but only 2,036 granules (5.2%); it read 16,678,912 rows and approximately
+1.22 GB. Each aggregate query read only two marks: 7,983 rows for service
+counts or 2,341 rows for duration states. Their corresponding raw plans
+retained all 22 parts and 91,806 granules and read all 547,356,173 rows.
+
+This Stage A run supports the MVP's bounded-acceleration architecture: retain
+full-resolution `Map` events for arbitrary fallback, add tenant/dataset-scoped
+attribute indexes only for observed selective predicates, and maintain small
+mergeable aggregate states for known dashboard shapes. It does not yet select
+GCP as the production platform. Spot interruption invalidated the planned
+three-repetition acceleration variance sample and demonstrates that
+interruptible load generators need resumable orchestration; Stage B production
+latency and soak tests must use non-interruptible leaves unless preemption is
+the behavior under test.
+
+Local artifacts and checksums are:
+
+[options="header",cols="3*"]
+|===
+|Artifact |Contents |SHA-256
+
+|`.tmp/experiment-015/stage-a/experiment-015-stage-a-database.tar.gz`
+|Load logs, manifests, summaries, and host evidence
+|`810aec951c0d53cebc0e92d2861ff9d3857d1e41e068177bf165dd4cdc7e9cc0`
+
+|`.tmp/experiment-015/stage-a/experiment-015-stage-a-raw-v1.tar.gz`
+|Raw timings, results, query logs, and storage evidence
+|`0296923c5baed2cc96d833580a1ad644a2d8009e0211230a119856e92f9a577c`
+
+|`.tmp/experiment-015/stage-a/acceleration-build-query-log.jsonl`
+|Recovered derived-table build costs
+|`54341c56d97c53aee0f93a6ac37d2095f1561be56916bc948230c5dd54c020b6`
+
+|`.tmp/experiment-015/stage-a/experiment-015-stage-a-acceleration-v3.tar.gz`
+|One-repetition acceleration timings, results, correctness, and evidence
+|`77659184ec58046a23156b7c06d9265cb5350a737271dfdcc799c24c67e8684f`
+
+|`.tmp/experiment-015/stage-a/experiment-015-stage-a-plans.tar.gz`
+|All 20 raw and accelerated `EXPLAIN indexes = 1` plans
+|`eac79fbeb14629ccdff3f61b992b149bab11175496adcb8f16c865f93a2e4fd3`
+|===
+
+The topology must be explicitly destroyed after this documentation is
+validated and pushed rather than relying on the six-hour deletion limit.
