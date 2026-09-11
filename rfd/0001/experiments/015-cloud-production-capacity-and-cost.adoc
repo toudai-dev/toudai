@@ -493,8 +493,9 @@ ClickHouse 26.8.2.7 LTS static build, verified against the publisher SHA-512
 `3f0d06f897dda0ffdff8e84dc6b1494611ef9b0b590422fbcf9900a4bac9d16fc0a621327965f8c1edbc8f1d20a8d7d333c88eff999f65cdec4229b91ccb1719`.
 The load generator reached that server over its private address and reported
 version 26.8.2.7. Cloud/local performance comparisons must account for this
-version change; the image and Flox lock should move to a fixed version before a
-repeat or production decision.
+version change. The committed Flox manifest and lock now pin 26.8.2.7 LTS so
+the next golden image uses the fixed build; the existing image still contains
+26.3.17.110 and must not be reused for another Sapphire Rapids server run.
 
 The checksum-validated one-day load is in progress. The topology must be
 explicitly destroyed after artifacts are preserved rather than relying on the

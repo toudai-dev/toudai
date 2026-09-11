@@ -30,7 +30,7 @@ sudo --user lighthouse --set-home env FLOX_DISABLE_METRICS=true \
 
 sudo tee /etc/lighthouse-benchmark-image >/dev/null <<EOF
 flox_version=${flox_version}
-clickhouse_version=26.3.17.110
+clickhouse_version=26.8.2.7
 EOF
 
 rm -f "${flox_deb}" /tmp/lighthouse-manifest.toml \

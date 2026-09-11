@@ -2,7 +2,9 @@
 
 This directory prepares Experiment 015 without creating infrastructure by
 default. The committed Flox lock provides the benchmark tools and the exact
-ClickHouse 26.3.17.110 binary used by the local baseline.
+ClickHouse 26.8.2.7 LTS version required on the GCP Sapphire Rapids leaf. The
+earlier local baseline used 26.3.17.110 and requires a version-matched repeat
+before a final cloud/local comparison.
 
 == Boundaries
 

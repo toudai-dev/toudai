@@ -5,8 +5,7 @@
     "install": {
       "clickhouse": {
         "pkg-path": "clickhouse-lts",
-        "pkg-group": "clickhouse",
-        "version": "26.3.17.110-lts"
+        "version": "26.8.2.7-lts"
       },
       "curl": {
         "pkg-path": "curl"
@@ -43,30 +42,30 @@
     {
       "attr_path": "clickhouse-lts",
       "broken": false,
-      "derivation": "/nix/store/w2d4g2497nxamyy678aya38kdxldjk3i-clickhouse-26.3.17.110-lts.drv",
+      "derivation": "/nix/store/s6kvprcvnwn4dzi8x3z4zxqmrf4ywqgv-clickhouse-26.8.2.7-lts.drv",
       "description": "Column-oriented database management system",
       "install_id": "clickhouse",
       "license": "Apache-2.0",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=c043004d1c6985732bcc1cbc5a9c9aecbbb4e0f0",
-      "name": "clickhouse-26.3.17.110-lts",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "clickhouse-26.8.2.7-lts",
       "pname": "clickhouse-lts",
-      "rev": "c043004d1c6985732bcc1cbc5a9c9aecbbb4e0f0",
-      "rev_count": 1068089,
-      "rev_date": "2026-09-05T13:27:54Z",
-      "scrape_date": "2026-09-06T06:05:11.868921Z",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:07:40.627351Z",
       "stabilities": [
         "unstable"
       ],
       "unfree": false,
-      "version": "26.3.17.110-lts",
+      "version": "26.8.2.7-lts",
       "outputs_to_install": [
         "out"
       ],
       "outputs": {
-        "out": "/nix/store/iq9ci9k56sbsg44v48sn7xnimjan87az-clickhouse-26.3.17.110-lts"
+        "out": "/nix/store/p6la1wbwplsza9946lkyrg038206z1jk-clickhouse-26.8.2.7-lts"
       },
       "system": "x86_64-linux",
-      "group": "clickhouse",
+      "group": "toplevel",
       "priority": 5
     },
     {
