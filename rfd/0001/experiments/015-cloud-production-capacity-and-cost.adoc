@@ -2,7 +2,7 @@
 
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- *Status:* Planned
+- *Status:* In progress
 - *Date:* 2026-09-04
 - *External mutation:* Requires separate approval before provisioning cloud
   infrastructure, uploading data, or incurring cost
@@ -393,6 +393,51 @@ The booted image passed the following checks:
 The local boot-test log is `.tmp/experiment-015/image-smoke.log`, with SHA-256
 `2db3ae5094ccdd62ea61368f6bfaef111be3aecfb3a11fadccb9e10f4a205fcd`.
 
-No benchmark compute is running and no corpus has been uploaded. Provisioning
-the serving topology, creating the corpus bucket, and executing the benchmark
-remain behind their separate approval gates.
+The approved production-derived corpus upload completed on 2026-09-11 before
+serving VMs were provisioned, avoiding idle compute during transfer:
+
+[options="header",cols="2*"]
+|===
+|Measurement |Result
+
+|Source
+|`/mnt/storage/lighthouse/2026-08-05`
+
+|Destination
+|`gs://lighthouse-508219-lighthouse-exp015/corpus/2026-08-05`
+
+|Inventory
+|238 Parquet objects, 115,853,143,188 bytes (107.90 GiB)
+
+|Elapsed wall time
+|16 minutes 49 seconds (`2026-09-10T23:58:17Z` through
+`2026-09-11T00:15:06Z`)
+
+|Reported average throughput
+|110.8 MiB/s
+
+|Remote verification
+|238 objects and 115,853,143,188 bytes
+
+|Manifest
+|`gs://lighthouse-508219-lighthouse-exp015/manifests/experiment-015-gcp-corpus-2026-08-05-v1.tsv`
+
+|Manifest SHA-256
+|`73febcb0c901a5e6212a9be698f846b0f6cb02204709692dbb8fe3d419c29e99`
+|===
+
+`gcloud storage` selected parallel composite uploads and therefore transport
+integrity used CRC32C rather than MD5 for composite objects. The independently
+generated per-file SHA-256 manifest preserves end-to-end validation for later
+downloads and benchmark loads. The upload log is
+`.tmp/experiment-015/corpus-upload.log`, with SHA-256
+`84af43494da621220a77a813211804cae5c9ab7e083981140c9ad3f73a48727c`.
+
+The regional Standard bucket has uniform bucket-level access and public-access
+prevention enforced. Versioning and soft delete are disabled, and a 14-day
+delete lifecycle is the leak guardrail. The uploaded 107.90 GiB now incurs GCS
+storage and request charges until explicit cleanup or lifecycle expiration.
+
+No benchmark compute instance or persistent disk remained after the upload.
+The image and corpus bucket remain billable. Provisioning the Spot serving
+topology and executing the benchmark require a separate approval.

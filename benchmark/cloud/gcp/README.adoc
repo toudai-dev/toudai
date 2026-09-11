@@ -8,8 +8,8 @@ ClickHouse 26.3.17.110 binary used by the local baseline.
 
 - `network/` defines the private benchmark VPC, subnet, and IAP-only SSH rule.
 - `storage/` defines the private, temporary regional corpus bucket.
-- `image/` builds a dependency-only Debian image on disposable discounted
-  capacity.
+- `image/` builds a dependency-only Debian image on disposable on-demand
+  capacity; Stage A serving nodes use Spot capacity.
 - The image contains no corpus, credentials, ClickHouse data, or tenant state.
 - Applying OpenTofu or running `packer build` creates billable shared resources
   and requires explicit approval.
@@ -78,9 +78,9 @@ not a substitute for supervising the build.
 . Build the golden image with the one-hour-capped on-demand builder.
 . Verify the image metadata and run the ClickHouse smoke test on a disposable
   instance.
+. Upload only the explicitly approved corpus to the private regional bucket.
 . Provision the Stage A Spot database and load-generator topology from the
   validated image.
-. Upload only the explicitly approved corpus to the private regional bucket.
 . Run the Spot rehearsal, preserve artifacts, and destroy serving resources.
 . Repeat the accepted workload on on-demand capacity.
 
