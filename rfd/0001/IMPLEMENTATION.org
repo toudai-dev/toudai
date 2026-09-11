@@ -767,7 +767,7 @@ criterion.
 - [X] Provision the approved private GCP Stage A Spot leaf and load generator
   with six-hour provider-enforced deletion, least-privilege corpus access, and
   load-generator-only ClickHouse ingress.
-- [ ] Complete the GCP Stage A load and benchmark, preserve its artifacts, and
+- [X] Complete the GCP Stage A load and benchmark, preserve its artifacts, and
   destroy the topology before the six-hour deletion guardrail.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
   with the approved same-cloud GCP run, then run

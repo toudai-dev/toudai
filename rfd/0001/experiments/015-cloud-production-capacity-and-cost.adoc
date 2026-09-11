@@ -663,5 +663,12 @@ Local artifacts and checksums are:
 |`eac79fbeb14629ccdff3f61b992b149bab11175496adcb8f16c865f93a2e4fd3`
 |===
 
-The topology must be explicitly destroyed after this documentation is
-validated and pushed rather than relying on the six-hour deletion limit.
+After the result commit was pushed, the reviewed OpenTofu destroy plan contained
+zero creates, zero changes, and five destroys. It removed both Stage A VMs,
+their auto-deleting boot disks and disposable Titanium SSD data, the dedicated
+ClickHouse firewall rule, the benchmark service account, and its bucket-reader
+binding on 2026-09-11. API inventory and empty OpenTofu state then confirmed no
+Stage A instance, disk, firewall rule, service account, or managed state
+remained. The shared private network, golden image, and checksum-validated
+corpus bucket remain for an explicitly approved future stage; the bucket's
+14-day deletion lifecycle remains its leak guardrail.
