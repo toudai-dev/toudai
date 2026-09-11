@@ -1,0 +1,33 @@
+{"explain":"Output: count(), sum(cityHash64(event_id))"}
+{"explain":""}
+{"explain":"Aggregating"}
+{"explain":"│  Keys:"}
+{"explain":"│  Aggregates: count(), sum(cityHash64(event_id))"}
+{"explain":"│  Skip merging: 0"}
+{"explain":"└──ReadFromMergeTree (benchmark.events_map_hot)"}
+{"explain":"      Read type: Default"}
+{"explain":"      Parts: 22 | Granules: 91806"}
+{"explain":"      Output: event_id"}
+{"explain":"      Prewhere filter"}
+{"explain":"      Prewhere filter column:  timestamp <= '2026-08-06 03:59:59.999999' AND timestamp >= '2026-08-05 04:00:00.000024' AND attributes.key_caller = 'executor-queue' AND attributes.key_type = 'event_lifecycle'"}
+{"explain":"      Indexes:"}
+{"explain":"        Min-Max"}
+{"explain":"          Keys:"}
+{"explain":"            timestamp"}
+{"explain":"          Condition: and((timestamp in (-Inf, '1785988799.999999']), (timestamp in ['1785902400.000024', +Inf)))"}
+{"explain":"          Parts: 22\/22"}
+{"explain":"          Granules: 91806\/91806"}
+{"explain":"        Partition"}
+{"explain":"          Keys:"}
+{"explain":"            toDate(timestamp)"}
+{"explain":"          Condition: and((toDate(timestamp) in (-Inf, 20671]), (toDate(timestamp) in [20670, +Inf)))"}
+{"explain":"          Parts: 22\/22"}
+{"explain":"          Granules: 91806\/91806"}
+{"explain":"        PrimaryKey"}
+{"explain":"          Keys:"}
+{"explain":"            timestamp"}
+{"explain":"          Condition: and((timestamp in (-Inf, '1785988799.999999']), (timestamp in ['1785902400.000024', +Inf)))"}
+{"explain":"          Parts: 22\/22"}
+{"explain":"          Granules: 91806\/91806"}
+{"explain":"          Search Algorithm: generic exclusion search"}
+{"explain":"        Ranges: 22"}

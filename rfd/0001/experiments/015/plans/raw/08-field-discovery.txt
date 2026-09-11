@@ -1,0 +1,41 @@
+{"explain":"Output: CAST(attributes.keys AS Array(String)), count()"}
+{"explain":""}
+{"explain":"Limit"}
+{"explain":"│  Limit 100"}
+{"explain":"│  Offset 0"}
+{"explain":"└──Sorting (Sorting for ORDER BY)"}
+{"explain":"   │  Sort description: count() DESC, CAST(attributes.keys AS Array(String)) ASC"}
+{"explain":"   │  Limit 100"}
+{"explain":"   └──Aggregating"}
+{"explain":"      │  Keys: CAST(attributes.keys AS Array(String))"}
+{"explain":"      │  Aggregates: count()"}
+{"explain":"      │  Skip merging: 0"}
+{"explain":"      └──ArrayJoin (ARRAY JOIN)"}
+{"explain":"         │  ARRAY JOIN CAST(attributes.keys AS Array(String))"}
+{"explain":"         └──ReadFromMergeTree (benchmark.events_map_hot)"}
+{"explain":"               Read type: Default"}
+{"explain":"               Parts: 22 | Granules: 91806"}
+{"explain":"               Output: greaterOrEquals(timestamp, _CAST('1785902400.000024'_DateTime64(6, 'UTC'), 'DateTime64(6, 'UTC')'_String)), lessOrEquals(timestamp, _CAST('1785988799.999999'_DateTime64(6, 'UTC'), 'DateTime64(6, 'UTC')'_String)), attributes.keys"}
+{"explain":"               Prewhere filter"}
+{"explain":"               Prewhere filter column: greaterOrEquals(timestamp, _CAST('1785902400.000024'_DateTime64(6, 'UTC'), 'DateTime64(6, 'UTC')'_String)) AND lessOrEquals(timestamp, _CAST('1785988799.999999'_DateTime64(6, 'UTC'), 'DateTime64(6, 'UTC')'_String))"}
+{"explain":"               Indexes:"}
+{"explain":"                 Min-Max"}
+{"explain":"                   Keys:"}
+{"explain":"                     timestamp"}
+{"explain":"                   Condition: and((timestamp in (-Inf, '1785988799.999999']), (timestamp in ['1785902400.000024', +Inf)))"}
+{"explain":"                   Parts: 22\/22"}
+{"explain":"                   Granules: 91806\/91806"}
+{"explain":"                 Partition"}
+{"explain":"                   Keys:"}
+{"explain":"                     toDate(timestamp)"}
+{"explain":"                   Condition: and((toDate(timestamp) in (-Inf, 20671]), (toDate(timestamp) in [20670, +Inf)))"}
+{"explain":"                   Parts: 22\/22"}
+{"explain":"                   Granules: 91806\/91806"}
+{"explain":"                 PrimaryKey"}
+{"explain":"                   Keys:"}
+{"explain":"                     timestamp"}
+{"explain":"                   Condition: and((timestamp in (-Inf, '1785988799.999999']), (timestamp in ['1785902400.000024', +Inf)))"}
+{"explain":"                   Parts: 22\/22"}
+{"explain":"                   Granules: 91806\/91806"}
+{"explain":"                   Search Algorithm: generic exclusion search"}
+{"explain":"                 Ranges: 22"}

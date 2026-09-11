@@ -1,0 +1,5 @@
+{"table":"accel_attribute_string","rows":322960601,"bytes_on_disk":3282949400,"data_uncompressed_bytes":23098021895,"active_parts":15}
+{"table":"accel_duration_5m","rows":2341,"bytes_on_disk":4561600,"data_uncompressed_bytes":8192116,"active_parts":2}
+{"table":"accel_event_count_5m","rows":7983,"bytes_on_disk":41130,"data_uncompressed_bytes":333173,"active_parts":2}
+{"table":"event_payloads","rows":547356173,"bytes_on_disk":78301867335,"data_uncompressed_bytes":2114751257010,"active_parts":15}
+{"table":"events_map_hot","rows":547356173,"bytes_on_disk":111587239630,"data_uncompressed_bytes":966947219145,"active_parts":22}

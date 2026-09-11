@@ -1,0 +1,30 @@
+= Experiment 015 Stage A evidence
+
+link:../015-cloud-production-capacity-and-cost.adoc[Experiment report] ·
+link:../../README.adoc[RFD 0001]
+
+This directory preserves the compact, reviewable evidence behind the GCP
+Stage A results. It intentionally excludes the production-derived corpus,
+event payloads, and query result rows.
+
+== Contents
+
+- `load-summary.tsv`, `load-query-metrics.tsv`, and `database-hardware.txt`
+  record ingestion, host, and table measurements.
+- `raw-query-timings.tsv` and `raw-query-metrics.tsv` record all 60 baseline
+  query executions.
+- `acceleration-*.tsv` and `acceleration-*.jsonl` record derived-table build
+  cost, storage, execution metrics, and correctness checks.
+- `plans/` contains all 20 captured `EXPLAIN indexes = 1` plans.
+- `titanium-fio.json` is the raw local-SSD baseline.
+- `SHA256SUMS` covers every evidence file in this directory except itself.
+
+The source `workspace_id` values in query plans were replaced with
+`REDACTED_WORKSPACE_ID` before committing. This changes the plan-file hashes
+from the private immutable archive but does not change index conditions,
+selected parts, selected granules, ranges, or algorithms. The private archive
+and its original checksums remain recorded in the experiment report.
+
+The timing files contain hashes of the omitted query result rows. Aggregate
+correctness checks compare exact output where deterministic and count/sum
+anchors where ClickHouse aggregate-state serialization can vary.
