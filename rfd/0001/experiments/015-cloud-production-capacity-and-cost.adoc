@@ -298,6 +298,12 @@ plans with secrets removed.
 
 == Results
 
+The compact raw evidence used below is committed under
+link:015/README.adoc[`experiments/015/`]. It contains all measured timings,
+query metrics, acceleration build and correctness records, hardware evidence,
+the Titanium SSD `fio` output, and all 20 sanitized query plans. The private
+archive retains exact originals and omitted production-derived query results.
+
 Cost-free preparation completed on 2026-09-10:
 
 - a committed Flox manifest and lock resolve ClickHouse 26.3.17.110, OpenTofu,

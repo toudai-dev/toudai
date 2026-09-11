@@ -1,0 +1,37 @@
+{"explain":"Output: count(), sum(cityHash64(event_id))"}
+{"explain":""}
+{"explain":"Aggregating"}
+{"explain":"│  Keys:"}
+{"explain":"│  Aggregates: count(), sum(cityHash64(event_id))"}
+{"explain":"│  Skip merging: 0"}
+{"explain":"└──ReadFromMergeTree (benchmark.accel_attribute_string)"}
+{"explain":"      Read type: Default"}
+{"explain":"      Parts: 2 | Granules: 7230"}
+{"explain":"      Output: event_id"}
+{"explain":"      Prewhere filter"}
+{"explain":"      Prewhere filter column:  tenant_id = 1 AND dataset = 'gcp-logging' AND field_name = 'type' AND field_value = 'event_lifecycle' AND timestamp <= '2026-08-06 03:59:59.999999' AND timestamp >= '2026-08-05 04:00:00.000024'"}
+{"explain":"      Indexes:"}
+{"explain":"        Min-Max"}
+{"explain":"          Keys:"}
+{"explain":"            timestamp"}
+{"explain":"          Condition: and((timestamp in (-Inf, '1785988799.999999']), (timestamp in ['1785902400.000024', +Inf)))"}
+{"explain":"          Parts: 15\/15"}
+{"explain":"          Granules: 39431\/39431"}
+{"explain":"        Partition"}
+{"explain":"          Keys:"}
+{"explain":"            toDate(timestamp)"}
+{"explain":"          Condition: and((toDate(timestamp) in (-Inf, 20671]), (toDate(timestamp) in [20670, +Inf)))"}
+{"explain":"          Parts: 15\/15"}
+{"explain":"          Granules: 39431\/39431"}
+{"explain":"        PrimaryKey"}
+{"explain":"          Keys:"}
+{"explain":"            tenant_id"}
+{"explain":"            dataset"}
+{"explain":"            field_name"}
+{"explain":"            field_value"}
+{"explain":"            timestamp"}
+{"explain":"          Condition: and(and((timestamp in (-Inf, '1785988799.999999']), (timestamp in ['1785902400.000024', +Inf))), and((field_value in ['event_lifecycle', 'event_lifecycle']), and((field_name in ['type', 'type']), and((dataset in ['gcp-logging', 'gcp-logging']), (tenant_id in [1, 1])))))"}
+{"explain":"          Parts: 2\/15"}
+{"explain":"          Granules: 7230\/39431"}
+{"explain":"          Search Algorithm: binary search"}
+{"explain":"        Ranges: 2"}
