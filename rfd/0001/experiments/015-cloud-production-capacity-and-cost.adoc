@@ -668,11 +668,14 @@ Local artifacts and checksums are:
 |`eac79fbeb14629ccdff3f61b992b149bab11175496adcb8f16c865f93a2e4fd3`
 |===
 
-These result artifacts currently exist only in the originating workstation's
-ignored `.tmp` directory. Their checksums identify them but do not make them
-available to another reviewer or protect them from local loss. Preserve them
-in an approved durable location before deleting the local copies; this remains
-an evidence-retention gap, not a completed cloud upload.
+The six evidence objects and their manifest are also stored privately under
+`gs://lighthouse-508219-lighthouse-exp015/artifacts/stage-a/`. The manifest's
+SHA-256 is
+`6836b6b638304ae7b8f0cea60224347c6c92b2fc7aff8f45f1e481b3ae1849c0`.
+A clean download reproduced every recorded byte count and SHA-256. All seven
+objects have a temporary hold, so the bucket's 14-day lifecycle cannot delete
+them until an operator explicitly releases the hold. They remain billable and
+private rather than public review artifacts.
 
 After the result commit was pushed, the reviewed OpenTofu destroy plan contained
 zero creates, zero changes, and five destroys. It removed both Stage A VMs,
@@ -685,4 +688,6 @@ golden image remain billable. The image is retained only as build evidence and
 must not be used for another Z3 run because it contains incompatible
 ClickHouse 26.3.17.110. A future explicitly approved stage must build and
 smoke-test a replacement from the 26.8.2.7 LTS lock. The bucket's 14-day
-deletion lifecycle remains its leak guardrail.
+deletion lifecycle remains the corpus leak guardrail; the held Stage A evidence
+is intentionally exempt until it moves to the project's permanent artifact
+store.
