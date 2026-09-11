@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${LIGHTHOUSE_GCP_UPLOAD_APPROVED:-}" != "1" ]]; then
+  echo "set LIGHTHOUSE_GCP_UPLOAD_APPROVED=1 after approving the cloud upload" >&2
+  exit 1
+fi
+
+source_dir="${1:?usage: benchmark-upload-gcp-corpus SOURCE_DIR BUCKET_URI [RUN_ID]}"
+bucket_uri="${2:?usage: benchmark-upload-gcp-corpus SOURCE_DIR BUCKET_URI [RUN_ID]}"
+run_id="${3:-experiment-015-corpus-$(date -u +%Y%m%dT%H%M%SZ)}"
+expected_files="${LIGHTHOUSE_EXPECTED_FILES:-238}"
+expected_bytes="${LIGHTHOUSE_EXPECTED_BYTES:-115853143188}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS:-/mnt/fast-storage/lighthouse/runs}"
+run_dir="${runs_root}/${run_id}"
+manifest="${run_dir}/corpus-sha256.tsv"
+object_prefix="${bucket_uri%/}/corpus/$(basename "${source_dir}")"
+
+if [[ ! -d "${source_dir}" ]]; then
+  echo "source directory not found: ${source_dir}" >&2
+  exit 1
+fi
+if [[ "${bucket_uri}" != gs://* ]]; then
+  echo "bucket URI must start with gs://" >&2
+  exit 1
+fi
+if [[ -e "${run_dir}" ]]; then
+  echo "run directory already exists: ${run_dir}" >&2
+  exit 1
+fi
+
+mkdir -p "${run_dir}"
+find "${source_dir}" -maxdepth 1 -type f -name '*.parquet' -printf '%f\n' \
+  | LC_ALL=C sort > "${run_dir}/files.txt"
+
+actual_files="$(wc -l < "${run_dir}/files.txt")"
+actual_bytes="$(while IFS= read -r file; do stat -c '%s' "${source_dir}/${file}"; done < "${run_dir}/files.txt" | awk '{ total += $1 } END { print total + 0 }')"
+if [[ "${actual_files}" != "${expected_files}" || "${actual_bytes}" != "${expected_bytes}" ]]; then
+  echo "corpus mismatch: expected ${expected_files} files/${expected_bytes} bytes, found ${actual_files}/${actual_bytes}" >&2
+  exit 1
+fi
+
+printf '# relative_path\tbytes\tsha256\n' > "${manifest}"
+while IFS= read -r file; do
+  bytes="$(stat -c '%s' "${source_dir}/${file}")"
+  sha256="$(sha256sum "${source_dir}/${file}" | awk '{ print $1 }')"
+  printf '%s\t%s\t%s\n' "${file}" "${bytes}" "${sha256}" >> "${manifest}"
+done < "${run_dir}/files.txt"
+
+{
+  printf 'run_id=%s\n' "${run_id}"
+  printf 'source_dir=%s\n' "${source_dir}"
+  printf 'bucket_uri=%s\n' "${bucket_uri}"
+  printf 'object_prefix=%s\n' "${object_prefix}"
+  printf 'files=%s\n' "${actual_files}"
+  printf 'bytes=%s\n' "${actual_bytes}"
+  printf 'started_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "${run_dir}/run.env"
+
+gcloud storage rsync "${source_dir}" "${object_prefix}" \
+  --recursive \
+  --checksums-only
+gcloud storage cp "${manifest}" "${bucket_uri%/}/manifests/${run_id}.tsv" \
+  --cache-control=no-store
+
+remote_files="$(gcloud storage ls "${object_prefix}/**" | wc -l)"
+remote_bytes="$(gcloud storage du --summarize "${object_prefix}" | awk '{ print $1 }')"
+if [[ "${remote_files}" != "${actual_files}" || "${remote_bytes}" != "${actual_bytes}" ]]; then
+  echo "remote corpus mismatch: expected ${actual_files} files/${actual_bytes} bytes, found ${remote_files}/${remote_bytes}" >&2
+  exit 1
+fi
+
+{
+  printf 'completed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'manifest_sha256=%s\n' "$(sha256sum "${manifest}" | awk '{ print $1 }')"
+} >> "${run_dir}/run.env"
+touch "${run_dir}/COMPLETED"
+echo "GCP corpus upload completed: ${run_dir}"

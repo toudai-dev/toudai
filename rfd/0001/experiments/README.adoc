@@ -101,7 +101,7 @@ conditions. Add a new run or record and link the relationship.
 |link:014-local-distributed-cluster-simulation.adoc[Local distributed-cluster simulation]
 
 |015
-|Planned
+|In progress
 |link:015-cloud-production-capacity-and-cost.adoc[Cloud production capacity and cost]
 
 |016

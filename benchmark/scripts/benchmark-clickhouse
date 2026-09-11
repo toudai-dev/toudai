@@ -5,7 +5,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
 clickhouse_root="${benchmark_root}/clickhouse"
-config_file="${repo_root}/benchmark/clickhouse/config.xml"
+config_file="${LIGHTHOUSE_CLICKHOUSE_CONFIG:-${repo_root}/benchmark/clickhouse/config.xml}"
 
 data_dir="${clickhouse_root}/data"
 tmp_dir="${clickhouse_root}/tmp"
@@ -19,6 +19,7 @@ error_log_file="${log_dir}/clickhouse-server.err.log"
 
 tcp_port="${LIGHTHOUSE_CLICKHOUSE_TCP_PORT:-19000}"
 http_port="${LIGHTHOUSE_CLICKHOUSE_HTTP_PORT:-18123}"
+host="${LIGHTHOUSE_CLICKHOUSE_HOST:-127.0.0.1}"
 
 usage() {
     cat <<'EOF'
@@ -34,6 +35,7 @@ Commands:
 
 Environment:
   LIGHTHOUSE_BENCH_ROOT             Data root (default: /mnt/fast-storage/lighthouse)
+  LIGHTHOUSE_CLICKHOUSE_HOST        Server host (default: 127.0.0.1)
   LIGHTHOUSE_CLICKHOUSE_TCP_PORT    Native port (default: 19000)
   LIGHTHOUSE_CLICKHOUSE_HTTP_PORT   HTTP port (default: 18123)
   LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH
@@ -68,7 +70,7 @@ is_running() {
 
 client() {
     clickhouse client \
-        --host 127.0.0.1 \
+        --host "${host}" \
         --port "${tcp_port}" \
         "$@"
 }

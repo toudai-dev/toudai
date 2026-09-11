@@ -1,0 +1,293 @@
+{
+  "lockfile-version": 1,
+  "manifest": {
+    "schema-version": "1.15.0",
+    "install": {
+      "clickhouse": {
+        "pkg-path": "clickhouse-lts",
+        "version": "26.8.2.7-lts"
+      },
+      "curl": {
+        "pkg-path": "curl"
+      },
+      "fio": {
+        "pkg-path": "fio"
+      },
+      "google-cloud-sdk": {
+        "pkg-path": "google-cloud-sdk"
+      },
+      "jq": {
+        "pkg-path": "jq"
+      },
+      "opentofu": {
+        "pkg-path": "opentofu"
+      },
+      "packer": {
+        "pkg-path": "packer"
+      },
+      "sysstat": {
+        "pkg-path": "sysstat"
+      }
+    },
+    "options": {
+      "systems": [
+        "x86_64-linux"
+      ],
+      "allow": {
+        "unfree": true
+      }
+    }
+  },
+  "packages": [
+    {
+      "attr_path": "clickhouse-lts",
+      "broken": false,
+      "derivation": "/nix/store/s6kvprcvnwn4dzi8x3z4zxqmrf4ywqgv-clickhouse-26.8.2.7-lts.drv",
+      "description": "Column-oriented database management system",
+      "install_id": "clickhouse",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "clickhouse-26.8.2.7-lts",
+      "pname": "clickhouse-lts",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:07:40.627351Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "26.8.2.7-lts",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/p6la1wbwplsza9946lkyrg038206z1jk-clickhouse-26.8.2.7-lts"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "curl",
+      "broken": false,
+      "derivation": "/nix/store/zfdrn807xnm4dlapzrxmn45laa7606f7-curl-8.21.0.drv",
+      "description": "Command line tool for transferring files with URL syntax",
+      "install_id": "curl",
+      "license": "curl",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "curl-8.21.0",
+      "pname": "curl",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:07:40.876080Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "8.21.0",
+      "outputs_to_install": [
+        "bin",
+        "bin",
+        "man",
+        "man"
+      ],
+      "outputs": {
+        "bin": "/nix/store/969dkwnqy7cr2nyw1mzvbf890q68qjv6-curl-8.21.0-bin",
+        "debug": "/nix/store/chyvcvzrfdx5a25din5ccf9dsmrnrifx-curl-8.21.0-debug",
+        "dev": "/nix/store/pnmnw633qab0glfm2nzks09fxl4dy2pn-curl-8.21.0-dev",
+        "devdoc": "/nix/store/1g4h1x8a0pa2xj1wzxfkcnrvfaykwin9-curl-8.21.0-devdoc",
+        "man": "/nix/store/hnddvhacaxmc5iw2qdl6alvvj1vi4ix9-curl-8.21.0-man",
+        "out": "/nix/store/x4xicianwlchh2cadblv4pfz8syvl97b-curl-8.21.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "fio",
+      "broken": false,
+      "derivation": "/nix/store/ipal3mf7377xqg4f23s96vfmm15xv8sg-fio-3.42.drv",
+      "description": "Flexible IO Tester - an IO benchmark tool",
+      "install_id": "fio",
+      "license": "GPL-2.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "fio-3.42",
+      "pname": "fio",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:07:41.655199Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.42",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/gpvq80c0ai5df2b8gaqbb4bfmbq8n4nk-fio-3.42"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "google-cloud-sdk",
+      "broken": false,
+      "derivation": "/nix/store/gjzsw5djsh73mkn234agqf3dk7s4g7g1-google-cloud-sdk-581.0.0.drv",
+      "description": "Tools for the google cloud platform",
+      "install_id": "google-cloud-sdk",
+      "license": "Unspecified free software license",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "google-cloud-sdk-581.0.0",
+      "pname": "google-cloud-sdk",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:07:43.210722Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "581.0.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/2ggzr6l9lpg8bz6zvpbxmmrqdhbw6y9r-google-cloud-sdk-581.0.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "jq",
+      "broken": false,
+      "derivation": "/nix/store/d1h6nfwgqq43drkzzszmryjvcfrs1s5p-jq-1.8.2.drv",
+      "description": "Lightweight and flexible command-line JSON processor",
+      "install_id": "jq",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "jq-1.8.2",
+      "pname": "jq",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:08:04.070125Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.8.2",
+      "outputs_to_install": [
+        "bin",
+        "bin",
+        "bin",
+        "man"
+      ],
+      "outputs": {
+        "bin": "/nix/store/xvd6920kffyyshg7mbw5wvfk6lg9wfkl-jq-1.8.2-bin",
+        "dev": "/nix/store/qavm4f7d2wm4s9v1ck90n200y20x95fm-jq-1.8.2-dev",
+        "doc": "/nix/store/2ga5gcahn4vr0b5fmlinxbz1w2m4qm5g-jq-1.8.2-doc",
+        "man": "/nix/store/n36fiv9a8p19bcj6cyjfgmb0l9s55qfn-jq-1.8.2-man",
+        "out": "/nix/store/d91mwgs15hv4ajza7jn6axyiwa07ga7m-jq-1.8.2"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "opentofu",
+      "broken": false,
+      "derivation": "/nix/store/qh1n13cpm7r127wrgk5d17xi50gv365c-opentofu-1.12.6.drv",
+      "description": "Tool for building, changing, and versioning infrastructure",
+      "install_id": "opentofu",
+      "license": "MPL-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "opentofu-1.12.6",
+      "pname": "opentofu",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:08:29.884204Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.12.6",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/860svhxynyrf5khp4k1hpil8id4sgjvx-opentofu-1.12.6"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "packer",
+      "broken": false,
+      "derivation": "/nix/store/yd7bb8d64zjnsrxz41kjb4ykbazifm8n-packer-1.15.4.drv",
+      "description": "Tool for creating identical machine images for multiple platforms from a single source configuration",
+      "install_id": "packer",
+      "license": "BUSL-1.1",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "packer-1.15.4",
+      "pname": "packer",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:08:30.523770Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "1.15.4",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/ywxg9y5n3cal7a28vc5qvixh2jd9xij1-packer-1.15.4"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "sysstat",
+      "broken": false,
+      "derivation": "/nix/store/kvcl663zkssw3nhqsjzwhhhfibdyzc97-sysstat-12.7.7.drv",
+      "description": "Collection of performance monitoring tools for Linux (such as sar, iostat and pidstat)",
+      "install_id": "sysstat",
+      "license": "GPL-2.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "name": "sysstat-12.7.7",
+      "pname": "sysstat",
+      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
+      "rev_count": 1069856,
+      "rev_date": "2026-09-08T15:35:43Z",
+      "scrape_date": "2026-09-09T06:10:27.241435Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "12.7.7",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/h6hzyaccx9kbsibq1pzqc81jjbz1x8ph-sysstat-12.7.7-doc",
+        "man": "/nix/store/3g24d9lv9r99f9p23s4ayb0ls5z75bjf-sysstat-12.7.7-man",
+        "out": "/nix/store/6b85s5mbpsr5xj0rxsix8l8v1zw3ywgi-sysstat-12.7.7"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    }
+  ]
+}

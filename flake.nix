@@ -49,6 +49,10 @@
             git-cliff
             goreleaser
             asciidoctor
+
+            ## Benchmark tools
+            google-cloud-sdk
+            terraform
           ];
         };
       }

@@ -156,8 +156,8 @@ PY
   lscpu
   free -h
   df -h "${benchmark_root}"
-  zfs list fast-storage/lighthouse
-  zfs get compression,recordsize,atime,refquota,mountpoint fast-storage/lighthouse
+  zfs list fast-storage/lighthouse 2>/dev/null || true
+  zfs get compression,recordsize,atime,refquota,mountpoint fast-storage/lighthouse 2>/dev/null || true
 } > "${run_dir}/evidence/host-storage.txt"
 jj status > "${run_dir}/evidence/jj-status.txt" 2>&1 || true
 sha256sum "${repo_root}/flake.lock" > "${run_dir}/evidence/flake-lock.sha256"
