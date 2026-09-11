@@ -29,9 +29,8 @@ variable "subnetwork" {
 }
 
 variable "image" {
-  description = "Validated dependency image used by both nodes."
+  description = "Explicitly validated dependency image used by both nodes; the first Stage A image contains incompatible ClickHouse 26.3 and must not be reused."
   type        = string
-  default     = "lighthouse-benchmark-20260910-213157"
 }
 
 variable "corpus_bucket" {

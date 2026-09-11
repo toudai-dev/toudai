@@ -12,6 +12,10 @@ before a final cloud/local comparison.
 - `storage/` defines the private, temporary regional corpus bucket.
 - `image/` builds a dependency-only Debian image on disposable on-demand
   capacity; Stage A serving nodes use Spot capacity.
+- `stage-a/` requires an explicit `image` variable. Do not reuse
+  `lighthouse-benchmark-20260910-213157`: it contains ClickHouse 26.3.17.110,
+  which fails to start on the Z3 Sapphire Rapids host. Build and smoke-test an
+  image from the current 26.8.2.7 LTS Flox lock before another Stage A apply.
 - The image contains no corpus, credentials, ClickHouse data, or tenant state.
 - Applying OpenTofu or running `packer build` creates billable shared resources
   and requires explicit approval.
