@@ -764,8 +764,11 @@ criterion.
 - [X] Prepare and apply the GCP Stage A private network, build and boot-validate
   the pinned dependency image, create the guarded regional corpus bucket, and
   checksum-inventory and upload the one-day corpus before starting compute.
-- [ ] Prepare the GCP Z3 Spot serving-topology OpenTofu plan, six-hour cost
-  envelope, automatic teardown, and workload commands for explicit approval.
+- [X] Provision the approved private GCP Stage A Spot leaf and load generator
+  with six-hour provider-enforced deletion, least-privilege corpus access, and
+  load-generator-only ClickHouse ingress.
+- [ ] Complete the GCP Stage A load and benchmark, preserve its artifacts, and
+  destroy the topology before the six-hour deletion guardrail.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
   with the approved same-cloud GCP run, then run
   10 TB scaling, replicated failure-domain, sustained-ingestion, failure, and

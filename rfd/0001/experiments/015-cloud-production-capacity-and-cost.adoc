@@ -439,5 +439,63 @@ delete lifecycle is the leak guardrail. The uploaded 107.90 GiB now incurs GCS
 storage and request charges until explicit cleanup or lifecycle expiration.
 
 No benchmark compute instance or persistent disk remained after the upload.
-The image and corpus bucket remain billable. Provisioning the Spot serving
-topology and executing the benchmark require a separate approval.
+The image and corpus bucket remained billable. The user subsequently approved
+the Stage A Spot setup.
+
+The applied Stage A plan created five resources and no replacements or
+deletions: one database VM, one dedicated load-generator VM, one service
+account, one bucket-reader binding, and one load-generator-to-database firewall
+rule. Both VMs have private IPv4 addresses only, use Spot provisioning with
+automatic restart disabled, delete their boot disks with the instance, and
+have provider-enforced `DELETE` termination after 21,600 seconds. ClickHouse
+ports 8123 and 9000 accept ingress only from the load-generator network tag;
+IAP remains the only SSH path.
+
+[options="header",cols="4*"]
+|===
+|Role |Machine |Measured CPU and RAM |Storage
+
+|Database leaf
+|`z3-highmem-14-standardlssd`
+|14 vCPU Intel Xeon Platinum 8481C; 118,169,047,040 bytes RAM
+|3,221,225,472,000-byte Titanium SSD plus 100 GB boot disk
+
+|Load generator
+|`e2-standard-4`
+|4 vCPU AMD EPYC 7B12; 16,779,542,528 bytes RAM
+|100 GB boot disk
+|===
+
+The empty Titanium SSD baseline used direct I/O, a 16 GiB working file, queue
+depth 32 for sequential I/O, and queue depth 64 for 30-second 4 KiB random
+reads. One run measured 2,562 MiB/s sequential writes, 3,073 MiB/s sequential
+reads, and 303,178 random-read IOPS. The raw local `fio` JSON is
+`.tmp/experiment-015/stage-a/titanium-fio.json`, with SHA-256
+`76a04a094aee71d977c7431ded71bc9604b2050905b6114fbf60991f9dee699f`.
+These are observed baseline values, not yet repeated variance estimates.
+
+The database node downloaded all 238 corpus objects to the Titanium SSD. The
+remote inventory remained 115,853,143,188 bytes, and every per-file SHA-256
+matched the uploaded manifest before loading began.
+
+The first server start exposed a reproducible platform incompatibility rather
+than a memory-capacity failure: the Nix-built ClickHouse 26.3.17.110 aborted on
+the Sapphire Rapids CPU with `Cannot allocate ThreadStack` and `EINVAL`.
+ClickHouse issue 108811 and merged fix 108813 identify the cause as an
+unrounded alternate signal-stack allocation when AMX makes glibc's runtime
+signal-stack size not page-aligned. The fix first appears in 26.7.1.604.
+
+- https://github.com/ClickHouse/ClickHouse/issues/108811
+- https://github.com/ClickHouse/ClickHouse/pull/108813
+
+To avoid wasting the already-running Spot allocation, Stage A uses the official
+ClickHouse 26.8.2.7 LTS static build, verified against the publisher SHA-512
+`3f0d06f897dda0ffdff8e84dc6b1494611ef9b0b590422fbcf9900a4bac9d16fc0a621327965f8c1edbc8f1d20a8d7d333c88eff999f65cdec4229b91ccb1719`.
+The load generator reached that server over its private address and reported
+version 26.8.2.7. Cloud/local performance comparisons must account for this
+version change; the image and Flox lock should move to a fixed version before a
+repeat or production decision.
+
+The checksum-validated one-day load is in progress. The topology must be
+explicitly destroyed after artifacts are preserved rather than relying on the
+six-hour deletion limit.
