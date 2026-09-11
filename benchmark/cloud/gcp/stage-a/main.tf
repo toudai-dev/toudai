@@ -100,6 +100,12 @@ resource "google_compute_instance" "database" {
 
   deletion_protection = false
 
+  lifecycle {
+    // Z3 attaches its fixed-size Titanium SSD implicitly; never treat that
+    // provider-populated scratch_disk state as a request to replace the leaf.
+    ignore_changes = [scratch_disk]
+  }
+
   depends_on = [google_storage_bucket_iam_member.corpus_reader]
 }
 
