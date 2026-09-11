@@ -377,8 +377,8 @@ capture_logs
   uname -a
   free -h
   df -h "${benchmark_root}" "${archive_root}"
-  zpool status -P fast-storage storage
-  zfs list fast-storage/lighthouse storage/lighthouse-bench
+  zpool status -P fast-storage storage 2>/dev/null || true
+  zfs list fast-storage/lighthouse storage/lighthouse-bench 2>/dev/null || true
 } > "${run_dir}/evidence/host-storage-after.txt"
 date -u +%FT%TZ > "${run_dir}/completed-at"
 echo "completed" > "${run_dir}/status"

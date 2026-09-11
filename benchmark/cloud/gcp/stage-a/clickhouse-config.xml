@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <console>false</console>
+        <size>100M</size>
+        <count>5</count>
+    </logger>
+
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <listen_host>0.0.0.0</listen_host>
+
+    <max_connections>128</max_connections>
+    <max_concurrent_queries>24</max_concurrent_queries>
+    <max_server_memory_usage_to_ram_ratio>0.85</max_server_memory_usage_to_ram_ratio>
+    <mark_cache_size>8589934592</mark_cache_size>
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+
+    <path>/mnt/disks/clickhouse/server/clickhouse/data/</path>
+    <tmp_path>/mnt/disks/clickhouse/server/clickhouse/tmp/</tmp_path>
+    <user_files_path>/mnt/disks/clickhouse/server/clickhouse/user_files/</user_files_path>
+    <format_schema_path>/mnt/disks/clickhouse/server/clickhouse/format_schemas/</format_schema_path>
+
+    <storage_configuration>
+        <disks>
+            <os_overflow>
+                <path>/mnt/disks/clickhouse/overflow/</path>
+            </os_overflow>
+            <bulk_archive>
+                <path>/mnt/disks/clickhouse/archive/</path>
+            </bulk_archive>
+        </disks>
+        <policies>
+            <benchmark_overflow>
+                <volumes>
+                    <default><disk>default</disk></default>
+                    <overflow><disk>os_overflow</disk></overflow>
+                    <archive><disk>bulk_archive</disk></archive>
+                </volumes>
+            </benchmark_overflow>
+            <benchmark_archive>
+                <volumes>
+                    <archive><disk>bulk_archive</disk></archive>
+                </volumes>
+            </benchmark_archive>
+        </policies>
+    </storage_configuration>
+
+    <users_config>clickhouse-users.xml</users_config>
+    <user_directories>
+        <users_xml><path>clickhouse-users.xml</path></users_xml>
+    </user_directories>
+
+    <default_profile>default</default_profile>
+    <default_database>default</default_database>
+    <timezone>UTC</timezone>
+    <mlock_executable>false</mlock_executable>
+
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>1000</flush_interval_milliseconds>
+    </query_log>
+</clickhouse>
