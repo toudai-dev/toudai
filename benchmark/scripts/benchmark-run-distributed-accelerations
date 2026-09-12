@@ -10,8 +10,8 @@ repetitions="${LIGHTHOUSE_DISTRIBUTED_REPETITIONS:-3}"
 range_spec="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h}"
 expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
 min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
-load_run="experiment-014-distributed-day-v1-${shards}s"
-raw_run="${runs_root}/experiment-014-distributed-query-v1-${shards}s"
+load_run="${LIGHTHOUSE_DISTRIBUTED_LOAD_RUN:-experiment-014-distributed-day-v1-${shards}s}"
+raw_run="${runs_root}/${LIGHTHOUSE_DISTRIBUTED_RAW_RUN:-experiment-014-distributed-query-v1-${shards}s}"
 
 if [[ -z "${shards}" || -z "${run_id}" ]]; then
   echo "usage: $0 SHARDS RUN_ID" >&2
@@ -41,10 +41,12 @@ if [[ "$(cat "${raw_run}/status" 2>/dev/null || true)" != "completed" ]]; then
   echo "completed raw distributed query run not found: ${raw_run}" >&2
   exit 1
 fi
-available="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
-if [[ "${available}" -lt "${min_free_bytes}" ]]; then
-  echo "benchmark dataset has ${available} bytes free, below ${min_free_bytes}" >&2
-  exit 1
+if [[ -z "${LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND:-}" ]]; then
+  available="$(df -B1 --output=avail "${benchmark_root}" | tail -1 | tr -d ' ')"
+  if [[ "${available}" -lt "${min_free_bytes}" ]]; then
+    echo "benchmark dataset has ${available} bytes free, below ${min_free_bytes}" >&2
+    exit 1
+  fi
 fi
 
 run_dir="${runs_root}/${run_id}"
@@ -55,7 +57,7 @@ fi
 mkdir -p "${run_dir}"/{evidence,plans/coordinator,plans/leaves,queries,results,state}
 echo "starting" > "${run_dir}/status"
 
-cluster=("${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster")
+cluster=("${LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND:-${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster}")
 completed=0
 sampler_pid=""
 stop_sampler() {
@@ -92,6 +94,7 @@ range_seconds() {
     1h) echo 3600 ;;
     6h) echo 21600 ;;
     24h) echo 86400 ;;
+    10d) echo 864000 ;;
     *) echo "unknown range: $1" >&2; return 2 ;;
   esac
 }
@@ -99,12 +102,12 @@ for range_name in "${ranges[@]}"; do
   range_seconds "${range_name}" >/dev/null
 done
 
-day_end="2026-08-06 04:00:00"
+day_end="${LIGHTHOUSE_DISTRIBUTED_DAY_END:-2026-08-06 04:00:00}"
 dynamic_low_value="${LIGHTHOUSE_BENCH_DYNAMIC_LOW_VALUE:-event_lifecycle}"
 dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-306e56de-c041-4b4d-9a62-d59e742bf58b}"
 safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
 query_prefix="lighthouse_${safe_run_id}"
-revision="$(jj log -r @- --no-graph -T 'commit_id')"
+revision="${LIGHTHOUSE_BENCH_REVISION:-$(jj log -r @- --no-graph -T 'commit_id' 2>/dev/null || echo unknown)}"
 date -u +%FT%TZ > "${run_dir}/started-at"
 
 cat > "${run_dir}/manifest.json" <<EOF
@@ -131,12 +134,14 @@ EOF
   uname -a
   lscpu
   free -h
-  df -h "${benchmark_root}"
-  zpool list -v fast-storage
+  df -h "${benchmark_root}" 2>/dev/null || df -h .
+  zpool list -v fast-storage 2>/dev/null || true
   "${cluster[@]}" status "${shards}"
 } > "${run_dir}/evidence/host.txt"
-"${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
-sampler_pid=$!
+if [[ "${LIGHTHOUSE_DISTRIBUTED_HOST_SAMPLER:-1}" == "1" ]]; then
+  "${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
+  sampler_pid=$!
+fi
 
 local_schema="
   CREATE TABLE benchmark_distributed.accel_attribute_string_local

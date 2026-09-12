@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <logger><level>information</level><console>false</console></logger>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <listen_host>0.0.0.0</listen_host>
+    <path>/var/lib/lighthouse-clickhouse/data/</path>
+    <tmp_path>/var/lib/lighthouse-clickhouse/tmp/</tmp_path>
+    <user_files_path>/var/lib/lighthouse-clickhouse/user_files/</user_files_path>
+    <format_schema_path>/var/lib/lighthouse-clickhouse/format_schemas/</format_schema_path>
+    <users_config>clickhouse-users.xml</users_config>
+    <remote_servers>
+        <lighthouse>
+%{ for ip in leaf_ips ~}
+            <shard><replica><host>${ip}</host><port>9000</port></replica></shard>
+%{ endfor ~}
+        </lighthouse>
+    </remote_servers>
+    <timezone>UTC</timezone>
+</clickhouse>

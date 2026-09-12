@@ -769,6 +769,12 @@ criterion.
   load-generator-only ClickHouse ingress.
 - [X] Complete the GCP Stage A load and benchmark, preserve its artifacts, and
   destroy the topology before the six-hour deletion guardrail.
+- [X] Build and boot-test the corrected ClickHouse 26.8.2.7 Stage B image, and
+  define a private, provider-capped 1/2/4-shard topology plus a checksum-checked,
+  day-resumable GCS loader without starting idle compute.
+- [ ] Upload and inventory the exact Experiment 010 ten-day corpus for Stage B;
+  do not use the initially uploaded 5.03B-row July set as the 5.69B-row
+  comparison corpus.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
   with the approved same-cloud GCP run, then run
   10 TB scaling, replicated failure-domain, sustained-ingestion, failure, and

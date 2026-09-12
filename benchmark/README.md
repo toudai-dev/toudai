@@ -228,3 +228,40 @@ The OpenTofu network plan and Packer image template can be initialized and
 validated without creating cloud resources. Do not apply a plan, build an
 image, or upload a corpus until the Experiment 015 spend and data-handling gates
 are explicitly approved.
+
+Stage B's multi-host topology and immutable corpus inventory live under
+`benchmark/cloud/gcp/stage-b`. Its loader streams Parquet objects through the
+same normalized event transform used by the local experiments and inserts into
+the coordinator's `Distributed` table:
+
+```bash
+LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=10.142.0.10 \
+LIGHTHOUSE_CLUSTER_LEAF_HOSTS=10.142.0.11,10.142.0.12 \
+LIGHTHOUSE_BENCH_REVISION="$(jj log -r @- --no-graph -T commit_id)" \
+benchmark/scripts/benchmark-load-gcp-distributed \
+  2 experiment-015-stage-b-load-v1-2s
+```
+
+The loader validates the remote object count and bytes before each day, checks
+the resulting day by row count and normalized-event checksum, and resumes at a
+validated day boundary. If a stream fails after partially inserting a day, the
+next invocation drops and rebuilds only that date partition. Completed-day
+markers and final run evidence are copied to the private experiment bucket.
+
+The existing distributed query and acceleration runners use the remote hosts
+when given the compatible adapter. A Stage B run sets the exact load/run IDs,
+5.69B-row expectation, end time, and range matrix explicitly:
+
+```bash
+export LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND="$PWD/benchmark/scripts/benchmark-clickhouse-remote-cluster"
+export LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=experiment-015-stage-b-load-v1-2s
+export LIGHTHOUSE_BENCH_EXPECTED_ROWS=5689254359
+export LIGHTHOUSE_DISTRIBUTED_DAY_END='2026-08-11 04:00:00'
+export LIGHTHOUSE_DISTRIBUTED_RANGES=5m,1h,6h,24h,10d
+export LIGHTHOUSE_DISTRIBUTED_HOST_SAMPLER=0
+benchmark/scripts/benchmark-run-distributed-queries \
+  2 experiment-015-stage-b-query-v1-2s
+```
+
+The cloud run disables the load-generator-only host sampler; startup evidence
+and provider metrics must be collected for every coordinator and leaf instead.

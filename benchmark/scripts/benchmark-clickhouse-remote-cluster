@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+coordinator="${LIGHTHOUSE_CLUSTER_COORDINATOR_HOST:-}"
+leaf_spec="${LIGHTHOUSE_CLUSTER_LEAF_HOSTS:-}"
+[[ -n "${coordinator}" && -n "${leaf_spec}" ]] || {
+  echo "LIGHTHOUSE_CLUSTER_COORDINATOR_HOST and LIGHTHOUSE_CLUSTER_LEAF_HOSTS are required" >&2
+  exit 2
+}
+IFS=',' read -r -a leaves <<< "${leaf_spec}"
+
+validate_shards() {
+  case "$1" in 1|2|4) ;; *) echo "SHARDS must be 1, 2, or 4" >&2; exit 2 ;; esac
+  if [[ "${#leaves[@]}" != "$1" ]]; then
+    echo "expected $1 remote leaves, found ${#leaves[@]}" >&2
+    exit 2
+  fi
+}
+coordinator_client() { clickhouse client --host "${coordinator}" --port 9000 "$@"; }
+leaf_client() {
+  local index="$1"
+  shift
+  [[ "${index}" =~ ^[1-9][0-9]*$ && "${index}" -le "${#leaves[@]}" ]] || {
+    echo "leaf index must be between 1 and ${#leaves[@]}" >&2
+    exit 2
+  }
+  clickhouse client --host "${leaves[$((index - 1))]}" --port 9000 "$@"
+}
+
+case "${1:-}" in
+  start)
+    validate_shards "${2:-}"
+    coordinator_client --query "SELECT 1" >/dev/null
+    for index in $(seq 1 "${2}"); do leaf_client "${index}" --query "SELECT 1" >/dev/null; done
+    ;;
+  stop)
+    validate_shards "${2:-}"
+    ;;
+  status)
+    shards="${2:-${#leaves[@]}}"
+    validate_shards "${shards}"
+    printf 'node\thost\thealth\n'
+    health=failed
+    coordinator_client --query "SELECT 1" >/dev/null 2>&1 && health=ok
+    printf 'coordinator\t%s\t%s\n' "${coordinator}" "${health}"
+    for index in $(seq 1 "${shards}"); do
+      health=failed
+      leaf_client "${index}" --query "SELECT 1" >/dev/null 2>&1 && health=ok
+      printf 'leaf-%s\t%s\t%s\n' "${index}" "${leaves[$((index - 1))]}" "${health}"
+    done
+    ;;
+  client)
+    shift
+    coordinator_client "$@"
+    ;;
+  leaf-client)
+    index="${2:-}"
+    shift 2
+    leaf_client "${index}" "$@"
+    ;;
+  *)
+    echo "usage: $0 {start SHARDS|stop SHARDS|status [SHARDS]|client ...|leaf-client INDEX ...}" >&2
+    exit 2
+    ;;
+esac

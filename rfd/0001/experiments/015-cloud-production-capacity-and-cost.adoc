@@ -712,3 +712,43 @@ OpenTofu plan are ready. Stage A's 2-hour-33-minute one-day load projects to
 approximately 25.5 hours for ten serial days, beyond the prior six-hour safety
 cap. Stage B therefore needs resumable multi-host loading and a separately
 bounded runtime rather than reusing the Stage A execution sequence unchanged.
+
+=== Stage B corpus correction and execution design
+
+The first Stage B upload selected `2026-07-15` through `2026-07-24` under the
+incorrect assumption that those directories were the 5.69B-row corpus used by
+Experiments 010 through 012. Direct Parquet-footer inspection disproved that
+assumption before compute provisioning: the July set contains 5,031,393,957
+rows and represents approximately 9.56 TB logical at the provisional 1,900
+bytes per event, not the required 5,689,254,359 rows and 10.81 TB. Its 2,305
+objects and 1,150,144,512,878 physical bytes were uploaded correctly, but it is
+not the immutable comparison corpus and must not be used for Stage B results.
+
+The corrected corpus is the exact Experiment 010 input, `2026-08-01` through
+`2026-08-10`. The already validated `2026-08-05` Stage A objects are reused;
+the other nine days are uploaded and independently checked against the
+versioned `stage-b/corpus.tsv` inventory. The July objects remain private and
+subject to the bucket lifecycle while this correction is reviewed; removing
+them early is optional cleanup rather than a benchmark prerequisite.
+
+Stage B runs 1-, 2-, and 4-shard topologies sequentially so every topology sees
+the same complete corpus without retaining three physical table copies at
+once. Each leaf is an on-demand `z3-highmem-14-standardlssd` with one disposable
+3,000 GiB Titanium SSD. A dedicated on-demand coordinator and load generator
+prevent Spot preemption from invalidating latency samples or interrupting the
+day-bounded loader. All VMs have auto-deleting boot disks and a provider-enforced
+36-hour default lifetime, bounded in configuration to 12 through 48 hours.
+
+The loader streams private GCS Parquet objects through `clickhouse local`,
+applies the same normalization as the local benchmark, and synchronously
+inserts through a `Distributed` table sharded by
+`cityHash64(tenant_id, dataset, event_id)`. Every completed date partition is
+validated against its independently retained row count and normalized-event
+checksum. Resume accepts only a complete matching date; a partial date is
+dropped and rebuilt because the serving schema intentionally does not add a
+benchmark-only source-file column. Completed-day markers and final evidence are
+written to the private artifact prefix.
+
+This is process- and day-resumable, not Local-SSD durable after VM loss. Spot
+leaves are therefore invalid for the retained Stage B topology. The immutable
+GCS corpus remains the replay boundary if an on-demand leaf is lost.

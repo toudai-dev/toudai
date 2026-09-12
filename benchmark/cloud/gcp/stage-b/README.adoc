@@ -1,0 +1,21 @@
+= GCP Stage B
+
+This module creates one dedicated coordinator, one dedicated load generator,
+and `shard_count` (1, 2, or 4) one-replica ClickHouse serving leaves on the
+existing private benchmark VPC. Run the 1-, 2-, then 4-shard topologies
+sequentially; do not compare concurrently deployed fleets.
+
+All nodes have private addresses only and use the VPC's existing IAP SSH rule.
+Leaves are on-demand `z3-highmem-14-standardlssd` instances because their local
+Titanium SSD state cannot survive Spot preemption. The coordinator and load
+generator are also on-demand so preemption cannot invalidate latency samples or
+interrupt the day-bounded loader. Every VM is provider-capped at 36 hours by
+default (configurable only from 12 through 48 hours), and every boot disk is
+auto-deleted with its VM. This is a safety ceiling, not cleanup automation:
+destroy each topology immediately after exporting results and hardware evidence.
+
+Typical workflow is `tofu init`,
+`tofu plan -var shard_count=1 -out=stage-b.tfplan`, review, apply deliberately,
+benchmark, export evidence, and `tofu destroy`.
+Repeat for shard counts 2 and 4. Compute, Local SSD, persistent disk, network,
+and storage charges accrue until resources are destroyed or reach their cap.
