@@ -237,6 +237,7 @@ the coordinator's `Distributed` table:
 ```bash
 LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=10.142.0.10 \
 LIGHTHOUSE_CLUSTER_LEAF_HOSTS=10.142.0.11,10.142.0.12 \
+LIGHTHOUSE_BENCH_RUNS_ROOT="$HOME/lighthouse-stage-b/runs" \
 LIGHTHOUSE_BENCH_REVISION="$(jj log -r @- --no-graph -T commit_id)" \
 benchmark/scripts/benchmark-load-gcp-distributed \
   2 experiment-015-stage-b-load-v1-2s
@@ -254,6 +255,8 @@ when given the compatible adapter. A Stage B run sets the exact load/run IDs,
 
 ```bash
 export LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND="$PWD/benchmark/scripts/benchmark-clickhouse-remote-cluster"
+export LIGHTHOUSE_BENCH_ROOT="$HOME/lighthouse-stage-b"
+export LIGHTHOUSE_BENCH_RUNS_ROOT="$LIGHTHOUSE_BENCH_ROOT/runs"
 export LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=experiment-015-stage-b-load-v1-2s
 export LIGHTHOUSE_BENCH_EXPECTED_ROWS=5689254359
 export LIGHTHOUSE_DISTRIBUTED_DAY_END='2026-08-11 04:00:00'
