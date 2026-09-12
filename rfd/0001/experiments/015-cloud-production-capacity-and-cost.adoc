@@ -697,3 +697,18 @@ smoke-test a replacement from the 26.8.2.7 LTS lock. The bucket's 14-day
 deletion lifecycle remains the corpus leak guardrail; the held Stage A evidence
 is intentionally exempt until it moves to the project's permanent artifact
 store.
+
+Stage B preparation began on 2026-09-12 after revalidating the active gcloud
+user, application-default credentials, project billing, private network,
+subnet, IAP firewall, and empty VM and disk inventory. Packer built replacement
+image `lighthouse-benchmark-20260912-172742` in 11 minutes 35 seconds from the
+committed Flox lock. The build and a separate private-IP-only, 15-minute-capped
+Spot boot test both reported ClickHouse 26.8.2.7. Explicit cleanup removed the
+boot-test VM and disk. The build log and boot-test log remain under
+`.tmp/experiment-015/stage-b/`; preserve them with the Stage B run evidence.
+
+Do not provision idle Stage B leaves before its resumable loader and exact
+OpenTofu plan are ready. Stage A's 2-hour-33-minute one-day load projects to
+approximately 25.5 hours for ten serial days, beyond the prior six-hour safety
+cap. Stage B therefore needs resumable multi-host loading and a separately
+bounded runtime rather than reusing the Stage A execution sequence unchanged.
