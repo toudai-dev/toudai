@@ -23,7 +23,7 @@ WITH
 SELECT
     toUInt64(1) AS tenant_id,
     CAST('gcp-logging' AS LowCardinality(String)) AS dataset,
-    coalesce(timestamp, toDateTime64(fromUnixTimestamp64Nano(timestamp_unix_nanos, 'UTC'), 6, 'UTC')) AS event_timestamp,
+    coalesce(timestamp, toDateTime64(fromUnixTimestamp64Nano(timestamp_unix_nanos, 'UTC'), 6, 'UTC')) AS timestamp,
     coalesce(receive_timestamp, toDateTime64(fromUnixTimestamp64Nano(receive_timestamp_unix_nanos, 'UTC'), 6, 'UTC')) AS observed_at,
     if(notEmpty(assumeNotNull(insert_id)), assumeNotNull(insert_id),
        hex(sipHash128(timestamp_unix_nanos, assumeNotNull(log_name), source_raw))) AS event_id,

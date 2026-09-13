@@ -760,6 +760,18 @@ starts queries, and a failed phase prevents the next phase. The continuation
 archives successful or failed stage evidence to the private artifact prefix so
 the cluster does not sit idle waiting for an operator between phases.
 
+The first full one-shard load attempt exposed a Native-format schema mismatch
+on 2026-09-13. All 638,620,872 rows for August 1 were accepted in 2 hours 20
+minutes, but end-of-day validation found zero rows in the expected date. Direct
+table inspection showed every row in partition `1970-01-01`: the transformation
+emitted `event_timestamp`, while the serving table names that field `timestamp`,
+so Native name matching supplied the destination column's zero default. The run
+is invalid performance evidence and remains preserved as a failed run. The fix
+aligns the emitted name with the destination schema and adds a first-batch
+partition check, reducing recurrence detection from a full day to one batch. A
+100-row Parquet-to-Native-to-MergeTree round trip then retained the expected
+2026 timestamp range and contained zero epoch timestamps.
+
 This is process- and day-resumable, not Local-SSD durable after VM loss. Spot
 leaves are therefore invalid for the retained Stage B topology. The immutable
 GCS corpus remains the replay boundary if an on-demand leaf is lost.

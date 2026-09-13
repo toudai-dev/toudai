@@ -54,16 +54,25 @@ echo initializing > "${run_dir}/status"
 failed=1
 failure_line="unknown"
 failure_command="unknown"
+failure_reason="unknown"
 record_error() {
   failure_line="$2"
   failure_command="$3"
+  [[ "${failure_reason}" != unknown ]] || failure_reason=command-failed
+}
+fail() {
+  failure_reason="$1"
+  echo "$2" >&2
+  return 1
 }
 on_exit() {
   local rc=$?
   if ((failed)); then
     echo failed > "${run_dir}/status"
     date -u +%FT%TZ > "${run_dir}/failed-at"
-    printf 'exit_code=%s\nline=%s\ncommand=%q\n' "${rc}" "${failure_line}" "${failure_command}" > "${run_dir}/failure.txt"
+    printf 'reason=%s\nexit_code=%s\nline=%s\ncommand=%q\n' \
+      "${failure_reason}" "${rc}" "${failure_line}" "${failure_command}" \
+      > "${run_dir}/failure.txt"
   fi
   return "${rc}"
 }
@@ -160,8 +169,7 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
   mapfile -t objects < <(gcloud storage ls "${remote_prefix}/**" | LC_ALL=C sort)
   remote_bytes="$(gcloud storage du --summarize "${remote_prefix}" | awk '{print $1}')"
   if [[ "${#objects[@]}" != "${expected_files}" || "${remote_bytes}" != "${expected_bytes}" ]]; then
-    echo "${day} corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${#objects[@]}/${remote_bytes}" >&2
-    exit 1
+    fail corpus-mismatch "${day} corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${#objects[@]}/${remote_bytes}"
   fi
 
   IFS=$'\t' read -r current_rows current_checksum <<< "$(day_state "${day}")"
@@ -181,20 +189,31 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
   echo "${day}: loading ${expected_files} Parquet objects (${expected_rows} rows)"
   started_ns="$(date +%s%N)"
   pids=()
+  first_batch=1
   for object in "${objects[@]}"; do
     load_object "${object}" &
     pids+=("$!")
     if [[ "${#pids[@]}" == "${parallelism}" ]]; then
       for pid in "${pids[@]}"; do wait "${pid}"; done
       pids=()
+      if ((first_batch)); then
+        # Native input maps by field name. Verify the expected partition after
+        # one batch so a schema-name mismatch cannot consume an entire run.
+        first_batch_rows="$("${client[@]}" --param_day="${day}" --query "
+          SELECT count() FROM benchmark_distributed.events
+          WHERE toDate(timestamp) = {day:Date} FORMAT TSVRaw")"
+        if [[ "${first_batch_rows}" == 0 ]]; then
+          fail timestamp-partition-mismatch "${day}: first batch produced no rows in its timestamp partition"
+        fi
+        first_batch=0
+      fi
     fi
   done
   for pid in "${pids[@]}"; do wait "${pid}"; done
   duration_ms="$((($(date +%s%N) - started_ns) / 1000000))"
   IFS=$'\t' read -r actual_rows actual_checksum <<< "$(day_state "${day}")"
   if [[ "${actual_rows}" != "${expected_rows}" || "${actual_checksum}" != "${expected_checksum}" ]]; then
-    echo "${day} validation failed: expected ${expected_rows}/${expected_checksum}, found ${actual_rows}/${actual_checksum}" >&2
-    exit 1
+    fail day-validation "${day} validation failed: expected ${expected_rows}/${expected_checksum}, found ${actual_rows}/${actual_checksum}"
   fi
   completed_at="$(date -u +%FT%TZ)"
   printf 'loaded\t%s\t%s\n' "${actual_rows}" "${actual_checksum}" > "${marker}"
@@ -208,7 +227,7 @@ done < "${inventory}"
 echo validating > "${run_dir}/status"
 expected_total="$(awk -F '\t' 'NR>1 {n+=$4} END {printf "%.0f",n}' "${inventory}")"
 actual_total="$("${client[@]}" --query 'SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw')"
-[[ "${actual_total}" == "${expected_total}" ]] || { echo "expected ${expected_total} rows, found ${actual_total}" >&2; exit 1; }
+[[ "${actual_total}" == "${expected_total}" ]] || fail total-validation "expected ${expected_total} rows, found ${actual_total}"
 
 printf 'leaf\trows\tbytes_on_disk\tactive_parts\n' > "${run_dir}/leaf-storage.tsv"
 for index in $(seq 1 "${shards}"); do
