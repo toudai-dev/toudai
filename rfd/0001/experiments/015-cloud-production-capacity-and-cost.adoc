@@ -726,10 +726,14 @@ not the immutable comparison corpus and must not be used for Stage B results.
 
 The corrected corpus is the exact Experiment 010 input, `2026-08-01` through
 `2026-08-10`. The already validated `2026-08-05` Stage A objects are reused;
-the other nine days are uploaded and independently checked against the
-versioned `stage-b/corpus.tsv` inventory. The July objects remain private and
-subject to the bucket lifecycle while this correction is reviewed; removing
-them early is optional cleanup rather than a benchmark prerequisite.
+the other nine days were uploaded from 2026-09-12T22:34:02Z through
+2026-09-13T02:08:20Z and independently checked against the versioned
+`stage-b/corpus.tsv` inventory. All ten per-day counts and byte totals match:
+2,245 Parquet objects, 1,116,601,405,252 physical bytes, and 5,689,254,359
+footer-reported rows. Ten SHA-256 manifests are present in the private bucket.
+The July objects remain private and subject to the bucket lifecycle while this
+correction is reviewed; removing them early is optional cleanup rather than a
+benchmark prerequisite.
 
 Stage B runs 1-, 2-, and 4-shard topologies sequentially so every topology sees
 the same complete corpus without retaining three physical table copies at
