@@ -1,10 +1,3 @@
-# Created by https://www.toptal.com/developers/gitignore/api/go
-# Edit at https://www.toptal.com/developers/gitignore?templates=go
-
-### Go ###
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -12,19 +5,11 @@
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Coverage and profiling output
 *.out
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
-go.work
-
-# End of https://www.toptal.com/developers/gitignore/api/go
+# Rust build output
+/target/
 
 .DS_Store
 .idea
@@ -35,9 +20,3 @@ tmp/
 .cache/
 
 *.json
-!conformance-report.json
-!pkg/conformance/promql/golden/**/*.json
-!pkg/conformance/promql/golden/**/manifest.json
-!pkg/conformance/logql/golden/**/*.json
-!pkg/conformance/logql/golden/**/manifest.json
-/lighthouse

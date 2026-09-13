@@ -25,16 +25,11 @@
       {
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
-            go
-            golangci-lint
-            gotests
-            gomodifytags
-            gore
-            gotools
-            delve
-
-            # LSPs
-            gopls
+            cargo
+            clippy
+            rust-analyzer
+            rustc
+            rustfmt
 
             # Tools
             docker-buildx
@@ -43,11 +38,7 @@
             goose
             buf
             protobuf
-            protoc-gen-go
-            protoc-gen-go-grpc
-            grpc-gateway
             git-cliff
-            goreleaser
             asciidoctor
 
             ## Benchmark tools

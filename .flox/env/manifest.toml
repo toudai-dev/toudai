@@ -11,6 +11,11 @@ fio.pkg-path = "fio"
 sysstat.pkg-path = "sysstat"
 clickhouse.pkg-path = "clickhouse-lts"
 clickhouse.version = "26.8.2.7-lts"
+clippy.pkg-path = "clippy"
+rust-analyzer.pkg-path = "rust-analyzer"
+cargo.pkg-path = "cargo"
+rustc.pkg-path = "rustc"
+rustfmt.pkg-path = "rustfmt"
 
 [options]
 systems = ["x86_64-linux"]

@@ -653,6 +653,8 @@ criterion.
   canonical JSON reconstruction size.
 - [X] Establish experiment and architecture decision record conventions.
 - [X] Record the initial corpus profile and unified-event storage boundary.
+- [X] Adopt Rust as the project implementation language and replace the empty
+  Go scaffold and stale Go-only development commands.
 - [X] Profile local benchmark storage, runtime options, and safe data placement.
 - [X] Add and smoke-test an isolated native ClickHouse benchmark harness.
 - [ ] Verify the exact GCP metric, bucket scope, exclusions, and calendar period

@@ -83,6 +83,17 @@ common routing, time, service, severity, trace, and typed measure columns plus
 the benchmark-selected flexible long tail. An exact payload table or archive is
 joined only for bounded drill-down, not ordinary aggregation.
 
+== Implementation language
+
+Lighthouse uses Rust for the service and benchmark load generators. This was a
+low-cost choice because the repository contained only a three-line Go
+placeholder and no Go dependencies, generated code, or tests. Rust provides
+the asynchronous I/O, explicit resource control, and Arrow/Parquet ecosystem
+needed by the ingestion and replay paths without making a custom storage engine
+part of the MVP. ClickHouse remains the serving engine. Revisit the language
+only if implementation uncovers a concrete interoperability gap that is more
+expensive than maintaining a second runtime.
+
 == Physical event representation
 
 Long-tail fields use ClickHouse `Map` for the MVP. Common schema-stable fields
