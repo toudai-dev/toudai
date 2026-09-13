@@ -746,12 +746,47 @@ day-bounded loader. All VMs have auto-deleting boot disks and a provider-enforce
 The loader streams private GCS Parquet objects through `clickhouse local`,
 applies the same normalization as the local benchmark, and synchronously
 inserts through a `Distributed` table sharded by
-`cityHash64(tenant_id, dataset, event_id)`. Every completed date partition is
-validated against its independently retained row count and normalized-event
-checksum. Resume accepts only a complete matching date; a partial date is
-dropped and rebuilt because the serving schema intentionally does not add a
-benchmark-only source-file column. Completed-day markers and final evidence are
-written to the private artifact prefix.
+`cityHash64(tenant_id, dataset, event_id)`. Every completed immutable source
+batch is validated against its cumulative row count and normalized-event
+checksum. Resume accepts only a complete matching batch and refuses an
+ambiguous partial batch without deleting data. Completed-batch markers and
+final evidence are written to the private artifact prefix.
+
+The first corrected Stage B load disproved the assumption that a corpus source
+directory is also an event-time partition. While loading source directory
+`2026-08-01`, valid event timestamps crossed into `2026-08-02`; at 538,992,628
+total rows, 5,168,109 rows were already in the latter partition. Dropping or
+validating `toDate(timestamp) = source_directory` would therefore reject valid
+data and could delete rows belonging to an adjacent source batch. Stage B now
+validates the cumulative row count and normalized-event checksum after each
+immutable source-directory batch. It recovers a completed batch only when the
+entire cumulative state matches and refuses an ambiguous partial batch without
+deleting event-time partitions. Final validation still checks the complete
+5,689,254,359-row corpus. This preserves the query-serving schema while making
+the distinction between source batches and event-time partitions explicit.
+
+That same validation then rejected the complete 638,620,872-row batch because
+its normalized checksum was 16,518,503,113,489,990,414 rather than the retained
+11,307,978,330,555,646,774. Row-level comparison against the Experiment 010
+table found the concrete difference: inferred Parquet input typed `labels` and
+`resource_labels` as `Nullable(JSON)`, so conversion through the transform's
+string-oriented extraction retained only `gcp.resource.type` and silently lost
+the label and resource-label maps. The local loader had explicitly declared
+both columns as `Nullable(String)`. Stage B now uses that same complete input
+structure rather than ClickHouse Parquet inference. A 100-row transform check
+reproduced the retained labels and resource labels before the invalid cloud
+batch was removed and rebuilt. The rejected batch is not benchmark input.
+
+The next corrected attempt stopped after 99,775,762 rows when one concurrent
+`gcloud storage cat` process transiently reported that no active account was
+selected. Its empty output then surfaced as an empty Parquet file and an empty
+ClickHouse insert. The VM's attached service account and active gcloud account
+were both present immediately afterward, so the observed cause is a transient
+gcloud streaming failure rather than expired VM credentials. The loader now
+downloads each object completely to a worker-private temporary file with three
+bounded attempts before transformation. This intentionally adds load-generator
+disk I/O, but prevents a failed or partial object stream from reaching the
+serving table. Temporary files are removed on both success and failure.
 
 The cloud-stage continuation is a separate guarded process rather than an
 unconditional shell chain. It waits for the loader's `completed` state, runs the

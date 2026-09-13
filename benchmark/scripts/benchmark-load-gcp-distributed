@@ -12,6 +12,7 @@ revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
 parallelism="${LIGHTHOUSE_GCP_LOAD_PARALLELISM:-2}"
 inventory="${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv"
 transform="${repo_root}/benchmark/clickhouse/gcp-parquet-to-events.sql"
+structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
 
 usage() {
   echo "usage: LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=IP LIGHTHOUSE_CLUSTER_LEAF_HOSTS=IP,... $0 SHARDS RUN_ID" >&2
@@ -136,34 +137,62 @@ CREATE TABLE IF NOT EXISTS benchmark_distributed.events
 ENGINE = Distributed(lighthouse, benchmark_distributed, events_local,
   cityHash64(tenant_id, dataset, event_id));"
 
-drop_day() {
-  local day="$1" index
-  for index in $(seq 1 "${shards}"); do
-    leaf_client "${index}" --query "ALTER TABLE benchmark_distributed.events_local DROP PARTITION '${day}'"
-  done
-}
-day_state() {
-  local day="$1"
-  "${client[@]}" --param_day="${day}" --query "
+global_state() {
+  "${client[@]}" --query "
     SELECT count(), sum(sipHash64(event_id, timestamp, attributes, resource, body))
-    FROM benchmark_distributed.events WHERE toDate(timestamp) = {day:Date} FORMAT TSVRaw"
+    FROM benchmark_distributed.events FORMAT TSVRaw"
 }
-load_object() {
+expected_state() {
+  local through_day="$1"
+  awk -F '\t' -v through_day="${through_day}" \
+    'NR > 1 && $1 <= through_day {print $4 "\t" $5}' "${inventory}" |
+    clickhouse local --structure 'rows UInt64, checksum UInt64' --input-format TSV \
+      --query 'SELECT sum(rows), sum(checksum) FROM table FORMAT TSVRaw'
+}
+load_object() (
   local object="$1"
-  gcloud storage cat "${object}" |
-    clickhouse local --max_threads=2 --input-format Parquet --queries-file "${transform}" |
+  local attempt object_file temp_dir
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/lighthouse-stage-b.XXXXXX")"
+  object_file="${temp_dir}/object.parquet"
+  trap 'rm -rf "${temp_dir}"' EXIT
+
+  # Authenticate and finish the object download before emitting Native rows so
+  # a transient credential failure cannot turn a partial stream into an insert.
+  for attempt in 1 2 3; do
+    rm -f "${object_file}"
+    if gcloud storage cp "${object}" "${object_file}"; then
+      break
+    fi
+    if [[ "${attempt}" == 3 ]]; then
+      echo "failed to download ${object} after ${attempt} attempts" >&2
+      return 1
+    fi
+    sleep "$((attempt * 5))"
+  done
+  [[ -s "${object_file}" ]]
+  clickhouse local --max_threads=2 --input-format Parquet --structure "${structure}" \
+      --queries-file "${transform}" < "${object_file}" |
     "${client[@]}" --receive_timeout=86400 --send_timeout=86400 \
       --insert_distributed_sync=1 --query "INSERT INTO benchmark_distributed.events FORMAT Native"
-}
+)
 
 printf 'day\trows\thot_checksum\tload_ms\tcompleted_at\n' > "${run_dir}/days.tsv.tmp"
 [[ -f "${run_dir}/days.tsv" ]] && tail -n +2 "${run_dir}/days.tsv" >> "${run_dir}/days.tsv.tmp"
 mv "${run_dir}/days.tsv.tmp" "${run_dir}/days.tsv"
 
 echo loading > "${run_dir}/status"
+previous_rows=0
+previous_checksum=0
 while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected_checksum; do
   [[ "${day}" == day ]] && continue
   marker="${state_dir}/${day}.done"
+  IFS=$'\t' read -r cumulative_rows cumulative_checksum <<< "$(expected_state "${day}")"
+
+  if [[ -f "${marker}" ]]; then
+    previous_rows="${cumulative_rows}"
+    previous_checksum="${cumulative_checksum}"
+    continue
+  fi
 
   remote_prefix="${bucket%/}/corpus/${day}"
   mapfile -t objects < <(gcloud storage ls "${remote_prefix}/**" | LC_ALL=C sort)
@@ -172,18 +201,18 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
     fail corpus-mismatch "${day} corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${#objects[@]}/${remote_bytes}"
   fi
 
-  IFS=$'\t' read -r current_rows current_checksum <<< "$(day_state "${day}")"
-  if [[ "${current_rows}" == "${expected_rows}" && "${current_checksum}" == "${expected_checksum}" ]]; then
-    if [[ ! -f "${marker}" ]]; then
-      printf 'recovered\t%s\t%s\n' "${current_rows}" "${current_checksum}" > "${marker}"
-    fi
+  IFS=$'\t' read -r current_rows current_checksum <<< "$(global_state)"
+  if [[ "${current_rows}" == "${cumulative_rows}" && "${current_checksum}" == "${cumulative_checksum}" ]]; then
+    printf 'recovered\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
+    printf '%s\t%s\t%s\t0\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "$(date -u +%FT%TZ)" >> "${run_dir}/days.tsv"
+    previous_rows="${cumulative_rows}"
+    previous_checksum="${cumulative_checksum}"
     continue
   fi
-  if [[ "${current_rows}" != 0 ]]; then
-    # A failed stream can leave an unknowable prefix. Rebuild the bounded day
-    # instead of treating a partial insert as resumable.
-    echo "${day}: dropping partial partition (${current_rows} rows)"
-    drop_day "${day}"
+  if [[ "${current_rows}" != "${previous_rows}" || "${current_checksum}" != "${previous_checksum}" ]]; then
+    # Source folders can overlap event-time partitions, so a partial source
+    # batch cannot be removed safely without source provenance.
+    fail partial-source-batch "${day}: expected prior state ${previous_rows}/${previous_checksum}, found ${current_rows}/${current_checksum}"
   fi
 
   echo "${day}: loading ${expected_files} Parquet objects (${expected_rows} rows)"
@@ -211,13 +240,15 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
   done
   for pid in "${pids[@]}"; do wait "${pid}"; done
   duration_ms="$((($(date +%s%N) - started_ns) / 1000000))"
-  IFS=$'\t' read -r actual_rows actual_checksum <<< "$(day_state "${day}")"
-  if [[ "${actual_rows}" != "${expected_rows}" || "${actual_checksum}" != "${expected_checksum}" ]]; then
-    fail day-validation "${day} validation failed: expected ${expected_rows}/${expected_checksum}, found ${actual_rows}/${actual_checksum}"
+  IFS=$'\t' read -r actual_rows actual_checksum <<< "$(global_state)"
+  if [[ "${actual_rows}" != "${cumulative_rows}" || "${actual_checksum}" != "${cumulative_checksum}" ]]; then
+    fail day-validation "${day} cumulative validation failed: expected ${cumulative_rows}/${cumulative_checksum}, found ${actual_rows}/${actual_checksum}"
   fi
   completed_at="$(date -u +%FT%TZ)"
-  printf 'loaded\t%s\t%s\n' "${actual_rows}" "${actual_checksum}" > "${marker}"
-  printf '%s\t%s\t%s\t%s\t%s\n' "${day}" "${actual_rows}" "${actual_checksum}" "${duration_ms}" "${completed_at}" >> "${run_dir}/days.tsv"
+  printf 'loaded\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
+  printf '%s\t%s\t%s\t%s\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "${duration_ms}" "${completed_at}" >> "${run_dir}/days.tsv"
+  previous_rows="${cumulative_rows}"
+  previous_checksum="${cumulative_checksum}"
   remote_marker="${bucket%/}/artifacts/stage-b/${run_id}/days/${day}.done"
   if ! gcloud storage ls "${remote_marker}" >/dev/null 2>&1; then
     gcloud storage cp "${marker}" "${remote_marker}" --cache-control=no-store
@@ -225,9 +256,11 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
 done < "${inventory}"
 
 echo validating > "${run_dir}/status"
-expected_total="$(awk -F '\t' 'NR>1 {n+=$4} END {printf "%.0f",n}' "${inventory}")"
-actual_total="$("${client[@]}" --query 'SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw')"
-[[ "${actual_total}" == "${expected_total}" ]] || fail total-validation "expected ${expected_total} rows, found ${actual_total}"
+IFS=$'\t' read -r expected_total expected_total_checksum <<< "$(expected_state 9999-12-31)"
+IFS=$'\t' read -r actual_total actual_total_checksum <<< "$(global_state)"
+if [[ "${actual_total}" != "${expected_total}" || "${actual_total_checksum}" != "${expected_total_checksum}" ]]; then
+  fail total-validation "expected ${expected_total}/${expected_total_checksum}, found ${actual_total}/${actual_total_checksum}"
+fi
 
 printf 'leaf\trows\tbytes_on_disk\tactive_parts\n' > "${run_dir}/leaf-storage.tsv"
 for index in $(seq 1 "${shards}"); do
