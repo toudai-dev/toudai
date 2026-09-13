@@ -147,7 +147,7 @@ resource "google_compute_instance" "coordinator" {
   scheduling {
     provisioning_model          = "STANDARD"
     automatic_restart           = false
-    on_host_maintenance         = "TERMINATE"
+    on_host_maintenance         = "MIGRATE"
     instance_termination_action = "DELETE"
     max_run_duration { seconds = local.max_lifetime_seconds }
   }
@@ -186,7 +186,7 @@ resource "google_compute_instance" "loadgen" {
   scheduling {
     provisioning_model          = "STANDARD"
     automatic_restart           = false
-    on_host_maintenance         = "TERMINATE"
+    on_host_maintenance         = "MIGRATE"
     instance_termination_action = "DELETE"
     max_run_duration { seconds = local.max_lifetime_seconds }
   }
