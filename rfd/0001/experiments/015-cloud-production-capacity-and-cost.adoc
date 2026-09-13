@@ -753,6 +753,13 @@ dropped and rebuilt because the serving schema intentionally does not add a
 benchmark-only source-file column. Completed-day markers and final evidence are
 written to the private artifact prefix.
 
+The cloud-stage continuation is a separate guarded process rather than an
+unconditional shell chain. It waits for the loader's `completed` state, runs the
+raw query inventory, then builds and measures accelerations. A failed load never
+starts queries, and a failed phase prevents the next phase. The continuation
+archives successful or failed stage evidence to the private artifact prefix so
+the cluster does not sit idle waiting for an operator between phases.
+
 This is process- and day-resumable, not Local-SSD durable after VM loss. Spot
 leaves are therefore invalid for the retained Stage B topology. The immutable
 GCS corpus remains the replay boundary if an on-demand leaf is lost.
