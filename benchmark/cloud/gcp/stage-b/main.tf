@@ -122,7 +122,7 @@ resource "google_compute_instance" "leaf" {
 
   lifecycle {
     # Z3 integrated Titanium SSD is provider-populated and disposable.
-    ignore_changes = [scratch_disk]
+    ignore_changes = [scratch_disk, metadata["ssh-keys"]]
   }
 
   depends_on = [google_storage_bucket_iam_member.object_viewer, google_storage_bucket_iam_member.object_creator]
@@ -165,14 +165,19 @@ resource "google_compute_instance" "coordinator" {
   metadata_startup_script = file("${path.module}/startup-coordinator.sh")
   deletion_protection     = false
   depends_on              = [google_storage_bucket_iam_member.object_viewer, google_storage_bucket_iam_member.object_creator]
+
+  lifecycle {
+    ignore_changes = [metadata["ssh-keys"]]
+  }
 }
 
 resource "google_compute_instance" "loadgen" {
-  name         = "${local.prefix}-loadgen"
-  machine_type = var.loadgen_machine_type
-  zone         = var.zone
-  tags         = ["lighthouse-iap-ssh", "${local.prefix}-loadgen"]
-  labels       = merge(local.common_labels, { purpose = "load-generator", capacity = "on-demand" })
+  name                      = "${local.prefix}-loadgen"
+  machine_type              = var.loadgen_machine_type
+  zone                      = var.zone
+  tags                      = ["lighthouse-iap-ssh", "${local.prefix}-loadgen"]
+  labels                    = merge(local.common_labels, { purpose = "load-generator", capacity = "on-demand" })
+  allow_stopping_for_update = true
 
   boot_disk {
     auto_delete = true
@@ -202,4 +207,8 @@ resource "google_compute_instance" "loadgen" {
   metadata_startup_script = file("${path.module}/startup-loadgen.sh")
   deletion_protection     = false
   depends_on              = [google_storage_bucket_iam_member.object_viewer, google_storage_bucket_iam_member.object_creator]
+
+  lifecycle {
+    ignore_changes = [metadata["ssh-keys"]]
+  }
 }

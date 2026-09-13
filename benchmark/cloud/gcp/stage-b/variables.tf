@@ -66,7 +66,7 @@ variable "coordinator_machine_type" {
 
 variable "loadgen_machine_type" {
   type    = string
-  default = "e2-standard-4"
+  default = "n2-standard-16"
 }
 
 variable "max_lifetime_hours" {
