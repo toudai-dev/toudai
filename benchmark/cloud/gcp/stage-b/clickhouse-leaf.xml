@@ -11,4 +11,9 @@
     <max_server_memory_usage_to_ram_ratio>0.85</max_server_memory_usage_to_ram_ratio>
     <users_config>clickhouse-users.xml</users_config>
     <timezone>UTC</timezone>
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>1000</flush_interval_milliseconds>
+    </query_log>
 </clickhouse>
