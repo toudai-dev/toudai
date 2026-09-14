@@ -653,6 +653,8 @@ criterion.
   canonical JSON reconstruction size.
 - [X] Establish experiment and architecture decision record conventions.
 - [X] Record the initial corpus profile and unified-event storage boundary.
+- [X] Adopt Rust as the project implementation language and replace the empty
+  Go scaffold and stale Go-only development commands.
 - [X] Profile local benchmark storage, runtime options, and safe data placement.
 - [X] Add and smoke-test an isolated native ClickHouse benchmark harness.
 - [ ] Verify the exact GCP metric, bucket scope, exclusions, and calendar period
@@ -769,11 +771,21 @@ criterion.
   load-generator-only ClickHouse ingress.
 - [X] Complete the GCP Stage A load and benchmark, preserve its artifacts, and
   destroy the topology before the six-hour deletion guardrail.
+- [X] Build and boot-test the corrected ClickHouse 26.8.2.7 Stage B image, and
+  define a private, provider-capped 1/2/4-shard topology plus a checksum-checked,
+  day-resumable GCS loader without starting idle compute.
+- [X] Upload and inventory the exact Experiment 010 ten-day corpus for Stage B;
+  do not use the initially uploaded 5.03B-row July set as the 5.69B-row
+  comparison corpus.
+- [X] Complete, validate, preserve, and tear down the GCP Stage B one-shard
+  baseline: 5.69B rows, 210 raw timings, 150 accelerated timings, complete
+  coordinator and leaf query telemetry, and 150 passing correctness checks.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
-  with the approved same-cloud GCP run, then run
-  10 TB scaling, replicated failure-domain, sustained-ingestion, failure, and
-  24-to-72-hour soak tests only on finalists; compare full infrastructure,
-  object storage, network, source-cloud egress, and operational cost.
+  with the completed same-cloud GCP run, then complete the two- and four-shard
+  10 TB scaling matrix and run replicated failure-domain, sustained-ingestion,
+  failure, and 24-to-72-hour soak tests only on finalists; compare full
+  infrastructure, object storage, network, source-cloud egress, and
+  operational cost.
 - [ ] Validate object-storage or cold-tier behavior on selected partitions.
 - [ ] Compare transparent ClickHouse tiering with an explicit hot/archive query
   split for selected aggregate and raw-event fixtures.

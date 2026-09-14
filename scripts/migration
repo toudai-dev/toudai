@@ -6,7 +6,7 @@
 export GOOSE_DRIVER="clickhouse"
 export GOOSE_TABLE="migrations"
 export GOOSE_DBSTRING="${GOOSE_DBSTRING:-clickhouse://admin:admin@127.0.0.1:9000/lighthouse_dev}"
-export GOOSE_MIGRATION_DIR="${GOOSE_MIGRATION_DIR:-pkg/db/migrations}"
+export GOOSE_MIGRATION_DIR="${GOOSE_MIGRATION_DIR:-migrations}"
 
 COMMAND="$1"
 [ $# -gt 0 ] && shift
@@ -23,20 +23,6 @@ create)
     ;;
 up)
     goose up
-    # Local-only schema snapshots. Production deploys use the lighthouse
-    # migrate command and do not run this script.
-    if [ "${SCHEMA_DUMP:-1}" != "0" ]; then
-        SCHEMA_OUT="${SCHEMA_OUT:-pkg/db/schema.sql}"
-        SCHEMA_PROFILE="${SCHEMA_PROFILE:-${DEPLOY_PROFILE:-}}"
-        SCHEMA_MODE="${SCHEMA_MODE:-live}"
-        SCHEMA_IMAGE="${SCHEMA_IMAGE:-clickhouse/clickhouse-server:25.8-alpine}"
-        go run ./tools/schema-dump \
-            -mode "$SCHEMA_MODE" \
-            -profile "$SCHEMA_PROFILE" \
-            -out "$SCHEMA_OUT" \
-            -migrations-dir "$GOOSE_MIGRATION_DIR" \
-            -image "$SCHEMA_IMAGE"
-    fi
     ;;
 down)
     goose down
@@ -56,13 +42,6 @@ status)
     echo "  down           Rollback the last migration"
     echo "  validate       Validate migration files"
     echo "  status         Show migration status"
-    echo ""
-    echo "Environment:"
-    echo "  SCHEMA_DUMP=0       Disable local schema.sql generation after up"
-    echo "  SCHEMA_OUT=<path>   Schema dump path (default: pkg/db/schema.sql)"
-    echo "  SCHEMA_PROFILE=<p>  Optional schema profile: cloud or onprem"
-    echo "  SCHEMA_MODE=<mode>  Schema dump mode: live or migrations (default: live)"
-    echo "  SCHEMA_IMAGE=<img>  ClickHouse image for live mode"
     echo ""
     echo "Examples:"
     echo "  $0 create add new table"

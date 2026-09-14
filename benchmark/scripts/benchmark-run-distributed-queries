@@ -11,7 +11,8 @@ cache_mode_spec="${LIGHTHOUSE_DISTRIBUTED_CACHE_MODES:-clickhouse-cold,warm}"
 range_spec="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h}"
 fixture_filter="${LIGHTHOUSE_DISTRIBUTED_FIXTURES:-}"
 expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
-load_run="experiment-014-distributed-day-v1-${shards}s"
+load_run="${LIGHTHOUSE_DISTRIBUTED_LOAD_RUN:-experiment-014-distributed-day-v1-${shards}s}"
+query_max_memory="${LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY:-8589934592}"
 
 if [[ -z "${shards}" || -z "${run_id}" ]]; then
   echo "usage: $0 SHARDS RUN_ID" >&2
@@ -29,6 +30,10 @@ if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
   echo "LIGHTHOUSE_DISTRIBUTED_REPETITIONS must be a positive integer" >&2
   exit 2
 fi
+if [[ ! "${query_max_memory}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY must be a positive integer" >&2
+  exit 2
+fi
 if [[ "$(cat "${runs_root}/${load_run}/status" 2>/dev/null || true)" != "completed" ]]; then
   echo "completed distributed load not found: ${runs_root}/${load_run}" >&2
   exit 1
@@ -42,7 +47,7 @@ fi
 mkdir -p "${run_dir}"/{evidence,plans/coordinator,plans/leaves,queries,results}
 echo "starting" > "${run_dir}/status"
 
-cluster=("${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster")
+cluster=("${LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND:-${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster}")
 completed=0
 sampler_pid=""
 stop_sampler() {
@@ -87,6 +92,7 @@ range_seconds() {
     1h) echo 3600 ;;
     6h) echo 21600 ;;
     24h) echo 86400 ;;
+    10d) echo 864000 ;;
     *) echo "unknown range: $1" >&2; return 2 ;;
   esac
 }
@@ -94,13 +100,13 @@ for range_name in "${ranges[@]}"; do
   range_seconds "${range_name}" >/dev/null
 done
 
-day_end="2026-08-06 04:00:00"
+day_end="${LIGHTHOUSE_DISTRIBUTED_DAY_END:-2026-08-06 04:00:00}"
 service="${LIGHTHOUSE_BENCH_SERVICE:-executor}"
 severity="${LIGHTHOUSE_BENCH_SEVERITY:-ERROR}"
 dynamic_value="${LIGHTHOUSE_BENCH_DYNAMIC_VALUE:-event_lifecycle}"
 safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
 query_prefix="lighthouse_${safe_run_id}"
-revision="$(jj log -r @- --no-graph -T 'commit_id')"
+revision="${LIGHTHOUSE_BENCH_REVISION:-$(jj log -r @- --no-graph -T 'commit_id' 2>/dev/null || echo unknown)}"
 date -u +%FT%TZ > "${run_dir}/started-at"
 
 cat > "${run_dir}/manifest.json" <<EOF
@@ -115,6 +121,7 @@ cat > "${run_dir}/manifest.json" <<EOF
   "ranges": "${range_spec}",
   "cache_modes": "${cache_mode_spec}",
   "repetitions": ${repetitions},
+  "query_max_memory": ${query_max_memory},
   "fixture_filter": "${fixture_filter}",
   "service": "${service}",
   "severity": "${severity}",
@@ -129,8 +136,8 @@ EOF
   uname -a
   lscpu
   free -h
-  df -h "${benchmark_root}"
-  zpool list -v fast-storage
+  df -h "${benchmark_root}" 2>/dev/null || df -h .
+  zpool list -v fast-storage 2>/dev/null || true
   "${cluster[@]}" status "${shards}"
 } > "${run_dir}/evidence/host.txt"
 for index in $(seq 1 "${shards}"); do
@@ -140,8 +147,10 @@ for index in $(seq 1 "${shards}"); do
     WHERE active AND database = 'benchmark_distributed' AND table = 'events_local'
     ORDER BY partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/leaf-${index}-parts.jsonl"
 done
-"${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
-sampler_pid=$!
+if [[ "${LIGHTHOUSE_DISTRIBUTED_HOST_SAMPLER:-1}" == "1" ]]; then
+  "${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
+  sampler_pid=$!
+fi
 
 selected_fixture() {
   local fixture="$1"
@@ -158,7 +167,7 @@ query_args=(
   --param_severity="${severity}"
   --param_dynamic_value="${dynamic_value}"
   --max_execution_time=1800
-  --max_memory_usage=8589934592
+  --max_memory_usage="${query_max_memory}"
 )
 
 drop_caches() {

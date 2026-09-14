@@ -697,3 +697,237 @@ smoke-test a replacement from the 26.8.2.7 LTS lock. The bucket's 14-day
 deletion lifecycle remains the corpus leak guardrail; the held Stage A evidence
 is intentionally exempt until it moves to the project's permanent artifact
 store.
+
+Stage B preparation began on 2026-09-12 after revalidating the active gcloud
+user, application-default credentials, project billing, private network,
+subnet, IAP firewall, and empty VM and disk inventory. Packer built replacement
+image `lighthouse-benchmark-20260912-172742` in 11 minutes 35 seconds from the
+committed Flox lock. The build and a separate private-IP-only, 15-minute-capped
+Spot boot test both reported ClickHouse 26.8.2.7. Explicit cleanup removed the
+boot-test VM and disk. The build log and boot-test log remain under
+`.tmp/experiment-015/stage-b/`; preserve them with the Stage B run evidence.
+
+Do not provision idle Stage B leaves before its resumable loader and exact
+OpenTofu plan are ready. Stage A's 2-hour-33-minute one-day load projects to
+approximately 25.5 hours for ten serial days, beyond the prior six-hour safety
+cap. Stage B therefore needs resumable multi-host loading and a separately
+bounded runtime rather than reusing the Stage A execution sequence unchanged.
+
+=== Stage B corpus correction and execution design
+
+The first Stage B upload selected `2026-07-15` through `2026-07-24` under the
+incorrect assumption that those directories were the 5.69B-row corpus used by
+Experiments 010 through 012. Direct Parquet-footer inspection disproved that
+assumption before compute provisioning: the July set contains 5,031,393,957
+rows and represents approximately 9.56 TB logical at the provisional 1,900
+bytes per event, not the required 5,689,254,359 rows and 10.81 TB. Its 2,305
+objects and 1,150,144,512,878 physical bytes were uploaded correctly, but it is
+not the immutable comparison corpus and must not be used for Stage B results.
+
+The corrected corpus is the exact Experiment 010 input, `2026-08-01` through
+`2026-08-10`. The already validated `2026-08-05` Stage A objects are reused;
+the other nine days were uploaded from 2026-09-12T22:34:02Z through
+2026-09-13T02:08:20Z and independently checked against the versioned
+`stage-b/corpus.tsv` inventory. All ten per-day counts and byte totals match:
+2,245 Parquet objects, 1,116,601,405,252 physical bytes, and 5,689,254,359
+footer-reported rows. Ten SHA-256 manifests are present in the private bucket.
+The July objects remain private and subject to the bucket lifecycle while this
+correction is reviewed; removing them early is optional cleanup rather than a
+benchmark prerequisite.
+
+Stage B runs 1-, 2-, and 4-shard topologies sequentially so every topology sees
+the same complete corpus without retaining three physical table copies at
+once. Each leaf is an on-demand `z3-highmem-14-standardlssd` with one disposable
+3,000 GiB Titanium SSD. A dedicated on-demand coordinator and load generator
+prevent Spot preemption from invalidating latency samples or interrupting the
+day-bounded loader. All VMs have auto-deleting boot disks and a provider-enforced
+36-hour default lifetime, bounded in configuration to 12 through 48 hours.
+
+The loader streams private GCS Parquet objects through `clickhouse local`,
+applies the same normalization as the local benchmark, and synchronously
+inserts through a `Distributed` table sharded by
+`cityHash64(tenant_id, dataset, event_id)`. Every completed immutable source
+batch is validated against its cumulative row count and normalized-event
+checksum. Resume accepts only a complete matching batch and refuses an
+ambiguous partial batch without deleting data. Completed-batch markers and
+final evidence are written to the private artifact prefix.
+
+The first corrected Stage B load disproved the assumption that a corpus source
+directory is also an event-time partition. While loading source directory
+`2026-08-01`, valid event timestamps crossed into `2026-08-02`; at 538,992,628
+total rows, 5,168,109 rows were already in the latter partition. Dropping or
+validating `toDate(timestamp) = source_directory` would therefore reject valid
+data and could delete rows belonging to an adjacent source batch. Stage B now
+validates the cumulative row count and normalized-event checksum after each
+immutable source-directory batch. It recovers a completed batch only when the
+entire cumulative state matches and refuses an ambiguous partial batch without
+deleting event-time partitions. Final validation still checks the complete
+5,689,254,359-row corpus. This preserves the query-serving schema while making
+the distinction between source batches and event-time partitions explicit.
+
+That same validation then rejected the complete 638,620,872-row batch because
+its normalized checksum was 16,518,503,113,489,990,414 rather than the retained
+11,307,978,330,555,646,774. Row-level comparison against the Experiment 010
+table found the concrete difference: inferred Parquet input typed `labels` and
+`resource_labels` as `Nullable(JSON)`, so conversion through the transform's
+string-oriented extraction retained only `gcp.resource.type` and silently lost
+the label and resource-label maps. The local loader had explicitly declared
+both columns as `Nullable(String)`. Stage B now uses that same complete input
+structure rather than ClickHouse Parquet inference. A 100-row transform check
+reproduced the retained labels and resource labels before the invalid cloud
+batch was removed and rebuilt. The rejected batch is not benchmark input.
+
+The next corrected attempt stopped after 99,775,762 rows when one concurrent
+`gcloud storage cat` process transiently reported that no active account was
+selected. Its empty output then surfaced as an empty Parquet file and an empty
+ClickHouse insert. The VM's attached service account and active gcloud account
+were both present immediately afterward, so the observed cause is a transient
+gcloud streaming failure rather than expired VM credentials. The loader now
+downloads each object completely to a worker-private temporary file with three
+bounded attempts before transformation. This intentionally adds load-generator
+disk I/O, but prevents a failed or partial object stream from reaching the
+serving table. Temporary files are removed on both success and failure.
+
+The cloud-stage continuation is a separate guarded process rather than an
+unconditional shell chain. It waits for the loader's `completed` state, runs the
+raw query inventory, then builds and measures accelerations. A failed load never
+starts queries, and a failed phase prevents the next phase. The continuation
+archives successful or failed stage evidence to the private artifact prefix so
+the cluster does not sit idle waiting for an operator between phases.
+
+The first full one-shard load attempt exposed a Native-format schema mismatch
+on 2026-09-13. All 638,620,872 rows for August 1 were accepted in 2 hours 20
+minutes, but end-of-day validation found zero rows in the expected date. Direct
+table inspection showed every row in partition `1970-01-01`: the transformation
+emitted `event_timestamp`, while the serving table names that field `timestamp`,
+so Native name matching supplied the destination column's zero default. The run
+is invalid performance evidence and remains preserved as a failed run. The fix
+aligns the emitted name with the destination schema and adds a first-batch
+partition check, reducing recurrence detection from a full day to one batch. A
+100-row Parquet-to-Native-to-MergeTree round trip then retained the expected
+2026 timestamp range and contained zero epoch timestamps.
+
+This is process- and day-resumable, not Local-SSD durable after VM loss. Spot
+leaves are therefore invalid for the retained Stage B topology. The immutable
+GCS corpus remains the replay boundary if an on-demand leaf is lost.
+
+=== Stage B one-shard result
+
+The corrected one-shard run completed on 2026-09-14 with one on-demand
+`z3-highmem-14-standardlssd` leaf, an `e2-standard-4` coordinator, and a
+dedicated `n2-custom-14-57344` load generator in `us-central1-a`. Direct host
+evidence identified the serving CPU as Intel Sapphire Rapids and measured
+118,169,047,040 bytes of leaf RAM and a 3,221,225,472,000-byte Titanium SSD.
+The run used ClickHouse 26.8.2.7 and benchmark revision `77c40de7e140`.
+
+The accepted loader, `experiment-015-stage-b-load-v6-1s`, ran from
+2026-09-13T10:25:34Z through 2026-09-14T03:35:41Z. All ten immutable source
+batches passed their cumulative row-count and normalized-event checksum gates.
+The sum of measured batch load time was 8 hours 32 minutes 46 seconds, or
+184,921 rows/s, but cumulative validation scans and orchestration extended the
+complete wall time to 17 hours 10 minutes 7 seconds. This backfill measurement
+is not a sustained-ingestion SLO.
+
+[options="header",cols="2*"]
+|===
+|Measurement |Result
+
+|Validated rows
+|5,689,254,359
+
+|Physical Parquet input
+|1,116,601,405,252 bytes in 2,245 objects
+
+|Normalized hot table
+|1,503,890,284,833 bytes in 106 active parts
+
+|Corpus inventory SHA-256
+|`8d408d37aef04d36307cdb53383a8256810318f59317bb5c79405fefd076b785`
+|===
+
+The final query run, `experiment-015-stage-b-v8-1s`, completed all 210 raw
+measurements and all 150 accelerated measurements. The raw phase ran for
+3 hours 23 minutes 19 seconds and the acceleration phase, including builds,
+validation, plans, and queries, ran for 50 minutes 22 seconds. Query logging
+captured every timed query on both coordinator and leaf. Peak measured leaf
+query memory was 8,905,300,116 bytes, below the explicit 16 GiB query limit.
+
+Ten-day raw median client wall times in milliseconds were:
+
+[options="header",cols="3*"]
+|===
+|Fixture |ClickHouse-cold |Warm
+
+|Recent tail |193 |154
+|Time-range count |19,197 |15,793
+|Service and severity |18,381 |18,379
+|Low-cardinality dynamic predicate |483,890 |218,677
+|Rate by service |26,930 |26,959
+|Duration heatmap |603,076 |619,513
+|Percentiles by caller |499,196 |509,911
+|===
+
+The leaf query log explains the large spread. Recent-tail retrieval read a
+median 1.78 million rows. The warm dynamic predicate used the condition cache
+to reduce its median input from all 5.69 billion rows to 1.86 billion. The
+ten-day count, service, rate, heatmap, and percentile shapes still read
+essentially the full table; the heatmap and percentile queries each processed
+approximately 5.13 TB of uncompressed column input and were not interactive.
+
+The four selected acceleration builds and their measured leaf costs were:
+
+[options="header",cols="5*"]
+|===
+|Build |Wall time |Rows written |Peak memory |Stored bytes
+
+|`type` attribute |819.198 s |2,084,160,576 |4,187,275,956 |Included below
+|`workspace_id` attribute |754.662 s |1,337,339,966 |4,276,015,601 |Included below
+|Service count, 5 minutes |43.690 s |79,599 |216,968,492 |361,240
+|Duration states, 5 minutes |847.771 s |23,487 |7,959,442,623 |44,182,257
+|Combined attribute table |1,573.860 s |3,421,500,542 |4,276,015,601 maximum |34,120,601,680
+|===
+
+All 150 raw-versus-accelerated correctness checks passed. For the ten-day
+window, cold medians fell from 483,890 ms to 3,803 ms for the low-cardinality
+predicate, 26,930 ms to 163 ms for service rate, 603,076 ms to 109 ms for the
+duration heatmap, and 499,196 ms to 150 ms for caller percentiles. The separate
+high-cardinality raw validation took 425,029 ms; its accelerated cold median
+was 737 ms. The derived tables occupied 34,165,145,177 bytes, 2.27% of the hot
+table. These results validate bounded selected-field and aggregate-state
+acceleration at this scale, but not arbitrary attribute inversion.
+
+The accepted run followed three rejected query-stage attempts over the same
+validated table. `v5` reached the first cold ten-day percentile query and then
+hit its explicit 8 GiB per-query limit with ClickHouse code 241; available host
+memory exceeded 100 GiB, so the limit rather than host pressure was the cause.
+`v6` failed immediately because the non-interactive launcher could not resolve
+the ClickHouse client on `PATH`. `v7` completed all 210 raw timings, but the
+Stage B server configuration had not enabled `system.query_log`, so the run
+lacked required execution telemetry and was rejected. The final configuration
+enabled query logging and raised only the benchmark driver's per-query limit to
+16 GiB. Earlier loader and stage archives remain preserved as failure evidence
+and are not benchmark results.
+
+The private validated loader archive is 4,273 bytes with SHA-256
+`e4ec318f357ee53a82a055e18fee33410aec0129d2314d4eb65c42d9a42cb759`.
+The final 599-entry stage archive is 6,488,522 bytes with SHA-256
+`a5a7c17fa81c6c25f085a14283187a601b901671cb7df0e665ec0a688fc47fd7`.
+A clean download reproduced every timed result hash, all 150 correctness
+records, 245 raw query-log records on each node, 180 coordinator and 184 leaf
+acceleration records, manifests, plans, storage records, and completed statuses.
+Supplemental direct hardware evidence has SHA-256
+`bcdf8a955e805405c10299863f34b90d1c28a8f3e026c11fe70a6b625a007445`.
+All three files remain private under the bucket's Stage B artifact prefix.
+
+After evidence export, the reviewed OpenTofu destroy plan contained zero
+creates, zero changes, and eight destroys. It removed all three VMs and their
+auto-deleting disks, both Stage B firewall rules, the temporary service
+account, and its two bucket roles. Empty API inventory and OpenTofu state then
+confirmed cleanup. The shared private network, image, corpus bucket, accepted
+artifacts, and rejected-run evidence remain outside this topology and retain
+their existing lifecycle and cost policy.
+
+This establishes the GCP one-shard Stage B baseline; it does not establish
+horizontal scaling efficiency or select a production platform. The two- and
+four-shard runs, current billing export, provider comparisons, replicated
+failure-domain tests, and soak work remain open.

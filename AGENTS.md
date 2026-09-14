@@ -36,14 +36,15 @@ Use standard conventional commit formatting such as `fix(promapi): handle empty 
 
 ### Building and Running
 
-- `go run . dev` runs development mode with hot reloading
-- `make dev` is an alias for development mode
-- `go run .` runs the main CLI application
+- `cargo run` runs the main CLI application
+- `make dev` is an alias for `cargo run`
+- `make build` builds the debug binary
 
 ### Testing and Quality
 
-- `make test` or `go test -test.v ./...` runs the full test suite
-- `make lint` or `golangci-lint run --verbose` runs linting
+- `make test` or `cargo test --all-targets` runs the full test suite
+- `make lint` or `cargo clippy --all-targets --all-features -- -D warnings` runs linting
+- `make fmt` or `cargo fmt --check` checks formatting
 
 ### Docker Environment
 

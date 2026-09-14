@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <logger><level>information</level><console>false</console></logger>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <listen_host>0.0.0.0</listen_host>
+    <path>/mnt/disks/clickhouse/data/</path>
+    <tmp_path>/mnt/disks/clickhouse/tmp/</tmp_path>
+    <user_files_path>/mnt/disks/clickhouse/user_files/</user_files_path>
+    <format_schema_path>/mnt/disks/clickhouse/format_schemas/</format_schema_path>
+    <max_server_memory_usage_to_ram_ratio>0.85</max_server_memory_usage_to_ram_ratio>
+    <users_config>clickhouse-users.xml</users_config>
+    <timezone>UTC</timezone>
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>1000</flush_interval_milliseconds>
+    </query_log>
+</clickhouse>

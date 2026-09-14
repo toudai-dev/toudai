@@ -3,9 +3,15 @@
   "manifest": {
     "schema-version": "1.15.0",
     "install": {
+      "cargo": {
+        "pkg-path": "cargo"
+      },
       "clickhouse": {
         "pkg-path": "clickhouse-lts",
         "version": "26.8.2.7-lts"
+      },
+      "clippy": {
+        "pkg-path": "clippy"
       },
       "curl": {
         "pkg-path": "curl"
@@ -25,6 +31,15 @@
       "packer": {
         "pkg-path": "packer"
       },
+      "rust-analyzer": {
+        "pkg-path": "rust-analyzer"
+      },
+      "rustc": {
+        "pkg-path": "rustc"
+      },
+      "rustfmt": {
+        "pkg-path": "rustfmt"
+      },
       "sysstat": {
         "pkg-path": "sysstat"
       }
@@ -40,20 +55,51 @@
   },
   "packages": [
     {
+      "attr_path": "cargo",
+      "broken": false,
+      "derivation": "/nix/store/y1zg3wvkz7q4l1fd57ldkam9l5idl6k3-cargo-1.97.1.drv",
+      "description": "Downloads your Rust project's dependencies and builds your project",
+      "install_id": "cargo",
+      "license": "[ MIT, Apache-2.0 ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "name": "cargo-1.97.1",
+      "pname": "cargo",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:06:40.732259Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.97.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/dv55qwamlq68hdiprg1v104ymwh1c27r-cargo-1.97.1"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
       "attr_path": "clickhouse-lts",
       "broken": false,
       "derivation": "/nix/store/s6kvprcvnwn4dzi8x3z4zxqmrf4ywqgv-clickhouse-26.8.2.7-lts.drv",
       "description": "Column-oriented database management system",
       "install_id": "clickhouse",
       "license": "Apache-2.0",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "clickhouse-26.8.2.7-lts",
       "pname": "clickhouse-lts",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:07:40.627351Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:06:40.984793Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -69,20 +115,52 @@
       "priority": 5
     },
     {
+      "attr_path": "clippy",
+      "broken": false,
+      "derivation": "/nix/store/c73jla34znhc3l3a3s4fk5aj7zg17qsk-clippy-1.97.1.drv",
+      "description": "Bunch of lints to catch common mistakes and improve your Rust code",
+      "install_id": "clippy",
+      "license": "[ MIT, Apache-2.0 ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "name": "clippy-1.97.1",
+      "pname": "clippy",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:06:40.989888Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.97.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/nafib7p33g095kh5s8y790wdcrv7mp9l-clippy-1.97.1-debug",
+        "out": "/nix/store/n4c4rzywa0wsfy239bqkgsx8lfhsfmwx-clippy-1.97.1"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
       "attr_path": "curl",
       "broken": false,
       "derivation": "/nix/store/zfdrn807xnm4dlapzrxmn45laa7606f7-curl-8.21.0.drv",
       "description": "Command line tool for transferring files with URL syntax",
       "install_id": "curl",
       "license": "curl",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "curl-8.21.0",
       "pname": "curl",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:07:40.876080Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:06:41.237390Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -112,14 +190,15 @@
       "description": "Flexible IO Tester - an IO benchmark tool",
       "install_id": "fio",
       "license": "GPL-2.0-or-later",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "fio-3.42",
       "pname": "fio",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:07:41.655199Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:06:42.023621Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -141,14 +220,15 @@
       "description": "Tools for the google cloud platform",
       "install_id": "google-cloud-sdk",
       "license": "Unspecified free software license",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "google-cloud-sdk-581.0.0",
       "pname": "google-cloud-sdk",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:07:43.210722Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:06:43.635381Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -170,14 +250,15 @@
       "description": "Lightweight and flexible command-line JSON processor",
       "install_id": "jq",
       "license": "MIT",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "jq-1.8.2",
       "pname": "jq",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:08:04.070125Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:07:04.101150Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -206,14 +287,15 @@
       "description": "Tool for building, changing, and versioning infrastructure",
       "install_id": "opentofu",
       "license": "MPL-2.0",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "opentofu-1.12.6",
       "pname": "opentofu",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:08:29.884204Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:07:30.058781Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -235,14 +317,15 @@
       "description": "Tool for creating identical machine images for multiple platforms from a single source configuration",
       "install_id": "packer",
       "license": "BUSL-1.1",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "packer-1.15.4",
       "pname": "packer",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:08:30.523770Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:07:30.688437Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": true,
@@ -258,20 +341,114 @@
       "priority": 5
     },
     {
+      "attr_path": "rust-analyzer",
+      "broken": false,
+      "derivation": "/nix/store/fbrx15ri4dv9a4vyn55i2jcdx5cvqz07-rust-analyzer-2026-08-03.drv",
+      "description": "Language server for the Rust language",
+      "install_id": "rust-analyzer",
+      "license": "[ MIT, Apache-2.0 ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "name": "rust-analyzer-2026-08-03",
+      "pname": "rust-analyzer",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:09:01.452227Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2026-08-03",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/4q11fsqhl7jn3a73paih88rrhiazb784-rust-analyzer-2026-08-03"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "rustc",
+      "broken": false,
+      "derivation": "/nix/store/ws46bp68ih8hf9661myqyf8ssq32fzba-rustc-wrapper-1.97.1.drv",
+      "description": "Safe, concurrent, practical language (wrapper script)",
+      "install_id": "rustc",
+      "license": "[ MIT, Apache-2.0 ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "name": "rustc-wrapper-1.97.1",
+      "pname": "rustc",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:09:01.523810Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.97.1",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "doc": "/nix/store/8svfp79q0gx10gcrsyxf1pw04q8jf0lp-rustc-wrapper-1.97.1-doc",
+        "man": "/nix/store/an2hvf5i7mq52mqdad9rad8mxkpksmq2-rustc-wrapper-1.97.1-man",
+        "out": "/nix/store/yaa1sq5g4jar7rvlspy7kk2wd98nj6qh-rustc-wrapper-1.97.1"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "rustfmt",
+      "broken": false,
+      "derivation": "/nix/store/89x1576ckylmc24b4qnh3j2k387lrgc5-rustfmt-1.97.1.drv",
+      "description": "Tool for formatting Rust code according to style guidelines",
+      "install_id": "rustfmt",
+      "license": "[ MIT, Apache-2.0 ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "name": "rustfmt-1.97.1",
+      "pname": "rustfmt",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:09:01.559339Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.97.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/47k26k98v32x56rxiqawdk5qk0r0b6w1-rustfmt-1.97.1"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
       "attr_path": "sysstat",
       "broken": false,
       "derivation": "/nix/store/kvcl663zkssw3nhqsjzwhhhfibdyzc97-sysstat-12.7.7.drv",
       "description": "Collection of performance monitoring tools for Linux (such as sar, iostat and pidstat)",
       "install_id": "sysstat",
       "license": "GPL-2.0-or-later",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=d6524aaca2ff07876657ae2b323f24be4874944b",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
       "name": "sysstat-12.7.7",
       "pname": "sysstat",
-      "rev": "d6524aaca2ff07876657ae2b323f24be4874944b",
-      "rev_count": 1069856,
-      "rev_date": "2026-09-08T15:35:43Z",
-      "scrape_date": "2026-09-09T06:10:27.241435Z",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:09:25.980543Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
