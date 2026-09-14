@@ -12,6 +12,7 @@ range_spec="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h}"
 fixture_filter="${LIGHTHOUSE_DISTRIBUTED_FIXTURES:-}"
 expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
 load_run="${LIGHTHOUSE_DISTRIBUTED_LOAD_RUN:-experiment-014-distributed-day-v1-${shards}s}"
+query_max_memory="${LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY:-8589934592}"
 
 if [[ -z "${shards}" || -z "${run_id}" ]]; then
   echo "usage: $0 SHARDS RUN_ID" >&2
@@ -27,6 +28,10 @@ if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
   echo "LIGHTHOUSE_DISTRIBUTED_REPETITIONS must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "${query_max_memory}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY must be a positive integer" >&2
   exit 2
 fi
 if [[ "$(cat "${runs_root}/${load_run}/status" 2>/dev/null || true)" != "completed" ]]; then
@@ -116,6 +121,7 @@ cat > "${run_dir}/manifest.json" <<EOF
   "ranges": "${range_spec}",
   "cache_modes": "${cache_mode_spec}",
   "repetitions": ${repetitions},
+  "query_max_memory": ${query_max_memory},
   "fixture_filter": "${fixture_filter}",
   "service": "${service}",
   "severity": "${severity}",
@@ -161,7 +167,7 @@ query_args=(
   --param_severity="${severity}"
   --param_dynamic_value="${dynamic_value}"
   --max_execution_time=1800
-  --max_memory_usage=8589934592
+  --max_memory_usage="${query_max_memory}"
 )
 
 drop_caches() {

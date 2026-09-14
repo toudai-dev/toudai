@@ -12,6 +12,7 @@ bucket="${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015
 expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-5689254359}"
 day_end="${LIGHTHOUSE_DISTRIBUTED_DAY_END:-2026-08-11 04:00:00}"
 ranges="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h,10d}"
+query_max_memory="${LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY:-17179869184}"
 revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
 poll_seconds="${LIGHTHOUSE_STAGE_POLL_SECONDS:-60}"
 max_wait_seconds="${LIGHTHOUSE_STAGE_MAX_WAIT_SECONDS:-129600}"
@@ -24,6 +25,7 @@ usage() {
 case "${shards}" in 1|2|4) ;; *) usage ;; esac
 [[ "${run_prefix}" =~ ^[A-Za-z0-9._-]+$ ]] || usage
 [[ "${poll_seconds}" =~ ^[1-9][0-9]*$ && "${max_wait_seconds}" =~ ^[1-9][0-9]*$ ]] || usage
+[[ "${query_max_memory}" =~ ^[1-9][0-9]*$ ]] || usage
 
 raw_run="${run_prefix}-raw"
 acceleration_run="${run_prefix}-acceleration"
@@ -45,6 +47,7 @@ load_run=${load_run}
 expected_rows=${expected_rows}
 day_end=${day_end}
 ranges=${ranges}
+query_max_memory=${query_max_memory}
 revision=${revision}
 EOF
 date -u +%FT%TZ > "${stage_dir}/started-at"
@@ -116,6 +119,7 @@ common_env=(
   "LIGHTHOUSE_BENCH_EXPECTED_ROWS=${expected_rows}"
   "LIGHTHOUSE_DISTRIBUTED_DAY_END=${day_end}"
   "LIGHTHOUSE_DISTRIBUTED_RANGES=${ranges}"
+  "LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY=${query_max_memory}"
   "LIGHTHOUSE_DISTRIBUTED_HOST_SAMPLER=0"
   "LIGHTHOUSE_BENCH_REVISION=${revision}"
 )
