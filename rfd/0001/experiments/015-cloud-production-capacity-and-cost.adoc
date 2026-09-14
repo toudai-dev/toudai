@@ -810,3 +810,124 @@ partition check, reducing recurrence detection from a full day to one batch. A
 This is process- and day-resumable, not Local-SSD durable after VM loss. Spot
 leaves are therefore invalid for the retained Stage B topology. The immutable
 GCS corpus remains the replay boundary if an on-demand leaf is lost.
+
+=== Stage B one-shard result
+
+The corrected one-shard run completed on 2026-09-14 with one on-demand
+`z3-highmem-14-standardlssd` leaf, an `e2-standard-4` coordinator, and a
+dedicated `n2-custom-14-57344` load generator in `us-central1-a`. Direct host
+evidence identified the serving CPU as Intel Sapphire Rapids and measured
+118,169,047,040 bytes of leaf RAM and a 3,221,225,472,000-byte Titanium SSD.
+The run used ClickHouse 26.8.2.7 and benchmark revision `77c40de7e140`.
+
+The accepted loader, `experiment-015-stage-b-load-v6-1s`, ran from
+2026-09-13T10:25:34Z through 2026-09-14T03:35:41Z. All ten immutable source
+batches passed their cumulative row-count and normalized-event checksum gates.
+The sum of measured batch load time was 8 hours 32 minutes 46 seconds, or
+184,921 rows/s, but cumulative validation scans and orchestration extended the
+complete wall time to 17 hours 10 minutes 7 seconds. This backfill measurement
+is not a sustained-ingestion SLO.
+
+[options="header",cols="2*"]
+|===
+|Measurement |Result
+
+|Validated rows
+|5,689,254,359
+
+|Physical Parquet input
+|1,116,601,405,252 bytes in 2,245 objects
+
+|Normalized hot table
+|1,503,890,284,833 bytes in 106 active parts
+
+|Corpus inventory SHA-256
+|`8d408d37aef04d36307cdb53383a8256810318f59317bb5c79405fefd076b785`
+|===
+
+The final query run, `experiment-015-stage-b-v8-1s`, completed all 210 raw
+measurements and all 150 accelerated measurements. The raw phase ran for
+3 hours 23 minutes 19 seconds and the acceleration phase, including builds,
+validation, plans, and queries, ran for 50 minutes 22 seconds. Query logging
+captured every timed query on both coordinator and leaf. Peak measured leaf
+query memory was 8,905,300,116 bytes, below the explicit 16 GiB query limit.
+
+Ten-day raw median client wall times in milliseconds were:
+
+[options="header",cols="3*"]
+|===
+|Fixture |ClickHouse-cold |Warm
+
+|Recent tail |193 |154
+|Time-range count |19,197 |15,793
+|Service and severity |18,381 |18,379
+|Low-cardinality dynamic predicate |483,890 |218,677
+|Rate by service |26,930 |26,959
+|Duration heatmap |603,076 |619,513
+|Percentiles by caller |499,196 |509,911
+|===
+
+The leaf query log explains the large spread. Recent-tail retrieval read a
+median 1.78 million rows. The warm dynamic predicate used the condition cache
+to reduce its median input from all 5.69 billion rows to 1.86 billion. The
+ten-day count, service, rate, heatmap, and percentile shapes still read
+essentially the full table; the heatmap and percentile queries each processed
+approximately 5.13 TB of uncompressed column input and were not interactive.
+
+The four selected acceleration builds and their measured leaf costs were:
+
+[options="header",cols="5*"]
+|===
+|Build |Wall time |Rows written |Peak memory |Stored bytes
+
+|`type` attribute |819.198 s |2,084,160,576 |4,187,275,956 |Included below
+|`workspace_id` attribute |754.662 s |1,337,339,966 |4,276,015,601 |Included below
+|Service count, 5 minutes |43.690 s |79,599 |216,968,492 |361,240
+|Duration states, 5 minutes |847.771 s |23,487 |7,959,442,623 |44,182,257
+|Combined attribute table |1,573.860 s |3,421,500,542 |4,276,015,601 maximum |34,120,601,680
+|===
+
+All 150 raw-versus-accelerated correctness checks passed. For the ten-day
+window, cold medians fell from 483,890 ms to 3,803 ms for the low-cardinality
+predicate, 26,930 ms to 163 ms for service rate, 603,076 ms to 109 ms for the
+duration heatmap, and 499,196 ms to 150 ms for caller percentiles. The separate
+high-cardinality raw validation took 425,029 ms; its accelerated cold median
+was 737 ms. The derived tables occupied 34,165,145,177 bytes, 2.27% of the hot
+table. These results validate bounded selected-field and aggregate-state
+acceleration at this scale, but not arbitrary attribute inversion.
+
+The accepted run followed three rejected query-stage attempts over the same
+validated table. `v5` reached the first cold ten-day percentile query and then
+hit its explicit 8 GiB per-query limit with ClickHouse code 241; available host
+memory exceeded 100 GiB, so the limit rather than host pressure was the cause.
+`v6` failed immediately because the non-interactive launcher could not resolve
+the ClickHouse client on `PATH`. `v7` completed all 210 raw timings, but the
+Stage B server configuration had not enabled `system.query_log`, so the run
+lacked required execution telemetry and was rejected. The final configuration
+enabled query logging and raised only the benchmark driver's per-query limit to
+16 GiB. Earlier loader and stage archives remain preserved as failure evidence
+and are not benchmark results.
+
+The private validated loader archive is 4,273 bytes with SHA-256
+`e4ec318f357ee53a82a055e18fee33410aec0129d2314d4eb65c42d9a42cb759`.
+The final 599-entry stage archive is 6,488,522 bytes with SHA-256
+`a5a7c17fa81c6c25f085a14283187a601b901671cb7df0e665ec0a688fc47fd7`.
+A clean download reproduced every timed result hash, all 150 correctness
+records, 245 raw query-log records on each node, 180 coordinator and 184 leaf
+acceleration records, manifests, plans, storage records, and completed statuses.
+Supplemental direct hardware evidence has SHA-256
+`bcdf8a955e805405c10299863f34b90d1c28a8f3e026c11fe70a6b625a007445`.
+All three files remain private under the bucket's Stage B artifact prefix.
+
+After evidence export, the reviewed OpenTofu destroy plan contained zero
+creates, zero changes, and eight destroys. It removed all three VMs and their
+auto-deleting disks, both Stage B firewall rules, the temporary service
+account, and its two bucket roles. Empty API inventory and OpenTofu state then
+confirmed cleanup. The shared private network, image, corpus bucket, accepted
+artifacts, and rejected-run evidence remain outside this topology and retain
+their existing lifecycle and cost policy.
+
+This establishes the GCP one-shard Stage B baseline; it does not establish
+horizontal scaling efficiency or select a production platform. The two- and
+four-shard runs, current billing export, provider comparisons, replicated
+failure-domain tests, and soak work remain open.
