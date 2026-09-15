@@ -1,0 +1,86 @@
+= AWS Benchmark Infrastructure
+
+This directory is the AWS replacement for the GCP Stage B infrastructure, which
+could not be provisioned because every project and region in the GCP account was
+capped at 24 `CPUS_PER_VM_FAMILY` for the local-SSD machine families the leaf
+shape requires. The merged GCP one-shard results are unaffected and stay the
+accepted baseline; see
+link:../../../rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[Experiment 015].
+
+The committed Flox lock provides the benchmark tools and the exact ClickHouse
+26.8.2.7 LTS version, so both clouds run the same ClickHouse closure.
+
+== Boundaries
+
+- `network/` defines a single-AZ VPC, one public subnet, an S3 gateway endpoint,
+  and a shared security group whose ClickHouse ports are reachable only from
+  another member of the group.
+- `guardrails/` defines the account-level cost ceiling: a scheduled watchdog
+  Lambda that terminates any tagged instance older than its declared lifetime,
+  and a monthly budget with forecasted and actual alerts.
+- `image/` builds a dependency-only Debian 12 image with the Flox-pinned
+  ClickHouse closure and the Session Manager agent. It contains no corpus,
+  credentials, ClickHouse data, or tenant state.
+- `stage-b/` creates the coordinator, load generator, and `shard_count` (1, 2, or
+  4) one-replica serving leaves.
+- Applying OpenTofu or running `packer build` creates billable resources and
+  requires explicit approval.
+
+== Cost controls
+
+The benchmark shapes are fixed by the experiment, so the savings come from
+everything around them.
+
+- Every node runs in one availability zone, so no traffic is billed cross-AZ.
+- The subnet is public only so Session Manager and package mirrors work without
+  a NAT gateway, which costs more per hour than the fleet's entire management
+  traffic is worth. No inbound rule permits internet access.
+- An S3 gateway endpoint is free and keeps corpus reads and result writes off
+  the metered internet path.
+- Leaves keep ClickHouse state on instance-store NVMe, so no EBS data volume is
+  provisioned or billed; the only EBS volume is a 100 GB gp3 root disk that is
+  deleted with its instance.
+- Every node is on-demand. Spot would invalidate a multi-hour run by losing
+  serving state mid-load, which costs more than the discount saves.
+- The corpus bucket expires objects after 45 days and aborts incomplete
+  multipart uploads after 7 days, so a forgotten corpus cannot bill forever.
+- The watchdog terminates any tagged instance past its declared lifetime, and
+  the budget stops the fleet at the ceiling. Both act without an operator.
+
+== Cost-free validation
+
+[source,shell]
+----
+flox activate -- tofu -chdir=benchmark/cloud/aws/network init -backend=false
+flox activate -- tofu -chdir=benchmark/cloud/aws/network validate
+
+flox activate -- tofu -chdir=benchmark/cloud/aws/guardrails init -backend=false
+flox activate -- tofu -chdir=benchmark/cloud/aws/guardrails validate
+
+flox activate -- tofu -chdir=benchmark/cloud/aws/stage-b init -backend=false
+flox activate -- tofu -chdir=benchmark/cloud/aws/stage-b validate
+
+flox activate -- packer init benchmark/cloud/aws/image/image.pkr.hcl
+flox activate -- packer validate benchmark/cloud/aws/image/image.pkr.hcl
+----
+
+`tofu plan` contacts AWS and must be reviewed before apply. Packer builds with a
+disposable `m7i.large` in the default VPC's public subnet and deletes the
+builder when the build ends; only the operator's public address may reach its
+temporary SSH rule.
+
+== Approved execution order
+
+. Apply and preserve the reviewed network plan.
+. Apply the guardrails so the ceiling exists before any benchmark node does.
+. Build the golden image and record the AMI ID.
+. Smoke-test the image: boot one node and confirm the instance-store device, the
+   ClickHouse version, and Session Manager registration.
+. Upload only the explicitly approved corpus to the private bucket.
+. Provision the 1-, 2-, then 4-shard topologies sequentially from the validated
+   image, exporting results and hardware evidence after each.
+. Destroy each topology immediately, then destroy the guardrails and network.
+
+See
+link:../../../rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[Experiment 015]
+for approval, privacy, cost, and decision gates.

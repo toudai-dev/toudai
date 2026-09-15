@@ -1,0 +1,180 @@
+= AWS Stage B
+
+This module creates one dedicated coordinator, one dedicated load generator, and
+`shard_count` (1, 2, or 4) one-replica ClickHouse serving leaves on the AWS
+benchmark VPC. Run the 1-, 2-, then 4-shard topologies sequentially; do not
+compare concurrently deployed fleets.
+
+== Shape and lifetime
+
+Leaves are on-demand `i4i.4xlarge` instances: 16 vCPU, 128 GiB RAM, and a 3,750 GB
+instance-store NVMe volume. The accepted GCP one-shard baseline left 1,400.6 GiB
+of hot parts plus 31.8 GiB of derived parts, with a 108.3 GiB largest part and a
+150 GiB merge cap, so a leaf has to hold roughly 1,582 GiB before headroom. That
+puts the 1,875 GB `i7i.2xlarge` at 90 % full with no reserve, and it also halves
+the leaf vCPU count, which would confound the scaling measurement. `i4i.4xlarge`
+sits at 45 %.
+
+The coordinator is `m7i.xlarge`, the same 4 vCPU and 16 GiB as the baseline's
+`e2-standard-4` coordinator, and the load generator is `m7i.4xlarge`.
+
+ClickHouse state lives on instance-store NVMe, which is destroyed with the host.
+There is no inbound SSH: management is Session Manager, and the shared security
+group only admits ClickHouse traffic from other benchmark nodes.
+
+`clickhouse-users.xml` is byte-identical to the accepted one-shard baseline, so
+query behaviour stays comparable. It is calibrated for a 14-thread leaf, which
+`i4i.4xlarge` exceeds, so no run oversubscribes its vCPUs. Changing
+`leaf_instance_type` to a shape with fewer than 14 vCPU requires revisiting it.
+
+== Lifetime and teardown
+
+EC2 has no equivalent of the GCP baseline's provider-enforced `max_run_duration`.
+Each node schedules its own `shutdown -h` from user data at `max_lifetime_hours`
+(configurable only from 12 through 48 hours), the topology sets
+`instance_initiated_shutdown_behavior = "terminate"`, and every root volume is
+deleted with its instance. Independently, the guardrails watchdog terminates any
+tagged instance that outlives the same lifetime plus a grace period, so a node
+whose operating system is wedged still cannot bill past its declared life.
+
+These are safety ceilings, not cleanup automation: destroy each topology
+immediately after exporting results, hardware evidence, and cost.
+
+== Workflow
+
+Typical workflow is `tofu init`,
+`tofu plan -var image=ami-... -var shard_count=1 -out=stage-b.tfplan`, review,
+apply deliberately, start the resumable load, then launch
+`benchmark/scripts/benchmark-run-distributed-stage` as its guarded
+continuation. That script and the loader are cloud-neutral: they select the
+object store from the bucket URI scheme, so an S3 run only changes
+`LIGHTHOUSE_CORPUS_BUCKET`. The continuation waits for complete load validation
+before running raw queries and acceleration builds, and it uploads failure
+evidence if loading or either benchmark phase fails.
+
+After the stage archive is uploaded, capture the node-level evidence and the
+metered cost before destroying the topology:
+
+[source,shell]
+----
+benchmark/scripts/benchmark-collect-aws-stage-b-evidence \
+  RUN_ID .tmp/experiment-015/stage-b/RUN_ID/nodes
+benchmark/scripts/benchmark-aws-stage-b-cost \
+  RUN_ID .tmp/experiment-015/stage-b/RUN_ID/cost
+----
+
+The collector reads each node through Session Manager and falls back to the EC2
+console output; each node also uploads a full evidence bundle to the run's
+result prefix, because the Session Manager API truncates captured output at
+24 KB. The cost collector needs the instances to still exist. Upload both
+bundles to the private artifact prefix, then `tofu destroy`.
+
+Repeat for shard counts 2 and 4. Compute, EBS, network, and storage charges
+accrue until resources are destroyed or reach their cap.
+
+== Scaling run runbook
+
+Run one topology at a time and keep the exact revision on the load generator,
+which has no repository of its own. Every benchmark command needs the image's
+Flox environment, because `clickhouse` and `aws` are not on the default `PATH`.
+Session Manager runs commands without an interactive session, so this runbook
+uses `send-command` throughout:
+
+[source,shell]
+----
+region=us-west-2
+profile=chaba
+bucket=s3://lighthouse-exp015-benchmark-828361646739
+stage_b=benchmark/cloud/aws/stage-b
+aws=(aws --profile "${profile}" --region "${region}")
+
+# Run a command on a node and print its output.
+ssm_run() {
+  local command_id
+  command_id="$("${aws[@]}" ssm send-command --instance-ids "$1" \
+    --document-name AWS-RunShellScript \
+    --parameters "$(python3 -c 'import json,sys; print(json.dumps({"commands": [sys.stdin.read()]}))' <<< "$2")" \
+    --query 'Command.CommandId' --output text)"
+  "${aws[@]}" ssm wait command-executed --command-id "${command_id}" --instance-id "$1" >/dev/null
+  "${aws[@]}" ssm get-command-invocation --command-id "${command_id}" --instance-id "$1" \
+    --query StandardOutputContent --output text
+}
+----
+
+Transfer the committed revision to the load generator through S3 and verify the
+preflight before starting the long load:
+
+[source,shell]
+----
+revision="$(jj log -r @- --no-graph -T commit_id)"
+git archive --format=tar.gz -o "/tmp/lighthouse-${revision}.tar.gz" "${revision}"
+sha256sum "/tmp/lighthouse-${revision}.tar.gz"
+
+coordinator_ip="$(tofu -chdir=${stage_b} output -raw coordinator_private_ip)"
+leaf_ips="$(tofu -chdir=${stage_b} output -json leaf_private_ips | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
+loadgen_id="$(tofu -chdir=${stage_b} output -raw loadgen_instance_id)"
+
+"${aws[@]}" s3 cp "/tmp/lighthouse-${revision}.tar.gz" \
+  "${bucket}/results/LOAD_RUN/lighthouse-${revision}.tar.gz"
+
+ssm_run "${loadgen_id}" "
+  set -euo pipefail
+  mkdir -p ~/lighthouse
+  aws s3 cp ${bucket}/results/LOAD_RUN/lighthouse-${revision}.tar.gz ~/lighthouse.tar.gz
+  tar -xzf ~/lighthouse.tar.gz -C ~/lighthouse
+  flox activate --dir /opt/lighthouse -- bash -lc '
+    clickhouse local --version
+    aws s3 ls ${bucket}/corpus/2026-08-01/ | head -2
+    LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator_ip} \\
+    LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips} \\
+      ~/lighthouse/benchmark/scripts/benchmark-clickhouse-remote-cluster status SHARDS'
+"
+----
+
+Start the loader detached so a lost Session Manager command cannot kill it. The
+loader is resumable at a validated source-batch boundary, so a lost session is
+recoverable rather than fatal:
+
+[source,shell]
+----
+ssm_run "${loadgen_id}" "
+  flox activate --dir /opt/lighthouse -- bash -lc '
+    cd ~/lighthouse
+    export LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator_ip}
+    export LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips}
+    export LIGHTHOUSE_CORPUS_BUCKET=${bucket}
+    export LIGHTHOUSE_CORPUS_INVENTORY=~/lighthouse/benchmark/cloud/aws/stage-b/corpus.tsv
+    export LIGHTHOUSE_GCP_LOAD_PARALLELISM=8
+    export LIGHTHOUSE_BENCH_REVISION=${revision}
+    setsid nohup benchmark/scripts/benchmark-load-distributed SHARDS LOAD_RUN \\
+      > ~/load.log 2>&1 < /dev/null &'
+"
+----
+
+Launch the guarded continuation the same way. It waits for the loader's
+`completed` state, so starting it early is safe:
+
+[source,shell]
+----
+ssm_run "${loadgen_id}" "
+  flox activate --dir /opt/lighthouse -- bash -lc '
+    cd ~/lighthouse
+    export LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator_ip}
+    export LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips}
+    export LIGHTHOUSE_CORPUS_BUCKET=${bucket}
+    export LIGHTHOUSE_CORPUS_INVENTORY=~/lighthouse/benchmark/cloud/aws/stage-b/corpus.tsv
+    export LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=LOAD_RUN
+    export LIGHTHOUSE_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs
+    export LIGHTHOUSE_BENCH_REVISION=${revision}
+    setsid nohup benchmark/scripts/benchmark-run-distributed-stage SHARDS STAGE_RUN \\
+      > ~/stage.log 2>&1 < /dev/null &'
+"
+----
+
+Poll `status` and `days.tsv` on the load generator rather than assuming progress
+from a live process. The loader archives its run to
+`${bucket}/artifacts/stage-b/LOAD_RUN/` and the stage script to
+`${bucket}/artifacts/stage-b/STAGE_RUN/`, so results are durable without
+depending on the instance. After the stage archive uploads, run the node
+evidence collector and the cost collector, upload both bundles, and destroy the
+topology.
