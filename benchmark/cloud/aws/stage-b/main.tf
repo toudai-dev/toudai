@@ -28,6 +28,10 @@ locals {
   corpus_objects   = "${local.bucket_arn}/corpus/*"
   manifest_objects = "${local.bucket_arn}/manifests/*"
   result_objects   = "${local.bucket_arn}/results/*"
+  # Run archives and per-day markers go here, not under results/. A node that
+  # cannot write them loses the entire benchmark record at teardown, so this is
+  # as load-bearing as the corpus read.
+  artifact_objects = "${local.bucket_arn}/artifacts/*"
 
   leaf_config_b64  = base64encode(file("${path.module}/clickhouse-leaf.xml"))
   users_config_b64 = base64encode(file("${path.module}/clickhouse-users.xml"))
@@ -65,17 +69,22 @@ data "aws_iam_policy_document" "node_access" {
   statement {
     sid     = "ReadImmutableCorpus"
     actions = ["s3:GetObject"]
-    # Corpus objects stay read-only for the whole experiment. Result objects are
-    # also readable so a node can stage the benchmark revision and verify what it
-    # exported; they were already writable, so this grants no new authority over
-    # the corpus.
-    resources = [local.corpus_objects, local.manifest_objects, local.result_objects]
+    # Corpus objects stay read-only for the whole experiment. Result and
+    # artifact objects are also readable so a node can stage the benchmark
+    # revision and verify what it exported; they were already writable, so this
+    # grants no new authority over the corpus.
+    resources = [
+      local.corpus_objects,
+      local.manifest_objects,
+      local.result_objects,
+      local.artifact_objects,
+    ]
   }
 
   statement {
     sid       = "WriteBenchmarkResults"
     actions   = ["s3:PutObject", "s3:AbortMultipartUpload"]
-    resources = [local.result_objects]
+    resources = [local.result_objects, local.artifact_objects]
   }
 
   statement {
@@ -86,7 +95,7 @@ data "aws_iam_policy_document" "node_access" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["corpus/*", "manifests/*", "results/*"]
+      values   = ["corpus/*", "manifests/*", "results/*", "artifacts/*"]
     }
   }
 }

@@ -8,7 +8,7 @@
 # lifetime ceiling remains the backstop if this process dies.
 set -Eeuo pipefail
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 shards="${1:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 run_prefix="${2:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 stage_run="${3:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
