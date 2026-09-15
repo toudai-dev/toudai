@@ -16,6 +16,7 @@ rust-analyzer.pkg-path = "rust-analyzer"
 cargo.pkg-path = "cargo"
 rustc.pkg-path = "rustc"
 rustfmt.pkg-path = "rustfmt"
+awscli2.pkg-path = "awscli2"
 
 [options]
 systems = ["x86_64-linux"]
