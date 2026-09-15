@@ -1099,18 +1099,18 @@ cost. Acceleration builds are leaf-local and split with shard count.
 
 |2 shards x 1 replica
 |$4.4412429
-|$67.5
-|$159.9 at 36 h
+|$67.5 at 15.2 h
+|$159.88 at 36 h
 
 |4 shards x 1 replica
 |$8.0072484
-|$106.5
-|$288.3 at 36 h
+|$106.5 at 13.3 h
+|$288.26 at 36 h
 
 |Both topologies
 |—
 |$174.0
-|$448.2 at 36 h
+|$448.15 at 36 h
 |===
 
 A 24-hour provider-enforced ceiling instead of the merged 36-hour default
@@ -1125,12 +1125,14 @@ free. Inter-zone egress is listed at $0.01/GiB and the one-shard coordinator
 reduction traffic was under 0.4 GB for an entire raw matrix, so even a
 zone-separated layout would add cents rather than dollars.
 
-Requested approval: the expected spend is $174.0 and the planning figure with
-contingency is $208.0. Approval for $300 with a 24-hour provider-enforced
-deletion ceiling bounds the worst case at $298.76. The merged 36-hour default
-would bound it at $448.20 and is the safer choice if a load slower than
-expected must not be cut off mid-run. Either way each topology is destroyed
-immediately after its archives, node evidence, and cost report are verified.
+Requested approval: the expected spend is $174.0 at the phase totals above. The
+planning figure with contingency is $208.06, which is 18 hours for the two-shard
+topology and 16 hours for the four-shard topology at the same rates. Approval
+for $300 with a 24-hour provider-enforced deletion ceiling bounds the worst case
+at $298.76. The merged 36-hour default would bound it at $448.15 and is the
+safer choice if a load slower than expected must not be cut off mid-run. Either
+way each topology is destroyed immediately after its archives, node evidence,
+and cost report are verified.
 
 Two failure modes are expected rather than hypothetical. The 4-shard
 coordinator shares 16 GiB with its own ClickHouse server, so a coordinator
