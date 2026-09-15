@@ -1321,12 +1321,12 @@ a forgotten corpus without an operator.
 
 Prepared and verified without a benchmark node ever running:
 
-- The dependency image was built on a disposable `m7i.large` in 45 minutes
-  53 seconds and registered as `ami-0c18a88f454bbc3af` (`x86_64`, HVM,
-  `/dev/xvda`). It carries the same Flox-pinned ClickHouse 26.8.2.7 closure as
-  the accepted GCP image plus the Session Manager agent, and the builder was
-  terminated at the end of the build. That image turned out to be unbootable and
-  was replaced; see the defect record below.
+- The dependency image was rebuilt on a disposable `m7i.large` and registered
+  as `ami-0298fd5dbaa1abaff` (`x86_64`, HVM, `/dev/xvda`). It carries the same
+  Flox-pinned ClickHouse 26.8.2.7 closure as the accepted GCP image plus the
+  Session Manager agent, and the builder was terminated at the end of the build.
+  The first attempt was unbootable and was replaced; see the defect records
+  below.
 - The benchmark network is applied: VPC `vpc-00332652707f3fb0e`, subnet
   `subnet-0d75cb46215de24cb`, security group `sg-0bb5c65999c4db22d`, and a free
   S3 gateway endpoint, all in `us-west-2a`.
@@ -1392,6 +1392,54 @@ the smoke topology was destroyed with all ten resources, and the probe instance
 was terminated. The failed attempt cost about $0.95 of metered usage: roughly
 46 minutes of `m7i.large` builder, 21 minutes of the three-node fleet, 8 minutes
 of probe, and their gp3 volumes.
+
+=== AWS Stage B bootstrap defects and the passing smoke test
+
+The rebuilt image booted and registered all three nodes with Session Manager,
+but the first smoke test still failed: `/mnt/disks/clickhouse` was unmounted and
+the ClickHouse service was inactive. The node's own startup log named the cause:
+
+[source,text]
+----
+expected exactly one instance-store device, found 3
+----
+
+AWS publishes three by-id aliases for a single instance-store device: a plain
+name, a `-ns-1` namespace alias, and a `_1` alias, all resolving to the same
+`/dev/nvme1n1`. The leaf counted three devices, failed its exactly-one
+assertion, and exited before formatting or mounting anything. The aliases are
+now resolved and deduplicated before counting, and the detection has a table
+test covering one device, two real devices, and none.
+
+Three further defects surfaced in the same round and are fixed together:
+
+- The readiness probe activated the Flox environment while systemd was
+  activating it for the server. Two concurrent first activations race on the
+  activation state directory, and the loser exits with `EACCES`, which restarted
+  the server twice before it settled and left the node without its `READY`
+  marker. The binary is now resolved once and reused, the unit gets a runtime
+  directory so Flox has a writable activation root, and the evidence collector
+  does the same. This also explains why the same recipe worked on GCP, where the
+  runtime directory exists.
+- Changing `user_data` stopped and started the instances rather than replacing
+  them, and cloud-init runs its per-instance modules once, so the node silently
+  kept running its old bootstrap and the first fix appeared not to work.
+  `user_data_replace_on_change` now forces a real replacement.
+- The evidence collector's remote command referenced a variable without escaping
+  it inside an unquoted here-document, so the local shell would have expanded it
+  to nothing before the command ever reached the node. ShellCheck caught it.
+
+The final smoke test passed: all three nodes registered with Session Manager,
+`NRestarts=0` with the service active, `READY` and `hardware.txt` written, the
+3.4 TB instance store mounted at `/mnt/disks/clickhouse`, ClickHouse answering
+`26.8.2.7`, `SELECT 1` succeeding from the load generator to the coordinator and
+from the coordinator to the leaf, the coordinator's `remote_servers` naming the
+leaf, and the evidence collector returning a checksummed bundle for all three
+nodes with no console fallback. The smoke topology was then destroyed, leaving
+no instance and no volume behind.
+
+The three smoke rounds together cost roughly $2 of metered usage, which is the
+price of finding all four defects before a paid run rather than during one.
 
 === AWS Stage B scaling runtime and cost estimate
 
