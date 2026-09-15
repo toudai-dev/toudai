@@ -59,10 +59,18 @@ flox activate -- tofu -chdir=benchmark/cloud/aws/guardrails validate
 
 flox activate -- tofu -chdir=benchmark/cloud/aws/stage-b init -backend=false
 flox activate -- tofu -chdir=benchmark/cloud/aws/stage-b validate
+flox activate -- benchmark/cloud/aws/stage-b/check-templates
 
 flox activate -- packer init benchmark/cloud/aws/image/image.pkr.hcl
 flox activate -- packer validate benchmark/cloud/aws/image/image.pkr.hcl
 ----
+
+`check-templates` renders the ClickHouse configuration and the user-data wrapper
+exactly as OpenTofu would and proves that what a node receives matches the
+committed sources: the leaf configuration stays byte-identical to the accepted
+one-shard baseline, the coordinator names every leaf at both shard counts, the
+wrapper is valid shell, and each delivered node script is byte-identical to its
+source.
 
 `tofu plan` contacts AWS and must be reviewed before apply. Packer builds with a
 disposable `m7i.large` in the default VPC's public subnet and deletes the

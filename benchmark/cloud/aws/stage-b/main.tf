@@ -130,7 +130,7 @@ resource "aws_instance" "leaf" {
     clickhouse_users     = local.users_config_b64
     max_lifetime_minutes = local.max_lifetime_minutes
     extra_env            = ""
-    startup_script       = file("${path.module}/startup-leaf.sh")
+    startup_script       = trimspace(file("${path.module}/startup-leaf.sh"))
   })
 
   tags = merge(local.common_tags, {
@@ -172,7 +172,7 @@ resource "aws_instance" "coordinator" {
     clickhouse_users     = local.users_config_b64
     max_lifetime_minutes = local.max_lifetime_minutes
     extra_env            = ""
-    startup_script       = file("${path.module}/startup-coordinator.sh")
+    startup_script       = trimspace(file("${path.module}/startup-coordinator.sh"))
   })
 
   tags = merge(local.common_tags, {
@@ -218,7 +218,7 @@ resource "aws_instance" "loadgen" {
       "export LIGHTHOUSE_COORDINATOR_IP='${aws_instance.coordinator.private_ip}'",
       "export LIGHTHOUSE_LEAF_IPS='${join(",", aws_instance.leaf[*].private_ip)}'",
     ])
-    startup_script = file("${path.module}/startup-loadgen.sh")
+    startup_script = trimspace(file("${path.module}/startup-loadgen.sh"))
   })
 
   tags = merge(local.common_tags, {
