@@ -1317,6 +1317,37 @@ is provisioned; on-demand capacity only, because Spot would invalidate a
 multi-hour run by losing serving state; and a 45-day bucket expiry that removes
 a forgotten corpus without an operator.
 
+=== AWS Stage B preparation status
+
+Prepared and verified without a benchmark node ever running:
+
+- The dependency image was built on a disposable `m7i.large` in 45 minutes
+  53 seconds and registered as `ami-0c18a88f454bbc3af` (`x86_64`, HVM,
+  `/dev/xvda`). It carries the same Flox-pinned ClickHouse 26.8.2.7 closure as
+  the accepted GCP image plus the Session Manager agent, and the builder was
+  terminated at the end of the build. The image is built and registered but not
+  yet boot-tested; a single-node boot check is the first step after approval.
+- The benchmark network is applied: VPC `vpc-00332652707f3fb0e`, subnet
+  `subnet-0d75cb46215de24cb`, security group `sg-0bb5c65999c4db22d`, and a free
+  S3 gateway endpoint, all in `us-west-2a`.
+- The guardrails are applied and were exercised against the live API: the
+  watchdog Lambda returned a correct cutoff and terminated nothing, and the
+  budget exists at the current ceiling with an email subscription pending the
+  recipient's confirmation.
+- `benchmark/cloud/aws/stage-b/check-templates` passes all fifteen checks. It
+  caught one real defect: the user-data wrapper appended a trailing newline, so
+  the script a node executed was not byte-identical to the committed source. The
+  templates now trim the file and the preflight enforces the identity.
+- The immutable ten-day corpus is uploading to S3 from the local copy, which was
+  verified byte-identical to GCS day by day against the committed inventory. The
+  transfer runs at about 123 MiB/s and writes a SHA-256 manifest, so the S3 copy
+  can be re-validated independently of the upload.
+- The GCP side is torn down: both benchmark images and the benchmark VPC,
+  subnet, and firewall rule are deleted, and the accepted and rejected artifacts
+  are archived to S3 under `results/gcp-stage-b-archive/` with a prefix README
+  that separates the accepted v8 stage and v6 load runs from the rejected
+  attempts. The GCS corpus bucket is deleted once the S3 copy is verified.
+
 === AWS Stage B scaling runtime and cost estimate
 
 The estimate carries over the phase timings measured on the accepted one-shard
