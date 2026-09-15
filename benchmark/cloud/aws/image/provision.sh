@@ -56,6 +56,17 @@ rm -f "${flox_deb}" "${ssm_agent_deb}" /tmp/lighthouse-manifest.toml \
   /tmp/lighthouse-manifest.lock /tmp/lighthouse-env.json
 sudo apt-get clean
 sudo rm -rf /var/lib/apt/lists/*
+
+# Only cloud-init's logs and state are cleared, never the machine identity.
+# `cloud-init clean --machine-id` removes /etc/machine-id, and systemd on
+# Debian 12 refuses to boot when it is missing while /etc is still read-only:
+#
+#   System cannot boot: Missing /etc/machine-id and /etc is mounted read-only.
+#
+# Instances launched from an image generalized that way never reach
+# network-online.target, so the Session Manager agent never registers and the
+# node is unusable. The first boot regenerates the identity on its own, which is
+# what an EC2 image is expected to do.
 if command -v cloud-init >/dev/null 2>&1; then
-  sudo cloud-init clean --logs --machine-id
+  sudo cloud-init clean --logs
 fi

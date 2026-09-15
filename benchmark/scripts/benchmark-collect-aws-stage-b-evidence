@@ -138,7 +138,9 @@ while IFS=$'\t' read -r instance_id name purpose; do
     continue
   fi
   echo "session manager unavailable for ${name}; falling back to console output" >&2
-  if "${aws_cmd[@]}" ec2 get-console-output --instance-id "${instance_id}" \
+  # `--latest` is required: without it the API returns cached output, which is
+  # empty for an instance whose console has never been polled.
+  if "${aws_cmd[@]}" ec2 get-console-output --instance-id "${instance_id}" --latest \
     --output text --query Output > "${out_dir}/${name}.console.txt" 2>/dev/null; then
     echo "console-fallback ${purpose:-unknown} ${name}"
   else
