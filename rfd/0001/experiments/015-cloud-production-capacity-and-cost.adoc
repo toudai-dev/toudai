@@ -1325,8 +1325,8 @@ Prepared and verified without a benchmark node ever running:
   53 seconds and registered as `ami-0c18a88f454bbc3af` (`x86_64`, HVM,
   `/dev/xvda`). It carries the same Flox-pinned ClickHouse 26.8.2.7 closure as
   the accepted GCP image plus the Session Manager agent, and the builder was
-  terminated at the end of the build. The image is built and registered but not
-  yet boot-tested; a single-node boot check is the first step after approval.
+  terminated at the end of the build. That image turned out to be unbootable and
+  was replaced; see the defect record below.
 - The benchmark network is applied: VPC `vpc-00332652707f3fb0e`, subnet
   `subnet-0d75cb46215de24cb`, security group `sg-0bb5c65999c4db22d`, and a free
   S3 gateway endpoint, all in `us-west-2a`.
@@ -1347,6 +1347,51 @@ Prepared and verified without a benchmark node ever running:
   are archived to S3 under `results/gcp-stage-b-archive/` with a prefix README
   that separates the accepted v8 stage and v6 load runs from the rejected
   attempts. The GCS corpus bucket is deleted once the S3 copy is verified.
+
+=== AWS Stage B image defect and fix
+
+The first AWS image, `ami-0c18a88f454bbc3af`, was unbootable. The smoke test
+that caught it applied the real Stage B module at one shard with a twelve-hour
+lifetime ceiling, which created ten resources including the budget stop action,
+and then launched the fleet.
+
+Every instance failed in the same way: none registered with Session Manager,
+EC2 instance status checks went `impaired` and never recovered, network output
+stayed at zero, and the cached console output was empty. A minimal `m7i.large`
+probe launched from the same image in the default VPC with no user data, no
+benchmark security group, and no module involvement failed identically, which
+isolated the fault to the image rather than to the VPC, subnet, security group,
+instance profile, or user data.
+
+`aws ec2 get-console-output --latest` then gave the cause directly:
+
+[source,text]
+----
+[    9.371873] systemd[1]: System cannot boot: Missing /etc/machine-id and /etc is mounted read-only.
+----
+
+The provisioner generalized the image with
+`cloud-init clean --logs --machine-id`. That flag removes the machine identity,
+and Debian 12's systemd refuses to boot when `/etc/machine-id` is missing while
+`/etc` is still read-only during early boot. The instances never reached
+`network-online.target`, so the Session Manager agent never registered, the
+benchmark startup script failed, and the node was unusable. The GCP provisioner
+keeps `--machine-id` and boots correctly under Google's guest environment, so
+its recipe is unchanged.
+
+The fix is one line: the AWS provisioner now runs `cloud-init clean --logs`
+only, and the first boot regenerates the identity, which is what an EC2 image is
+expected to do. Two smaller lessons are folded into the tooling: the evidence
+collector now requests `--latest` console output, because the cached form is
+empty for an instance whose console has never been polled, and this record
+confirms the value of the smoke test, since the same fault would otherwise have
+surfaced only after the fleet was provisioned for a paid run.
+
+Failure cleanup: the unbootable image was deregistered and its snapshot deleted,
+the smoke topology was destroyed with all ten resources, and the probe instance
+was terminated. The failed attempt cost about $0.95 of metered usage: roughly
+46 minutes of `m7i.large` builder, 21 minutes of the three-node fleet, 8 minutes
+of probe, and their gp3 volumes.
 
 === AWS Stage B scaling runtime and cost estimate
 
