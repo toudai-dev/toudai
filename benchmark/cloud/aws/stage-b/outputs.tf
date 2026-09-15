@@ -30,6 +30,28 @@ output "maximum_lifetime_hours" {
   value = var.max_lifetime_hours
 }
 
+# Echoed so an operator or an unattended teardown can destroy with exactly the
+# inputs this topology was applied with, without having to remember them.
+output "image" {
+  value = var.image
+}
+
+output "vpc_id" {
+  value = var.vpc_id
+}
+
+output "subnet_id" {
+  value = var.subnet_id
+}
+
+output "security_group_id" {
+  value = var.security_group_id
+}
+
+output "budget_topic_arn" {
+  value = var.budget_topic_arn
+}
+
 output "session_manager_targets" {
   description = "Instance IDs for `aws ssm start-session`; there is no inbound SSH path."
   value = concat(
