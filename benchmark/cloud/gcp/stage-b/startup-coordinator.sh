@@ -30,6 +30,10 @@ UNIT
   lscpu; free --bytes; lsblk --bytes --output NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS,MODEL
   flox activate --dir /opt/lighthouse -- clickhouse local --version
 } > "${state}/hardware.txt"
+
+# The metadata agent copies startup-script output to the serial console, so
+# mirror the host evidence there for retrieval when IAP SSH is unavailable.
+cat "${state}/hardware.txt"
 systemctl daemon-reload
 systemctl enable --now lighthouse-clickhouse.service
 for _attempt in $(seq 1 60); do
