@@ -1342,11 +1342,20 @@ Prepared and verified without a benchmark node ever running:
   verified byte-identical to GCS day by day against the committed inventory. The
   transfer runs at about 123 MiB/s and writes a SHA-256 manifest, so the S3 copy
   can be re-validated independently of the upload.
-- The GCP side is torn down: both benchmark images and the benchmark VPC,
-  subnet, and firewall rule are deleted, and the accepted and rejected artifacts
-  are archived to S3 under `results/gcp-stage-b-archive/` with a prefix README
-  that separates the accepted v8 stage and v6 load runs from the rejected
-  attempts. The GCS corpus bucket is deleted once the S3 copy is verified.
+- The GCP side is fully torn down. Both benchmark images and the benchmark VPC,
+  subnet, and firewall rule are deleted; the 2,267,583,743,310-byte corpus
+  bucket is emptied and deleted; and API inventory reports zero instances,
+  disks, snapshots, addresses, benchmark images, benchmark service accounts, and
+  buckets. Only Google's own `default` network and its default firewall rules
+  remain, which are not this experiment's resources. The accepted and rejected
+  artifacts were archived to S3 under `results/gcp-stage-b-archive/` first, with
+  a prefix README that separates the accepted v8 stage and v6 load runs from the
+  rejected attempts; all seven held Stage A objects and six sampled corpus
+  objects were verified by full SHA-256 against the local copies before the
+  bucket was removed. The Stage A objects carried a temporary hold that the RFD
+  describes as lasting "until it moves to the project's permanent artifact
+  store"; that condition is now met, so the hold was released as part of the
+  teardown rather than left behind.
 
 === AWS Stage B image defect and fix
 
