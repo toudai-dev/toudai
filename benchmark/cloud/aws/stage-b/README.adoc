@@ -72,6 +72,24 @@ bundles to the private artifact prefix, then `tofu destroy`.
 Repeat for shard counts 2 and 4. Compute, EBS, network, and storage charges
 accrue until resources are destroyed or reach their cap.
 
+== Approved execution order
+
+Run the four phases in order and destroy each topology before starting the next,
+so no two fleets bill at once. Every phase ends by uploading its archive, node
+evidence, and cost report, and by verifying them before destroy.
+
+. Boot-check the image at one shard for about twenty minutes: confirm the
+  instance-store device is detected, ClickHouse answers, the coordinator sees the
+  leaf, Session Manager registers, and the evidence collector returns a
+  checksummed bundle. Destroy immediately.
+. Run the one-shard topology. It is the same-hardware baseline for the scaling
+  comparison, because the accepted GCP one-shard result ran on Z3.
+. Run the two-shard topology.
+. Run the four-shard topology.
+
+Then delete the GCS corpus bucket, since the S3 copy has replaced it, and leave
+the network and guardrails in place until the results are reported.
+
 == Scaling run runbook
 
 Run one topology at a time and keep the exact revision on the load generator,
