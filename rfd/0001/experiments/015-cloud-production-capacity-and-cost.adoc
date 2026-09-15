@@ -951,7 +951,7 @@ Three tooling gaps were closed before provisioning:
   which still detects a partial source batch because a partial batch always
   changes the row count. Every post-batch cumulative gate and the final total
   gate keep their full checksum scan, so no validation semantics changed.
-  `benchmark/scripts/benchmark-load-gcp-distributed-test` drives the unmodified
+  `benchmark/scripts/benchmark-load-distributed-test` drives the unmodified
   loader against a local single-node ClickHouse instance and covers fresh load,
   idempotent resume, recovery with a lost marker, partial-batch rejection, and
   clean reload.

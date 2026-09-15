@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+# Resumable distributed Stage B loader.
+#
+# Renamed from `benchmark-load-gcp-distributed` when the AWS Stage B topology
+# was added: the object store is selected from the bucket URI scheme, so the
+# loader is cloud-neutral. The accepted GCP one-shard run was produced by the
+# previous name at the revision recorded in its own run manifest.
+set -Eeuo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=lib/object-store.sh
+source "${repo_root}/benchmark/scripts/lib/object-store.sh"
+shards="${1:-}"
+run_id="${2:-}"
+coordinator="${LIGHTHOUSE_CLUSTER_COORDINATOR_HOST:-}"
+leaf_spec="${LIGHTHOUSE_CLUSTER_LEAF_HOSTS:-}"
+# LIGHTHOUSE_CORPUS_BUCKET is the cloud-neutral name; the GCP-specific name is
+# still read so recorded runbooks keep working unchanged.
+bucket="${LIGHTHOUSE_CORPUS_BUCKET:-${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
+revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
+parallelism="${LIGHTHOUSE_GCP_LOAD_PARALLELISM:-2}"
+inventory="${LIGHTHOUSE_CORPUS_INVENTORY:-${LIGHTHOUSE_GCP_CORPUS_INVENTORY:-${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv}}"
+transform="${repo_root}/benchmark/clickhouse/gcp-parquet-to-events.sql"
+structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
+
+# Fail before any cluster work if the configured object store is unreachable.
+object_store_check "${bucket}"
+
+usage() {
+  echo "usage: LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=IP LIGHTHOUSE_CLUSTER_LEAF_HOSTS=IP,... $0 SHARDS RUN_ID" >&2
+  exit 2
+}
+[[ -n "${shards}" && -n "${run_id}" && -n "${coordinator}" && -n "${leaf_spec}" ]] || usage
+case "${shards}" in 1|2|4) ;; *) usage ;; esac
+[[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || usage
+if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 16 ]]; then
+  echo "LIGHTHOUSE_GCP_LOAD_PARALLELISM must be between 1 and 16" >&2
+  exit 2
+fi
+IFS=',' read -r -a leaves <<< "${leaf_spec}"
+if [[ "${#leaves[@]}" != "${shards}" ]]; then
+  echo "expected ${shards} leaf hosts, found ${#leaves[@]}" >&2
+  exit 2
+fi
+
+client=(clickhouse client --host "${coordinator}" --port 9000)
+leaf_client() { clickhouse client --host "${leaves[$(($1 - 1))]}" --port 9000 "${@:2}"; }
+"${client[@]}" --query "SELECT 1" >/dev/null
+for index in $(seq 1 "${shards}"); do leaf_client "${index}" --query "SELECT 1" >/dev/null; done
+
+run_dir="${runs_root}/${run_id}"
+state_dir="${run_dir}/state/days"
+mkdir -p "${state_dir}" "${run_dir}/evidence"
+config="shards=${shards}\ncoordinator=${coordinator}\nleaves=${leaf_spec}\nbucket=${bucket}\nparallelism=${parallelism}\ninventory_sha256=$(sha256sum "${inventory}" | cut -d' ' -f1)\n"
+if [[ -f "${run_dir}/config.txt" && "$(cat "${run_dir}/config.txt")" != "$(printf '%b' "${config}")" ]]; then
+  echo "run configuration does not match ${run_dir}/config.txt" >&2
+  exit 1
+fi
+if [[ "$(cat "${run_dir}/status" 2>/dev/null || true)" == completed ]]; then
+  echo "run is already complete: ${run_dir}"
+  exit 0
+fi
+printf '%b' "${config}" > "${run_dir}/config.txt"
+[[ -f "${run_dir}/started-at" ]] || date -u +%FT%TZ > "${run_dir}/started-at"
+echo initializing > "${run_dir}/status"
+
+failed=1
+failure_line="unknown"
+failure_command="unknown"
+failure_reason="unknown"
+record_error() {
+  failure_line="$2"
+  failure_command="$3"
+  [[ "${failure_reason}" != unknown ]] || failure_reason=command-failed
+}
+fail() {
+  failure_reason="$1"
+  echo "$2" >&2
+  return 1
+}
+on_exit() {
+  local rc=$?
+  if ((failed)); then
+    echo failed > "${run_dir}/status"
+    date -u +%FT%TZ > "${run_dir}/failed-at"
+    printf 'reason=%s\nexit_code=%s\nline=%s\ncommand=%q\n' \
+      "${failure_reason}" "${rc}" "${failure_line}" "${failure_command}" \
+      > "${run_dir}/failure.txt"
+  fi
+  return "${rc}"
+}
+trap 'record_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+trap on_exit EXIT
+
+local_schema="
+CREATE DATABASE IF NOT EXISTS benchmark_distributed;
+CREATE TABLE IF NOT EXISTS benchmark_distributed.events_local
+(
+  tenant_id UInt64,
+  dataset LowCardinality(String),
+  timestamp DateTime64(6, 'UTC'),
+  observed_at DateTime64(6, 'UTC'),
+  event_id String,
+  event_kind Enum8('event' = 1, 'log' = 2, 'span' = 3),
+  event_name LowCardinality(String),
+  body String,
+  service_name LowCardinality(String),
+  environment LowCardinality(String),
+  severity LowCardinality(String),
+  status_code LowCardinality(String),
+  trace_id String,
+  span_id String,
+  parent_span_id String,
+  span_kind LowCardinality(String),
+  duration_ns UInt64,
+  resource Map(LowCardinality(String), String),
+  scope Map(LowCardinality(String), String),
+  attributes Map(LowCardinality(String), String)
+)
+ENGINE = MergeTree
+PARTITION BY toDate(timestamp)
+ORDER BY (tenant_id, dataset, timestamp, event_id);"
+for index in $(seq 1 "${shards}"); do leaf_client "${index}" --multiquery --query "${local_schema}"; done
+"${client[@]}" --multiquery --query "
+CREATE DATABASE IF NOT EXISTS benchmark_distributed;
+CREATE TABLE IF NOT EXISTS benchmark_distributed.events
+(
+  tenant_id UInt64,
+  dataset LowCardinality(String),
+  timestamp DateTime64(6, 'UTC'),
+  observed_at DateTime64(6, 'UTC'),
+  event_id String,
+  event_kind Enum8('event' = 1, 'log' = 2, 'span' = 3),
+  event_name LowCardinality(String),
+  body String,
+  service_name LowCardinality(String),
+  environment LowCardinality(String),
+  severity LowCardinality(String),
+  status_code LowCardinality(String),
+  trace_id String,
+  span_id String,
+  parent_span_id String,
+  span_kind LowCardinality(String),
+  duration_ns UInt64,
+  resource Map(LowCardinality(String), String),
+  scope Map(LowCardinality(String), String),
+  attributes Map(LowCardinality(String), String)
+)
+ENGINE = Distributed(lighthouse, benchmark_distributed, events_local,
+  cityHash64(tenant_id, dataset, event_id));"
+
+global_state() {
+  "${client[@]}" --query "
+    SELECT count(), sum(sipHash64(event_id, timestamp, attributes, resource, body))
+    FROM benchmark_distributed.events FORMAT TSVRaw"
+}
+# MergeTree part headers answer count() without reading any column, so this is a
+# cheap state probe. The checksum scan above is O(accumulated corpus) and is
+# therefore reserved for the batch gates that actually need it.
+global_rows() {
+  "${client[@]}" --query "SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw"
+}
+expected_state() {
+  local through_day="$1"
+  awk -F '\t' -v through_day="${through_day}" \
+    'NR > 1 && $1 <= through_day {print $4 "\t" $5}' "${inventory}" |
+    clickhouse local --structure 'rows UInt64, checksum UInt64' --input-format TSV \
+      --query 'SELECT sum(rows), sum(checksum) FROM table FORMAT TSVRaw'
+}
+load_object() (
+  local object="$1"
+  local attempt object_file temp_dir
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/lighthouse-stage-b.XXXXXX")"
+  object_file="${temp_dir}/object.parquet"
+  trap 'rm -rf "${temp_dir}"' EXIT
+
+  # Authenticate and finish the object download before emitting Native rows so
+  # a transient credential failure cannot turn a partial stream into an insert.
+  for attempt in 1 2 3; do
+    rm -f "${object_file}"
+    if object_store_get "${object}" "${object_file}"; then
+      break
+    fi
+    if [[ "${attempt}" == 3 ]]; then
+      echo "failed to download ${object} after ${attempt} attempts" >&2
+      return 1
+    fi
+    sleep "$((attempt * 5))"
+  done
+  [[ -s "${object_file}" ]]
+  clickhouse local --max_threads=2 --input-format Parquet --structure "${structure}" \
+      --queries-file "${transform}" < "${object_file}" |
+    "${client[@]}" --receive_timeout=86400 --send_timeout=86400 \
+      --insert_distributed_sync=1 --query "INSERT INTO benchmark_distributed.events FORMAT Native"
+)
+
+printf 'day\trows\thot_checksum\tload_ms\tcompleted_at\n' > "${run_dir}/days.tsv.tmp"
+[[ -f "${run_dir}/days.tsv" ]] && tail -n +2 "${run_dir}/days.tsv" >> "${run_dir}/days.tsv.tmp"
+mv "${run_dir}/days.tsv.tmp" "${run_dir}/days.tsv"
+
+echo loading > "${run_dir}/status"
+previous_rows=0
+while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected_checksum; do
+  [[ "${day}" == day ]] && continue
+  marker="${state_dir}/${day}.done"
+  IFS=$'\t' read -r cumulative_rows cumulative_checksum <<< "$(expected_state "${day}")"
+
+  if [[ -f "${marker}" ]]; then
+    previous_rows="${cumulative_rows}"
+    continue
+  fi
+
+  remote_prefix="${bucket%/}/corpus/${day}"
+  mapfile -t objects < <(object_store_list "${remote_prefix}")
+  remote_bytes="$(object_store_bytes "${remote_prefix}")"
+  if [[ "${#objects[@]}" != "${expected_files}" || "${remote_bytes}" != "${expected_bytes}" ]]; then
+    fail corpus-mismatch "${day} corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${#objects[@]}/${remote_bytes}"
+  fi
+
+  IFS=$'\t' read -r current_rows <<< "$(global_rows)"
+  if [[ "${current_rows}" == "${cumulative_rows}" ]]; then
+    # The accumulated rows may already include this batch if an earlier attempt
+    # was interrupted after inserting it and before writing its marker. Only
+    # that ambiguous state needs the full checksum; a partial batch always
+    # changes the row count, so the probe above detects it either way.
+    IFS=$'\t' read -r current_rows current_checksum <<< "$(global_state)"
+    if [[ "${current_rows}" == "${cumulative_rows}" && "${current_checksum}" == "${cumulative_checksum}" ]]; then
+      printf 'recovered\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
+      printf '%s\t%s\t%s\t0\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "$(date -u +%FT%TZ)" >> "${run_dir}/days.tsv"
+      previous_rows="${cumulative_rows}"
+      continue
+    fi
+  fi
+  if [[ "${current_rows}" != "${previous_rows}" ]]; then
+    # Source folders can overlap event-time partitions, so a partial source
+    # batch cannot be removed safely without source provenance.
+    fail partial-source-batch "${day}: expected prior row count ${previous_rows}, found ${current_rows}"
+  fi
+
+  echo "${day}: loading ${expected_files} Parquet objects (${expected_rows} rows)"
+  started_ns="$(date +%s%N)"
+  pids=()
+  first_batch=1
+  for object in "${objects[@]}"; do
+    load_object "${object}" &
+    pids+=("$!")
+    if [[ "${#pids[@]}" == "${parallelism}" ]]; then
+      for pid in "${pids[@]}"; do wait "${pid}"; done
+      pids=()
+      if ((first_batch)); then
+        # Native input maps by field name. Verify the expected partition after
+        # one batch so a schema-name mismatch cannot consume an entire run.
+        first_batch_rows="$("${client[@]}" --param_day="${day}" --query "
+          SELECT count() FROM benchmark_distributed.events
+          WHERE toDate(timestamp) = {day:Date} FORMAT TSVRaw")"
+        if [[ "${first_batch_rows}" == 0 ]]; then
+          fail timestamp-partition-mismatch "${day}: first batch produced no rows in its timestamp partition"
+        fi
+        first_batch=0
+      fi
+    fi
+  done
+  for pid in "${pids[@]}"; do wait "${pid}"; done
+  duration_ms="$((($(date +%s%N) - started_ns) / 1000000))"
+  IFS=$'\t' read -r actual_rows actual_checksum <<< "$(global_state)"
+  if [[ "${actual_rows}" != "${cumulative_rows}" || "${actual_checksum}" != "${cumulative_checksum}" ]]; then
+    fail day-validation "${day} cumulative validation failed: expected ${cumulative_rows}/${cumulative_checksum}, found ${actual_rows}/${actual_checksum}"
+  fi
+  completed_at="$(date -u +%FT%TZ)"
+  printf 'loaded\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
+  printf '%s\t%s\t%s\t%s\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "${duration_ms}" "${completed_at}" >> "${run_dir}/days.tsv"
+  previous_rows="${cumulative_rows}"
+  remote_marker="${bucket%/}/artifacts/stage-b/${run_id}/days/${day}.done"
+  if ! object_store_exists "${remote_marker}"; then
+    object_store_put "${marker}" "${remote_marker}"
+  fi
+done < "${inventory}"
+
+echo validating > "${run_dir}/status"
+IFS=$'\t' read -r expected_total expected_total_checksum <<< "$(expected_state 9999-12-31)"
+IFS=$'\t' read -r actual_total actual_total_checksum <<< "$(global_state)"
+if [[ "${actual_total}" != "${expected_total}" || "${actual_total_checksum}" != "${expected_total_checksum}" ]]; then
+  fail total-validation "expected ${expected_total}/${expected_total_checksum}, found ${actual_total}/${actual_total_checksum}"
+fi
+
+printf 'leaf\trows\tbytes_on_disk\tactive_parts\n' > "${run_dir}/leaf-storage.tsv"
+for index in $(seq 1 "${shards}"); do
+  leaf_client "${index}" --query "
+    SELECT ${index}, sum(rows), sum(bytes_on_disk), count()
+    FROM system.parts WHERE active AND database='benchmark_distributed' AND table='events_local'
+    FORMAT TSVRaw" >> "${run_dir}/leaf-storage.tsv"
+  leaf_client "${index}" --query "
+    SELECT partition, name, rows, bytes_on_disk, marks, level
+    FROM system.parts WHERE active AND database='benchmark_distributed' AND table='events_local'
+    ORDER BY partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/leaf-${index}-parts.jsonl"
+done
+awk -F '\t' -v expected="${expected_total}" 'NR>1 {n+=$2} END {exit n != expected}' "${run_dir}/leaf-storage.tsv"
+
+cat > "${run_dir}/manifest.json" <<EOF
+{"run_id":"${run_id}","repository_revision":"${revision}","clickhouse_version":"$("${client[@]}" --query 'SELECT version() FORMAT TSVRaw')","rows":${expected_total},"shards":${shards},"replicas":1,"sharding_expression":"cityHash64(tenant_id, dataset, event_id)","sort_key":"(tenant_id, dataset, timestamp, event_id)","corpus_inventory_sha256":"$(sha256sum "${inventory}" | cut -d' ' -f1)"}
+EOF
+date -u +%FT%TZ > "${run_dir}/completed-at"
+echo completed > "${run_dir}/status"
+tar -C "${runs_root}" -czf "${run_dir}.tar.gz" "${run_id}"
+object_store_put "${run_dir}.tar.gz" "${bucket%/}/artifacts/stage-b/${run_id}/${run_id}.tar.gz"
+failed=0
+trap - EXIT
+echo "distributed load completed: ${run_dir}"

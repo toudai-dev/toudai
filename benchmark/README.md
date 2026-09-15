@@ -239,7 +239,7 @@ LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=10.142.0.10 \
 LIGHTHOUSE_CLUSTER_LEAF_HOSTS=10.142.0.11,10.142.0.12 \
 LIGHTHOUSE_BENCH_RUNS_ROOT="$HOME/lighthouse-stage-b/runs" \
 LIGHTHOUSE_BENCH_REVISION="$(jj log -r @- --no-graph -T commit_id)" \
-benchmark/scripts/benchmark-load-gcp-distributed \
+benchmark/scripts/benchmark-load-distributed \
   2 experiment-015-stage-b-load-v1-2s
 ```
 
@@ -252,7 +252,7 @@ markers and final run evidence are copied to the private experiment bucket.
 `LIGHTHOUSE_GCP_CORPUS_INVENTORY` overrides the committed inventory path. Each
 batch gate pays one checksum scan of the accumulated corpus; the pre-batch probe
 is a metadata-only row count, so a run does not pay two full-table scans per
-day. `benchmark/scripts/benchmark-load-gcp-distributed-test` exercises the
+day. `benchmark/scripts/benchmark-load-distributed-test` exercises the
 fresh-load, resume, recovery, and partial-batch paths against a local
 single-node ClickHouse instance.
 

@@ -17,7 +17,7 @@ destroy each topology immediately after exporting results and hardware evidence.
 Typical workflow is `tofu init`,
 `tofu plan -var shard_count=1 -out=stage-b.tfplan`, review, apply deliberately,
 start the resumable load, then launch
-`benchmark/scripts/benchmark-run-gcp-distributed-stage` as its guarded
+`benchmark/scripts/benchmark-run-distributed-stage` as its guarded
 continuation. The continuation waits for complete load validation before
 running raw queries and acceleration builds; it stops and uploads failure
 evidence if loading or either benchmark phase fails.
@@ -92,7 +92,7 @@ gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command 
      LIGHTHOUSE_CLUSTER_LEAF_HOSTS=LEAF_IPS \
      LIGHTHOUSE_GCP_LOAD_PARALLELISM=8 \
      LIGHTHOUSE_BENCH_REVISION=${revision} \
-     setsid nohup benchmark/scripts/benchmark-load-gcp-distributed SHARDS LOAD_RUN \
+     setsid nohup benchmark/scripts/benchmark-load-distributed SHARDS LOAD_RUN \
        > ~/load.log 2>&1 < /dev/null &'"
 ----
 
@@ -109,7 +109,7 @@ gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command 
      LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=LOAD_RUN \
      LIGHTHOUSE_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs \
      LIGHTHOUSE_BENCH_REVISION=${revision} \
-     setsid nohup benchmark/scripts/benchmark-run-gcp-distributed-stage SHARDS STAGE_RUN \
+     setsid nohup benchmark/scripts/benchmark-run-distributed-stage SHARDS STAGE_RUN \
        > ~/stage.log 2>&1 < /dev/null &'"
 ----
 
