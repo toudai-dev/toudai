@@ -1207,3 +1207,61 @@ at least 56 in `us-central1`, or an explicit decision to abandon the accepted Z3
 leaf baseline and re-establish a comparable one on a family that is not capped.
 The second option invalidates direct comparison with the accepted one-shard
 result and requires its own baseline run before any scaling claim.
+
+=== Local-SSD family alternatives in `us-central1`
+
+After the manual Z3 increase was denied as well, every local-SSD family was
+checked against its own quota. The cap is not specific to Z3:
+
+[options="header",cols="4*"]
+|===
+|Family |Local SSD |`us-central1` vCPU cap |Four leaves of at least 1.5 TiB
+
+|Z3
+|Titanium, 3,000 GiB on an 8-vCPU shape
+|24, increase denied
+|No, needs 32
+
+|C3
+|Titanium, 375 GiB per disk
+|`C3-CPUS` = 24
+|No
+
+|C4, C4A, C4D
+|Titanium, 375 GiB per disk
+|24
+|No
+
+|H4D
+|Titanium, 375 GiB per disk
+|none
+|No shape below 192 vCPU, and Preview
+
+|Z4D
+|`lssd` shapes listed
+|none
+|No billing SKUs in `us-central1`, not orderable
+
+|N4, E4, H3, C4N
+|none
+|200, 200, 88, 384
+|Not applicable
+
+|N2, N1
+|documented by Google, no `us-central1` SKU
+|N2 = 200
+|Unverified
+|===
+
+Z3 is uniquely SSD-dense: it pairs 3,000 GiB with 8 vCPUs, which is why a
+vCPU-based cap binds so early. The families with quota headroom carry no local
+SSD in this region, and the only uncapped local-SSD families either have no
+shape below 192 vCPUs or are not orderable. The published Local SSD machine
+series support table lists N2 and N1 as supporting Local SSD, but no
+`us-central1` Local SSD SKU exists for them, so that path is unverified rather
+than available.
+
+Consequence: no GCP local-SSD topology can host four leaves of the capacity the
+ten-day corpus requires under this project's quotas. The remaining directions
+are a reduced Z3 matrix, a network-storage re-baseline on a family with quota
+headroom, or another provider whose local-NVMe quota can be raised.
