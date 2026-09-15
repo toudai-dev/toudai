@@ -148,7 +148,7 @@ resource "aws_instance" "leaf" {
 
 resource "aws_instance" "coordinator" {
   ami                         = var.image
-  instance_type               = var.coordinator_machine_type
+  instance_type               = var.coordinator_instance_type
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [var.security_group_id]
   iam_instance_profile        = aws_iam_instance_profile.node.name
@@ -189,7 +189,7 @@ resource "aws_instance" "coordinator" {
 
 resource "aws_instance" "loadgen" {
   ami                         = var.image
-  instance_type               = var.loadgen_machine_type
+  instance_type               = var.loadgen_instance_type
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [var.security_group_id]
   iam_instance_profile        = aws_iam_instance_profile.node.name

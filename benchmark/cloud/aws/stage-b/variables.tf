@@ -69,13 +69,13 @@ variable "leaf_instance_type" {
   }
 }
 
-variable "coordinator_machine_type" {
+variable "coordinator_instance_type" {
   description = "Query coordinator shape; it holds no corpus data and only reduces leaf results."
   type        = string
   default     = "m7i.xlarge"
 }
 
-variable "loadgen_machine_type" {
+variable "loadgen_instance_type" {
   description = "Load generator shape; it only drives HTTP queries at the coordinator."
   type        = string
   default     = "m7i.4xlarge"
