@@ -1265,3 +1265,215 @@ Consequence: no GCP local-SSD topology can host four leaves of the capacity the
 ten-day corpus requires under this project's quotas. The remaining directions
 are a reduced Z3 matrix, a network-storage re-baseline on a family with quota
 headroom, or another provider whose local-NVMe quota can be raised.
+
+=== Stage B scaling moved to AWS
+
+Every local-SSD family in the GCP account was capped at 24 vCPUs, and both the
+automatic and the manually reviewed increases were denied, so the GCP path was
+abandoned rather than reduced. AWS replaces it for the scaling runs: the same
+Flox-pinned ClickHouse 26.8.2.7 closure, the same immutable corpus, the same
+schema, fixtures, cold/warm policy, telemetry, and correctness gates, and the
+same loader and stage scripts, which now select the object store from the bucket
+URI scheme instead of assuming Google Cloud.
+
+This is a hardware change, so the accepted GCP one-shard result is not a
+same-hardware baseline for a two- or four-shard AWS run. The AWS matrix
+therefore starts with its own one-shard topology, and scaling efficiency is
+measured within one hardware generation. The GCP one-shard result keeps its
+role as the accepted Stage B baseline and as the source of the measured phase
+timings the AWS estimate is built from.
+
+=== AWS Stage B topology and guardrails
+
+The AWS fleet is `shard_count` (1, 2, or 4) `i4i.4xlarge` serving leaves, one
+`m7i.xlarge` coordinator, and one `m7i.4xlarge` load generator in a single
+availability zone. A leaf carries 16 vCPU, 128 GiB RAM, and a 3,750 GB
+instance-store NVMe volume.
+
+The leaf shape follows from the accepted one-shard measurement rather than from
+convenience. That run left 1,400.6 GiB of hot parts plus 31.8 GiB of derived
+parts, with a 108.3 GiB largest part and a 150 GiB merge cap, so a leaf has to
+hold roughly 1,582 GiB before any reserve. The 1,875 GB `i7i.2xlarge` would sit
+at 90.6% full and would also halve the leaf vCPU count, which would confound the
+scaling measurement; `i4i.4xlarge` sits at 45.3%.
+
+EC2 has no provider-enforced `max_run_duration`, so the lifetime ceiling is
+enforced from outside the fleet. Every node schedules its own `shutdown -h` from
+user data, the topology sets `instance_initiated_shutdown_behavior =
+"terminate"`, and a scheduled watchdog Lambda independently terminates any
+instance tagged `experiment=015` that outlives the declared lifetime plus a
+grace period, whatever state its operating system is in. The watchdog's IAM
+policy is tag-conditioned, so it cannot terminate anything outside the
+experiment even if its own filters were wrong. A monthly account-wide budget
+adds forecasted and actual alerts and a stop action; the ceiling is account-wide
+because cost allocation tags need 24 hours to activate, which is longer than a
+topology lives.
+
+Cost controls that are not fixed by the experiment: single-AZ placement so no
+traffic is billed cross-AZ; a public subnet only so Session Manager and package
+mirrors work without a NAT gateway; a free S3 gateway endpoint for corpus reads
+and result writes; ClickHouse state on instance-store NVMe so no EBS data volume
+is provisioned; on-demand capacity only, because Spot would invalidate a
+multi-hour run by losing serving state; and a 45-day bucket expiry that removes
+a forgotten corpus without an operator.
+
+=== AWS Stage B scaling runtime and cost estimate
+
+The estimate carries over the phase timings measured on the accepted one-shard
+run and prices them with the current public `us-west-2` on-demand catalog, not
+with extrapolation from instance specifications. The measured loader wall clock
+was 17 hours 10 minutes 7 seconds, of which 8 hours 32 minutes 46 seconds was
+batch insert time and approximately 7.8 hours was the combined pre- and
+post-batch cumulative checksum scan. The pre-batch scan has since been replaced
+by a metadata-only row count, so the same run is expected to finish in roughly
+13.3 hours; the post-batch gates are unchanged.
+
+The AWS load generator has 16 vCPU against the accepted run's 14 and the leaf
+NVMe is at least as fast as the measured Titanium SSD, so carrying the GCP
+timings forward is conservative rather than optimistic.
+
+[options="header",cols="4*"]
+|===
+|Price |Unit |USD per unit |Source
+
+|`i4i.4xlarge` on-demand Linux
+|instance-hour
+|1.3730
+|AWS Price List bulk CSV, `us-west-2`
+
+|`m7i.xlarge` on-demand Linux
+|instance-hour
+|0.2016
+|AWS Price List bulk CSV, `us-west-2`
+
+|`m7i.4xlarge` on-demand Linux
+|instance-hour
+|0.8064
+|AWS Price List bulk CSV, `us-west-2`
+
+|gp3 EBS
+|GB-month
+|0.0800
+|AWS Price List bulk CSV, `us-west-2`
+
+|S3 Standard, first 51,200 GB
+|GB-month
+|0.0230
+|AWS Price List bulk CSV, `us-west-2`
+
+|Internet data transfer out, first 10,240 GB
+|GB
+|0.0900
+|AWS Price List bulk CSV, `us-west-2`
+|===
+
+The leaf rate already includes its 3,750 GB instance store, so unlike the GCP
+Z3 shape there is no separate local-SSD line item. Each node adds a 100 GB gp3
+root volume, which is 100 x 0.08 / 730 = $0.0109589 per hour.
+
+[options="header",cols="4*"]
+|===
+|Topology |Nodes |Hourly rate |Basis
+
+|1 shard x 1 replica
+|3
+|$2.4138767
+|1 leaf, coordinator, load generator, three root volumes
+
+|2 shards x 1 replica
+|4
+|$3.7978356
+|2 leaves, coordinator, load generator, four root volumes
+
+|4 shards x 1 replica
+|6
+|$6.5657534
+|4 leaves, coordinator, load generator, six root volumes
+|===
+
+[options="header",cols="4*"]
+|===
+|Phase |1 shard |2 shards |4 shards
+
+|Provision and readiness
+|0.4 h
+|0.4 h
+|0.4 h
+
+|Corpus reload and batch gates
+|13.3 h
+|11.5 h
+|10.5 h
+
+|Raw query matrix, 210 timings
+|3.4 h
+|2.2 h
+|1.5 h
+
+|Acceleration matrix, 150 timings and four builds
+|0.8 h
+|0.5 h
+|0.3 h
+
+|Evidence export, cost capture, and destroy
+|0.6 h
+|0.6 h
+|0.6 h
+
+|Total
+|18.5 h
+|15.2 h
+|13.3 h
+|===
+
+The one-shard reload is the measured optimized wall clock. The two- and
+four-shard figures reuse the phase model from the approved GCP scaling estimate,
+which held the load-generator-bound insert phase constant and shrank the
+parallelized cumulative checksum scans with shard count; the ten-day fixtures
+account for 86.6% of the one-shard raw phase and are expected to scale close to
+leaf count, while the shorter ranges carry fixed coordinator cost.
+
+[options="header",cols="4*"]
+|===
+|Topology |Expected cost |Ceiling at 24 h |Ceiling at 30 h
+
+|1 shard x 1 replica
+|$44.66 at 18.5 h
+|$57.93
+|$72.42
+
+|2 shards x 1 replica
+|$57.73 at 15.2 h
+|$91.15
+|$113.94
+
+|4 shards x 1 replica
+|$87.32 at 13.3 h
+|$157.58
+|$196.97
+
+|All three topologies
+|$189.71
+|$306.66
+|$383.32
+|===
+
+Shared costs sit outside every topology. The corpus is 1,116,601,405,252 bytes,
+1,116.6 GB, which is $25.68 per month at the listed Standard rate whether or not
+a benchmark runs; the 45-day expiry bounds its lifetime cost at roughly $38.5.
+Result archives add under 1 GB. Same-region object reads and all intra-zone
+traffic are free, the S3 gateway endpoint avoids the metered internet path, and
+S3 request charges for 2,245 corpus objects are under one cent, so network cost
+is effectively zero. The GCS bucket that this replaces cost about $42 per month
+and is deleted once the S3 copy is verified.
+
+Requested approval: $189.71 expected for the one-, two-, and four-shard AWS
+topologies together, plus the ongoing corpus storage. A 24-hour lifetime ceiling
+bounds the worst case at $306.66 and a 30-hour ceiling at $383.32; the
+30-hour ceiling is the recommended one because the one-shard reload has the
+least slack against its expected runtime. The current $250 budget ceiling is
+below both worst cases, so it should be raised before the runs: $350 with a
+24-hour ceiling, or $400 with the recommended 30-hour ceiling. Each topology is
+destroyed immediately after its archives, node evidence, and cost report are
+verified, so the expected spend is well under any of these ceilings.
+
