@@ -1338,10 +1338,13 @@ Prepared and verified without a benchmark node ever running:
   caught one real defect: the user-data wrapper appended a trailing newline, so
   the script a node executed was not byte-identical to the committed source. The
   templates now trim the file and the preflight enforces the identity.
-- The immutable ten-day corpus is uploading to S3 from the local copy, which was
-  verified byte-identical to GCS day by day against the committed inventory. The
-  transfer runs at about 123 MiB/s and writes a SHA-256 manifest, so the S3 copy
-  can be re-validated independently of the upload.
+- The immutable ten-day corpus is in S3, uploaded from the local copy at about
+  123 MiB/s. Every one of the ten days matches the committed inventory on object
+  count and byte total, 2,245 objects and 1,116,601,405,252 bytes, and six
+  boundary objects were additionally verified by full SHA-256 against the local
+  files. The upload also writes a SHA-256 manifest of every object; it is still
+  being generated locally because hashing 1.1 TB takes hours, and it is not a
+  prerequisite for any gate the loader applies.
 - The GCP side is fully torn down. Both benchmark images and the benchmark VPC,
   subnet, and firewall rule are deleted; the 2,267,583,743,310-byte corpus
   bucket is emptied and deleted; and API inventory reports zero instances,
@@ -1449,6 +1452,48 @@ no instance and no volume behind.
 
 The three smoke rounds together cost roughly $2 of metered usage, which is the
 price of finding all four defects before a paid run rather than during one.
+
+=== AWS Stage B first load attempt failed on a byte-formatting bug
+
+The first AWS phase started at 2026-09-15T21:49:19Z and failed its very first
+gate. The loader's own failure record named it exactly:
+
+[source,text]
+----
+reason=corpus-mismatch
+exit_code=1
+line=218
+command=return\ 1
+----
+
+and the log line showed why:
+
+[source,text]
+----
+2026-08-01 corpus mismatch: expected 224/113283993214, found 224/1.13284e+11
+----
+
+The object count was correct and the byte total was the same number written in
+scientific notation. Debian ships `mawk`, whose `print` renders a large integer
+that way, while the development machine's `gawk` prints it exactly; the shared
+object-store helper summed object sizes with `awk ... { print total }`. The gate
+was right to fail: a byte total that does not compare equal to the inventory
+cannot be trusted. The helper now uses `printf "%.0f"`, which is unambiguous
+across implementations, and the same latent bug in the GCS path — introduced by
+the object-store refactor, which converted the leading integer to a number
+instead of printing it as a string field — is fixed with it.
+
+The guarded continuation behaved as designed: it saw the loader fail, recorded
+`load-failed`, and uploaded its failure archive instead of proceeding to the
+query matrix. Two further defects were found and fixed before the retry: nodes
+could not read the staged benchmark revision because `results/` was write-only,
+and the runbook used `bash -lc` inside `flox activate`, where a login shell
+re-sources `/etc/profile` and wipes the `PATH` the activation just set.
+
+Re-verification after the fix is stronger than the sampled check it replaces:
+every one of the ten uploaded days was compared against the committed inventory
+and all ten match on object count and byte total, 1,116,601,405,252 bytes in
+total. The failed attempt cost about a minute of the three-node fleet.
 
 === AWS Stage B scaling runtime and cost estimate
 
