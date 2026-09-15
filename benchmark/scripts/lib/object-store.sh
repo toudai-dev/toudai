@@ -30,19 +30,23 @@ _object_store_s3_parts() {
 
 # Total bytes for a bucket and optional key prefix. JMESPath `sum()` rejects a
 # null projection, so the sizes are summed locally instead.
+#
+# `printf "%.0f"` rather than `print`: Debian ships mawk, whose `print` renders a
+# large integer in scientific notation, and a byte total of 1.13284e+11 silently
+# fails every comparison against the exact inventory.
 _object_store_s3_bytes() {
   local bucket="$1" key="$2"
   _object_store_aws s3api list-objects-v2 --bucket "${bucket}" --prefix "${key}" \
     --query 'Contents[].Size' --output text |
     tr '\t' '\n' |
-    awk '{ total += ($1 == "None" ? 0 : $1) } END { print total + 0 }'
+    awk '{ total += ($1 == "None" ? 0 : $1) } END { printf "%.0f\n", total }'
 }
 
 # `gcloud storage du --summarize` prints the byte count immediately before the
 # URL for a whole bucket and with a space for a prefix, so take the leading
 # integer rather than splitting on whitespace.
 _object_store_leading_int() {
-  awk 'match($0, /^[[:space:]]*[0-9]+/) { print substr($0, RSTART, RLENGTH) + 0 }'
+  awk 'match($0, /^[[:space:]]*[0-9]+/) { printf "%.0f\n", substr($0, RSTART, RLENGTH) }'
 }
 
 # Fail early, and with the right CLI named, when the store cannot be reached.
