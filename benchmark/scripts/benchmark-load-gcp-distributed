@@ -10,7 +10,7 @@ bucket="${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
 revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
 parallelism="${LIGHTHOUSE_GCP_LOAD_PARALLELISM:-2}"
-inventory="${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv"
+inventory="${LIGHTHOUSE_GCP_CORPUS_INVENTORY:-${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv}"
 transform="${repo_root}/benchmark/clickhouse/gcp-parquet-to-events.sql"
 structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
 
@@ -142,6 +142,12 @@ global_state() {
     SELECT count(), sum(sipHash64(event_id, timestamp, attributes, resource, body))
     FROM benchmark_distributed.events FORMAT TSVRaw"
 }
+# MergeTree part headers answer count() without reading any column, so this is a
+# cheap state probe. The checksum scan above is O(accumulated corpus) and is
+# therefore reserved for the batch gates that actually need it.
+global_rows() {
+  "${client[@]}" --query "SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw"
+}
 expected_state() {
   local through_day="$1"
   awk -F '\t' -v through_day="${through_day}" \
@@ -182,7 +188,6 @@ mv "${run_dir}/days.tsv.tmp" "${run_dir}/days.tsv"
 
 echo loading > "${run_dir}/status"
 previous_rows=0
-previous_checksum=0
 while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected_checksum; do
   [[ "${day}" == day ]] && continue
   marker="${state_dir}/${day}.done"
@@ -190,7 +195,6 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
 
   if [[ -f "${marker}" ]]; then
     previous_rows="${cumulative_rows}"
-    previous_checksum="${cumulative_checksum}"
     continue
   fi
 
@@ -201,18 +205,24 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
     fail corpus-mismatch "${day} corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${#objects[@]}/${remote_bytes}"
   fi
 
-  IFS=$'\t' read -r current_rows current_checksum <<< "$(global_state)"
-  if [[ "${current_rows}" == "${cumulative_rows}" && "${current_checksum}" == "${cumulative_checksum}" ]]; then
-    printf 'recovered\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
-    printf '%s\t%s\t%s\t0\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "$(date -u +%FT%TZ)" >> "${run_dir}/days.tsv"
-    previous_rows="${cumulative_rows}"
-    previous_checksum="${cumulative_checksum}"
-    continue
+  IFS=$'\t' read -r current_rows <<< "$(global_rows)"
+  if [[ "${current_rows}" == "${cumulative_rows}" ]]; then
+    # The accumulated rows may already include this batch if an earlier attempt
+    # was interrupted after inserting it and before writing its marker. Only
+    # that ambiguous state needs the full checksum; a partial batch always
+    # changes the row count, so the probe above detects it either way.
+    IFS=$'\t' read -r current_rows current_checksum <<< "$(global_state)"
+    if [[ "${current_rows}" == "${cumulative_rows}" && "${current_checksum}" == "${cumulative_checksum}" ]]; then
+      printf 'recovered\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
+      printf '%s\t%s\t%s\t0\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "$(date -u +%FT%TZ)" >> "${run_dir}/days.tsv"
+      previous_rows="${cumulative_rows}"
+      continue
+    fi
   fi
-  if [[ "${current_rows}" != "${previous_rows}" || "${current_checksum}" != "${previous_checksum}" ]]; then
+  if [[ "${current_rows}" != "${previous_rows}" ]]; then
     # Source folders can overlap event-time partitions, so a partial source
     # batch cannot be removed safely without source provenance.
-    fail partial-source-batch "${day}: expected prior state ${previous_rows}/${previous_checksum}, found ${current_rows}/${current_checksum}"
+    fail partial-source-batch "${day}: expected prior row count ${previous_rows}, found ${current_rows}"
   fi
 
   echo "${day}: loading ${expected_files} Parquet objects (${expected_rows} rows)"
@@ -248,7 +258,6 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
   printf 'loaded\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
   printf '%s\t%s\t%s\t%s\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "${duration_ms}" "${completed_at}" >> "${run_dir}/days.tsv"
   previous_rows="${cumulative_rows}"
-  previous_checksum="${cumulative_checksum}"
   remote_marker="${bucket%/}/artifacts/stage-b/${run_id}/days/${day}.done"
   if ! gcloud storage ls "${remote_marker}" >/dev/null 2>&1; then
     gcloud storage cp "${marker}" "${remote_marker}" --cache-control=no-store

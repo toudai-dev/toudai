@@ -244,10 +244,17 @@ benchmark/scripts/benchmark-load-gcp-distributed \
 ```
 
 The loader validates the remote object count and bytes before each day, checks
-the resulting day by row count and normalized-event checksum, and resumes at a
-validated day boundary. If a stream fails after partially inserting a day, the
-next invocation drops and rebuilds only that date partition. Completed-day
+the resulting day by cumulative row count and normalized-event checksum, and
+resumes at a validated day boundary. A partial source batch is refused instead
+of being deleted, because a source directory can overlap adjacent event-time
+partitions and only source provenance could bound the removal. Completed-day
 markers and final run evidence are copied to the private experiment bucket.
+`LIGHTHOUSE_GCP_CORPUS_INVENTORY` overrides the committed inventory path. Each
+batch gate pays one checksum scan of the accumulated corpus; the pre-batch probe
+is a metadata-only row count, so a run does not pay two full-table scans per
+day. `benchmark/scripts/benchmark-load-gcp-distributed-test` exercises the
+fresh-load, resume, recovery, and partial-batch paths against a local
+single-node ClickHouse instance.
 
 The existing distributed query and acceleration runners use the remote hosts
 when given the compatible adapter. A Stage B run sets the exact load/run IDs,
