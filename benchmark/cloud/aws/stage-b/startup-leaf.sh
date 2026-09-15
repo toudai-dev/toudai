@@ -19,9 +19,15 @@ shutdown -h "+${LIGHTHOUSE_MAX_LIFETIME_MINUTES}" "lighthouse experiment 015 sta
 install -d -m 0755 "${state}" /etc/clickhouse-server
 
 # Nitro instance-store volumes carry a stable by-id alias that the EBS root
-# volume never has. The fallback selects the only non-root block device so a
-# renamed alias fails loudly rather than silently mounting the wrong disk.
-mapfile -t store_disks < <(find /dev/disk/by-id -maxdepth 1 -type l -name 'nvme-Amazon_EC2_NVMe_Instance_Storage_*' 2>/dev/null | sort)
+# volume never has. AWS publishes several aliases for the same device (a plain
+# name, a `-ns-1` namespace alias, and a `_1` alias), so the targets are resolved
+# and deduplicated before counting. The fallback selects the only non-root block
+# device so a renamed alias fails loudly rather than silently mounting the wrong
+# disk.
+mapfile -t store_disks < <(
+  find /dev/disk/by-id -maxdepth 1 -type l -name 'nvme-Amazon_EC2_NVMe_Instance_Storage_*' -print0 2>/dev/null |
+    xargs -0 -r readlink -f | sort -u
+)
 if (( ${#store_disks[@]} == 0 )); then
   root_source="$(findmnt -no SOURCE /)"
   root_disk="/dev/$(lsblk -dno PKNAME "${root_source}" 2>/dev/null | head -n 1)"
@@ -48,6 +54,14 @@ printf '%s' "${LIGHTHOUSE_CLICKHOUSE_CONFIG_B64}" | base64 -d > /etc/clickhouse-
 printf '%s' "${LIGHTHOUSE_CLICKHOUSE_USERS_B64}" | base64 -d > /etc/clickhouse-server/clickhouse-users.xml
 chown -R lighthouse:lighthouse /etc/clickhouse-server
 
+# Resolve the ClickHouse binary once, before the server starts. Two concurrent
+# first activations of the same Flox environment race on its activation state
+# directory and the loser exits with EACCES, so probing through `flox activate`
+# while systemd starts the server restarted the server twice before it settled.
+# One activation, reused, removes the race.
+clickhouse_bin="$(flox activate --dir /opt/lighthouse -- bash -c 'command -v clickhouse')"
+[[ -x "${clickhouse_bin}" ]] || { echo "clickhouse binary not found in the image" >&2; exit 1; }
+
 cat > /etc/systemd/system/lighthouse-clickhouse.service <<'UNIT'
 [Unit]
 Description=Lighthouse ClickHouse 26.8.2.7
@@ -56,6 +70,12 @@ After=network-online.target
 User=lighthouse
 Group=lighthouse
 Environment=FLOX_DISABLE_METRICS=true
+# Flox stores activation state under the runtime directory, which does not exist
+# for a user without a login session; without it the first activation can fail
+# with EACCES and the server restarts before it settles.
+RuntimeDirectory=lighthouse-clickhouse
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/lighthouse-clickhouse
 ExecStart=/usr/bin/flox activate --dir /opt/lighthouse -- clickhouse server --config-file=/etc/clickhouse-server/config.xml
 Restart=on-failure
 LimitNOFILE=1048576
@@ -76,7 +96,7 @@ UNIT
   free --bytes
   lsblk --bytes --output NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS,MODEL
   findmnt /mnt/disks/clickhouse
-  flox activate --dir /opt/lighthouse -- clickhouse local --version
+  "${clickhouse_bin}" local --version
 } > "${state}/hardware.txt"
 
 # EC2 exposes the same evidence through `aws ec2 get-console-output`, so mirror
@@ -85,7 +105,7 @@ cat "${state}/hardware.txt"
 systemctl daemon-reload
 systemctl enable --now lighthouse-clickhouse.service
 for _attempt in $(seq 1 60); do
-  if flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT 1" >/dev/null 2>&1; then
+  if "${clickhouse_bin}" client --query "SELECT 1" >/dev/null 2>&1; then
     touch "${state}/READY"
     exit 0
   fi

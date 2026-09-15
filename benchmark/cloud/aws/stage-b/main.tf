@@ -119,6 +119,12 @@ resource "aws_instance" "leaf" {
   # abandoned run cannot bill past its declared lifetime.
   instance_initiated_shutdown_behavior = "terminate"
 
+  # The whole node bootstrap is user data, and cloud-init runs it once per
+  # instance. Without this, a user-data change stops and starts the instance
+  # instead of replacing it, cloud-init sees the same instance identity and
+  # skips the scripts, and the node silently keeps running the old bootstrap.
+  user_data_replace_on_change = true
+
   root_block_device {
     volume_size           = var.root_volume_size_gb
     volume_type           = "gp3"
@@ -161,6 +167,12 @@ resource "aws_instance" "coordinator" {
 
   instance_initiated_shutdown_behavior = "terminate"
 
+  # The whole node bootstrap is user data, and cloud-init runs it once per
+  # instance. Without this, a user-data change stops and starts the instance
+  # instead of replacing it, cloud-init sees the same instance identity and
+  # skips the scripts, and the node silently keeps running the old bootstrap.
+  user_data_replace_on_change = true
+
   root_block_device {
     volume_size           = var.root_volume_size_gb
     volume_type           = "gp3"
@@ -201,6 +213,12 @@ resource "aws_instance" "loadgen" {
   }
 
   instance_initiated_shutdown_behavior = "terminate"
+
+  # The whole node bootstrap is user data, and cloud-init runs it once per
+  # instance. Without this, a user-data change stops and starts the instance
+  # instead of replacing it, cloud-init sees the same instance identity and
+  # skips the scripts, and the node silently keeps running the old bootstrap.
+  user_data_replace_on_change = true
 
   root_block_device {
     volume_size           = var.root_volume_size_gb

@@ -52,6 +52,10 @@ set -u
 state=/var/lib/lighthouse-stage-b
 evidence="\${state}/evidence.txt"
 mkdir -p "\${state}"
+# Resolve the client once rather than activating the environment per query: a
+# second activation while the server's own activation is starting can fail with
+# EACCES and restart the server.
+clickhouse_bin="\$(flox activate --dir /opt/lighthouse -- which clickhouse)"
 {
   echo "### node"
   hostname
@@ -63,13 +67,13 @@ mkdir -p "\${state}"
   echo "### block_devices"
   lsblk --bytes --output NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS
   echo "### clickhouse_version"
-  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT version()" 2>&1 || echo "clickhouse client unavailable"
+  "\${clickhouse_bin}" client --query "SELECT version()" 2>&1 || echo "clickhouse client unavailable"
   echo "### clickhouse_asynchronous_metrics"
-  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT metric, value FROM system.asynchronous_metrics WHERE metric IN ('MemoryResident', 'MemoryVirtual', 'Uptime', 'LoadAverage1', 'FilesystemMainPathAvailableBytes', 'FilesystemMainPathTotalBytes') ORDER BY metric FORMAT TSVRaw" 2>&1 || true
+  "\${clickhouse_bin}" client --query "SELECT metric, value FROM system.asynchronous_metrics WHERE metric IN ('MemoryResident', 'MemoryVirtual', 'Uptime', 'LoadAverage1', 'FilesystemMainPathAvailableBytes', 'FilesystemMainPathTotalBytes') ORDER BY metric FORMAT TSVRaw" 2>&1 || true
   echo "### table_storage"
-  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT table, sum(rows), sum(bytes_on_disk), count() FROM system.parts WHERE active AND database = 'benchmark_distributed' GROUP BY table ORDER BY table FORMAT TSVRaw" 2>&1 || true
+  "\${clickhouse_bin}" client --query "SELECT table, sum(rows), sum(bytes_on_disk), count() FROM system.parts WHERE active AND database = 'benchmark_distributed' GROUP BY table ORDER BY table FORMAT TSVRaw" 2>&1 || true
   echo "### query_log"
-  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT count(), min(event_time), max(event_time) FROM system.query_log FORMAT TSVRaw" 2>&1 || true
+  "\${clickhouse_bin}" client --query "SELECT count(), min(event_time), max(event_time) FROM system.query_log FORMAT TSVRaw" 2>&1 || true
   echo "### service"
   systemctl is-active lighthouse-clickhouse.service 2>&1 || true
 } | tee "\${evidence}"
