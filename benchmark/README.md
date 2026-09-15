@@ -275,3 +275,19 @@ benchmark/scripts/benchmark-run-distributed-queries \
 
 The cloud run disables the load-generator-only host sampler; startup evidence
 and provider metrics must be collected for every coordinator and leaf instead.
+
+Capture the topology's metered usage and price it with the current public
+catalog before destroying it:
+
+```bash
+benchmark/scripts/benchmark-gcp-stage-b-cost \
+  experiment-015-stage-b-v1-2s .tmp/experiment-015/stage-b/v1-2s/cost
+```
+
+The cost report reads the live instance inventory, the
+`compute.googleapis.com/instance/uptime` metered series, and the Cloud Billing
+Catalog SKUs for the shapes in use. It prices instance core, RAM, integrated
+local SSD, and boot-disk hours, and it records the bucket's object bytes for
+the shared storage that is not attributable to one topology. It is a
+listed-price report for metered usage, not a metered invoice: without a billing
+export the exact invoiced amount remains unverifiable.
