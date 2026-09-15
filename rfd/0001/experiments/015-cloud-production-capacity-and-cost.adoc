@@ -931,3 +931,212 @@ This establishes the GCP one-shard Stage B baseline; it does not establish
 horizontal scaling efficiency or select a production platform. The two- and
 four-shard runs, current billing export, provider comparisons, replicated
 failure-domain tests, and soak work remain open.
+
+=== Stage B scaling preparation and approval packet
+
+Cost-free preparation for the two- and four-shard runs completed on 2026-09-15
+without creating billable resources. The immutable corpus was re-verified
+remotely against the committed inventory: every one of the ten days matched its
+expected object count and byte total, 2,245 Parquet objects and
+1,116,601,405,252 bytes in total. The project had no instance and no disk
+before preparation, the OpenTofu configuration still formats and validates, and
+the loader, cost, and evidence scripts pass ShellCheck.
+
+Three tooling gaps were closed before provisioning:
+
+- The loader re-read the entire accumulated corpus for a checksum before and
+  after every source batch. On the accepted one-shard run those scans added
+  approximately 7.8 hours to a load whose measured insert time was 8 hours
+  32 minutes 46 seconds. The pre-batch gate is now a metadata-only row count,
+  which still detects a partial source batch because a partial batch always
+  changes the row count. Every post-batch cumulative gate and the final total
+  gate keep their full checksum scan, so no validation semantics changed.
+  `benchmark/scripts/benchmark-load-gcp-distributed-test` drives the unmodified
+  loader against a local single-node ClickHouse instance and covers fresh load,
+  idempotent resume, recovery with a lost marker, partial-batch rejection, and
+  clean reload.
+- No run preserved metered cost. `benchmark/scripts/benchmark-gcp-stage-b-cost`
+  snapshots the live instance inventory, the metered
+  `compute.googleapis.com/instance/uptime` series, the machine-type shapes, and
+  the Cloud Billing Catalog SKUs for those shapes, then prices instance core,
+  RAM, integrated local SSD, and boot-disk hours.
+- Node hardware evidence was only recoverable by hand.
+  `benchmark/scripts/benchmark-collect-gcp-stage-b-evidence` reads the
+  coordinator and every leaf over IAP SSH, falls back to the serial console,
+  and writes a checksummed bundle. The startup scripts now mirror
+  `hardware.txt` to that console.
+
+=== Stage B scaling runtime and cost estimate
+
+The estimate uses the accepted one-shard run's metered uptime and the current
+public `us-central1` on-demand catalog, not extrapolation from instance
+specifications.
+
+Cloud Monitoring metered the accepted one-shard topology at 33.46 leaf hours,
+33.43 coordinator hours, and 33.34 load-generator hours for 21.4 hours of
+benchmark activity. At the catalog prices below that run cost $59.20 of leaf
+compute and local SSD, $4.48 of coordinator, $23.80 of load generator, and
+$1.37 of boot disk, or $88.85 in total. This is listed price for metered usage;
+because no billing export was preserved, the invoiced amount remains
+unverifiable and the same limitation applies to the runs below.
+
+[options="header",cols="3*"]
+|===
+|Billing SKU |Unit |USD per unit
+
+|Z3 Instance Core running in Americas
+|vCPU-hour
+|0.04965310
+
+|Z3 Instance Ram running in Americas
+|GiB-hour
+|0.00665530
+
+|Z3 Instance Local SSD running in Americas
+|GiB-month
+|0.08000000
+
+|E2 Instance Core running in Americas
+|vCPU-hour
+|0.02181159
+
+|E2 Instance Ram running in Americas
+|GiB-hour
+|0.00292353
+
+|N2 Custom Instance Core running in Americas
+|vCPU-hour
+|0.03319155
+
+|N2 Custom Instance Ram running in Americas
+|GiB-hour
+|0.00444885
+
+|Balanced PD Capacity
+|GiB-month
+|0.10000000
+
+|Network Inter Zone Data Transfer Out
+|GiB
+|0.01000000
+
+|Standard Storage US Regional
+|GiB-month
+|0.02000000
+|===
+
+[options="header",cols="4*"]
+|===
+|Derived rate |Shape |Storage |USD per hour
+
+|`z3-highmem-14-standardlssd`
+|14 vCPU, 112 GiB
+|3,000 GiB Titanium SSD
+|1.76930412
+
+|`e2-standard-4`
+|4 vCPU, 16 GiB
+|100 GiB boot disk
+|0.13402284
+
+|`n2-custom-14-57344`
+|14 vCPU, 56 GiB
+|100 GiB boot disk
+|0.71381730
+
+|Boot disk, counted separately
+|100 GiB `pd-balanced`
+|—
+|0.01369863
+|===
+
+The reload dominates both runs. The load generator, not the leaves, was the
+ingestion bottleneck at 184,921 measured rows/s, so the measured 8.53-hour
+insert phase is held constant while the one post-batch cumulative checksum scan
+per day parallelizes across shards and shrinks with shard count. The ten-day
+fixtures account for 86.6% of the one-shard raw phase and are expected to
+scale close to leaf count, while the shorter ranges carry fixed coordinator
+cost. Acceleration builds are leaf-local and split with shard count.
+
+[options="header",cols="4*"]
+|===
+|Phase |2 shards |4 shards |Basis
+
+|Provision and readiness
+|0.4 h
+|0.4 h
+|Validated image and startup scripts
+
+|Corpus reload and batch gates
+|11.5 h
+|10.5 h
+|8.53 h measured inserts plus parallelized cumulative checksum scans
+
+|Raw query matrix, 210 timings
+|2.2 h
+|1.5 h
+|One-shard raw phase was 3.39 h
+
+|Acceleration matrix, 150 timings and four builds
+|0.5 h
+|0.3 h
+|One-shard acceleration phase was 0.84 h
+
+|Evidence export, cost capture, and destroy
+|0.6 h
+|0.6 h
+|Archive upload, node collection, reviewed destroy
+
+|Total
+|15.2 h
+|13.3 h
+|
+|===
+
+[options="header",cols="4*"]
+|===
+|Topology |Hourly rate |Expected cost |Provider-enforced ceiling
+
+|2 shards x 1 replica
+|$4.4412429
+|$67.5
+|$159.9 at 36 h
+
+|4 shards x 1 replica
+|$8.0072484
+|$106.5
+|$288.3 at 36 h
+
+|Both topologies
+|—
+|$174.0
+|$448.2 at 36 h
+|===
+
+A 24-hour provider-enforced ceiling instead of the merged 36-hour default
+bounds both topologies at $298.76 and still leaves roughly 50% headroom over
+the expected 15.2-hour and 13.3-hour runs.
+
+Shared costs are outside both topologies. The corpus bucket currently holds
+2,266,758,374,310 bytes, 2,111 GiB, which is $42.23 per month at the listed
+regional Standard rate whether or not a benchmark runs; most of it is the
+rejected July corpus. Same-region object reads and all intra-zone traffic are
+free. Inter-zone egress is listed at $0.01/GiB and the one-shard coordinator
+reduction traffic was under 0.4 GB for an entire raw matrix, so even a
+zone-separated layout would add cents rather than dollars.
+
+Requested approval: the expected spend is $174.0 and the planning figure with
+contingency is $208.0. Approval for $300 with a 24-hour provider-enforced
+deletion ceiling bounds the worst case at $298.76. The merged 36-hour default
+would bound it at $448.20 and is the safer choice if a load slower than
+expected must not be cut off mid-run. Either way each topology is destroyed
+immediately after its archives, node evidence, and cost report are verified.
+
+Two failure modes are expected rather than hypothetical. The 4-shard
+coordinator shares 16 GiB with its own ClickHouse server, so a coordinator
+memory limit is the most likely new failure; the one-shard coordinator merged
+at a 6.1 MB peak, and any failure will be diagnosed from the query log before
+a configuration change. The load generator remains the ingestion bottleneck at
+every shard count. Horizontal scaling divides per-shard scan work; it does not
+make arbitrary ten-day scans interactive, and the results will be reported
+without that claim.

@@ -780,6 +780,11 @@ criterion.
 - [X] Complete, validate, preserve, and tear down the GCP Stage B one-shard
   baseline: 5.69B rows, 210 raw timings, 150 accelerated timings, complete
   coordinator and leaf query telemetry, and 150 passing correctness checks.
+- [X] Prepare the two- and four-shard Stage B scaling run: remove the redundant
+  pre-batch corpus scan from the distributed loader, add metered-cost and
+  node-evidence collectors, re-verify the immutable ten-day corpus inventory,
+  and record the runtime and maximum-cost estimate for explicit budget
+  approval.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
   with the completed same-cloud GCP run, then complete the two- and four-shard
   10 TB scaling matrix and run replicated failure-domain, sustained-ingestion,
