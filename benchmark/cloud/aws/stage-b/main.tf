@@ -63,9 +63,13 @@ resource "aws_iam_role_policy_attachment" "session_manager" {
 
 data "aws_iam_policy_document" "node_access" {
   statement {
-    sid       = "ReadImmutableCorpus"
-    actions   = ["s3:GetObject"]
-    resources = [local.corpus_objects, local.manifest_objects]
+    sid     = "ReadImmutableCorpus"
+    actions = ["s3:GetObject"]
+    # Corpus objects stay read-only for the whole experiment. Result objects are
+    # also readable so a node can stage the benchmark revision and verify what it
+    # exported; they were already writable, so this grants no new authority over
+    # the corpus.
+    resources = [local.corpus_objects, local.manifest_objects, local.result_objects]
   }
 
   statement {

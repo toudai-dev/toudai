@@ -98,6 +98,10 @@ Flox environment, because `clickhouse` and `aws` are not on the default `PATH`.
 Session Manager runs commands without an interactive session, so this runbook
 uses `send-command` throughout:
 
+Note that node commands use `bash -c`, not `bash -lc`: a login shell re-sources
+`/etc/profile`, which overwrites the `PATH` that `flox activate` just set, so
+`clickhouse` and `aws` become unreachable.
+
 [source,shell]
 ----
 region=us-west-2
@@ -140,7 +144,7 @@ ssm_run "${loadgen_id}" "
   mkdir -p ~/lighthouse
   aws s3 cp ${bucket}/results/LOAD_RUN/lighthouse-${revision}.tar.gz ~/lighthouse.tar.gz
   tar -xzf ~/lighthouse.tar.gz -C ~/lighthouse
-  flox activate --dir /opt/lighthouse -- bash -lc '
+  flox activate --dir /opt/lighthouse -- bash -c '
     clickhouse local --version
     aws s3 ls ${bucket}/corpus/2026-08-01/ | head -2
     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator_ip} \\
@@ -156,7 +160,7 @@ recoverable rather than fatal:
 [source,shell]
 ----
 ssm_run "${loadgen_id}" "
-  flox activate --dir /opt/lighthouse -- bash -lc '
+  flox activate --dir /opt/lighthouse -- bash -c '
     cd ~/lighthouse
     export LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator_ip}
     export LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips}
@@ -175,7 +179,7 @@ Launch the guarded continuation the same way. It waits for the loader's
 [source,shell]
 ----
 ssm_run "${loadgen_id}" "
-  flox activate --dir /opt/lighthouse -- bash -lc '
+  flox activate --dir /opt/lighthouse -- bash -c '
     cd ~/lighthouse
     export LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator_ip}
     export LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips}
