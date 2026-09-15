@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Collect per-node Stage B host evidence before the AWS topology is destroyed.
+#
+# The startup scripts write hardware.txt on every node, but nothing else copies
+# it off the instance. This drives the coordinator and every leaf through
+# Session Manager, captures the command output, and additionally has each node
+# upload a full evidence bundle to the run's result prefix so nothing depends on
+# the collector still being alive. Falls back to the EC2 console output when
+# Session Manager is unavailable, which is the AWS equivalent of the GCP
+# collector's serial-console fallback.
+set -Eeuo pipefail
+
+region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
+profile_args=()
+[[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]] && profile_args=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
+instance_filter="${LIGHTHOUSE_AWS_INSTANCE_FILTER:-Name=tag:experiment,Values=015 Name=tag:stage,Values=b Name=instance-state-name,Values=running,pending}"
+bucket="${LIGHTHOUSE_CORPUS_BUCKET:-s3://lighthouse-exp015-benchmark-828361646739}"
+attempts="${LIGHTHOUSE_AWS_SSM_ATTEMPTS:-3}"
+
+run_id="${1:-}"
+out_dir="${2:-}"
+if [[ -z "${run_id}" || -z "${out_dir}" ]]; then
+  echo "usage: $0 RUN_ID OUTPUT_DIR" >&2
+  echo "env: LIGHTHOUSE_AWS_PROFILE, LIGHTHOUSE_AWS_REGION, LIGHTHOUSE_CORPUS_BUCKET," >&2
+  echo "     LIGHTHOUSE_AWS_INSTANCE_FILTER, LIGHTHOUSE_AWS_SSM_ATTEMPTS" >&2
+  exit 2
+fi
+[[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid run ID: ${run_id}" >&2; exit 2; }
+[[ "${attempts}" =~ ^[1-9][0-9]*$ ]] || { echo "LIGHTHOUSE_AWS_SSM_ATTEMPTS must be a positive integer" >&2; exit 2; }
+
+aws_cmd=(aws "${profile_args[@]}" --region "${region}")
+mkdir -p "${out_dir}"
+nodes_file="${out_dir}/nodes.tsv"
+remote_prefix="${bucket%/}/results/${run_id}/nodes"
+
+# shellcheck disable=SC2086
+"${aws_cmd[@]}" ec2 describe-instances --filters ${instance_filter} \
+  --query 'Reservations[].Instances[].[InstanceId, Tags[?Key==`Name`].Value | [0], Tags[?Key==`role`].Value | [0]]' \
+  --output text | LC_ALL=C sort > "${nodes_file}"
+if [[ ! -s "${nodes_file}" ]]; then
+  echo "no matching instances; collect evidence before destroying the topology" >&2
+  exit 1
+fi
+cat "${nodes_file}"
+
+# Runs on the remote node. Kept free of locally expanded variables so the same
+# text reaches the remote shell unchanged. The bundle upload is best effort: it
+# is what preserves full fidelity, but a node whose Flox environment is broken
+# must still yield the Session Manager capture.
+read -r -d '' remote_command <<REMOTE || true
+set -u
+state=/var/lib/lighthouse-stage-b
+evidence="\${state}/evidence.txt"
+mkdir -p "\${state}"
+{
+  echo "### node"
+  hostname
+  date --utc --iso-8601=seconds
+  echo "### hardware"
+  cat "\${state}/hardware.txt" 2>/dev/null || echo "hardware.txt missing"
+  echo "### mount"
+  df -h /mnt/disks/clickhouse 2>/dev/null || df -h /var/lib/lighthouse-clickhouse 2>/dev/null || df -h /
+  echo "### block_devices"
+  lsblk --bytes --output NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS
+  echo "### clickhouse_version"
+  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT version()" 2>&1 || echo "clickhouse client unavailable"
+  echo "### clickhouse_asynchronous_metrics"
+  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT metric, value FROM system.asynchronous_metrics WHERE metric IN ('MemoryResident', 'MemoryVirtual', 'Uptime', 'LoadAverage1', 'FilesystemMainPathAvailableBytes', 'FilesystemMainPathTotalBytes') ORDER BY metric FORMAT TSVRaw" 2>&1 || true
+  echo "### table_storage"
+  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT table, sum(rows), sum(bytes_on_disk), count() FROM system.parts WHERE active AND database = 'benchmark_distributed' GROUP BY table ORDER BY table FORMAT TSVRaw" 2>&1 || true
+  echo "### query_log"
+  flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT count(), min(event_time), max(event_time) FROM system.query_log FORMAT TSVRaw" 2>&1 || true
+  echo "### service"
+  systemctl is-active lighthouse-clickhouse.service 2>&1 || true
+} | tee "\${evidence}"
+
+# The Session Manager API truncates captured output at 24 KB, so the same
+# evidence is also archived to the run prefix where it cannot be cut short.
+if flox activate --dir /opt/lighthouse -- aws s3 cp "\${evidence}" \
+  "${remote_prefix}/\$(hostname).txt" --only-show-errors --no-progress >/dev/null 2>&1; then
+  echo "### archived"
+  echo "${remote_prefix}/\$(hostname).txt"
+else
+  echo "### archived"
+  echo "bundle upload unavailable"
+fi
+REMOTE
+
+failures=0
+# A failed remote command still carries the evidence of the failure, so the
+# capture accepts any terminal status rather than only success.
+ssm_capture() {
+  local instance_id="$1" target="$2" command_id status
+  command_id="$("${aws_cmd[@]}" ssm send-command --instance-ids "${instance_id}" \
+    --document-name AWS-RunShellScript --comment "lighthouse stage b evidence" \
+    --parameters "$(python3 -c 'import json,sys; print(json.dumps({"commands": [sys.stdin.read()]}))' <<< "${remote_command}")" \
+    --query 'Command.CommandId' --output text 2>/dev/null)" || return 1
+  [[ -n "${command_id}" ]] || return 1
+
+  status="Pending"
+  for _poll in $(seq 1 120); do
+    status="$("${aws_cmd[@]}" ssm get-command-invocation --command-id "${command_id}" \
+      --instance-id "${instance_id}" --query 'Status' --output text 2>/dev/null || echo Pending)"
+    case "${status}" in
+      Pending|InProgress|Delayed) sleep 5 ;;
+      *) break ;;
+    esac
+  done
+  case "${status}" in
+    Success|Failed|Cancelled|TimedOut) ;;
+    *) return 1 ;;
+  esac
+
+  "${aws_cmd[@]}" ssm get-command-invocation --command-id "${command_id}" \
+    --instance-id "${instance_id}" --query 'StandardOutputContent' --output text > "${target}"
+  if [[ "$(cat "${target}")" == "None" ]]; then
+    : > "${target}"
+  fi
+  printf '### ssm_status\n%s\n' "${status}" >> "${target}"
+  return 0
+}
+
+while IFS=$'\t' read -r instance_id name purpose; do
+  [[ -n "${instance_id}" ]] || continue
+  name="${name:-${instance_id}}"
+  target="${out_dir}/${name}.txt"
+  collected=0
+  for attempt in $(seq 1 "${attempts}"); do
+    if ssm_capture "${instance_id}" "${target}"; then
+      collected=1
+      break
+    fi
+    echo "session manager attempt ${attempt} failed for ${name}" >&2
+    sleep $((attempt * 5))
+  done
+  if (( collected )); then
+    echo "collected ${purpose:-unknown} ${name}"
+    continue
+  fi
+  echo "session manager unavailable for ${name}; falling back to console output" >&2
+  if "${aws_cmd[@]}" ec2 get-console-output --instance-id "${instance_id}" \
+    --output text --query Output > "${out_dir}/${name}.console.txt" 2>/dev/null; then
+    echo "console-fallback ${purpose:-unknown} ${name}"
+  else
+    echo "failed to collect evidence for ${name}" >&2
+    failures=$((failures + 1))
+  fi
+done < "${nodes_file}"
+
+{
+  echo "run_id=${run_id}"
+  echo "region=${region}"
+  echo "instance_filter=${instance_filter}"
+  echo "remote_prefix=${remote_prefix}"
+  echo "collected_at=$(date -u +%FT%TZ)"
+  echo "nodes=$(wc -l < "${nodes_file}")"
+} > "${out_dir}/collection.txt"
+
+if (( failures > 0 )); then
+  echo "${failures} node(s) produced no evidence" >&2
+  exit 1
+fi
+
+( cd "${out_dir}" && sha256sum ./*.txt > SHA256SUMS )
+echo "wrote ${out_dir}/SHA256SUMS"
+cat "${out_dir}/SHA256SUMS"
