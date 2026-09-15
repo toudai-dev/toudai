@@ -144,7 +144,7 @@ ssm_run "${loadgen_id}" "
     export LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips}
     export LIGHTHOUSE_CORPUS_BUCKET=${bucket}
     export LIGHTHOUSE_CORPUS_INVENTORY=~/lighthouse/benchmark/cloud/aws/stage-b/corpus.tsv
-    export LIGHTHOUSE_GCP_LOAD_PARALLELISM=8
+    export LIGHTHOUSE_LOAD_PARALLELISM=8
     export LIGHTHOUSE_BENCH_REVISION=${revision}
     setsid nohup benchmark/scripts/benchmark-load-distributed SHARDS LOAD_RUN \\
       > ~/load.log 2>&1 < /dev/null &'
