@@ -785,6 +785,11 @@ criterion.
   node-evidence collectors, re-verify the immutable ten-day corpus inventory,
   and record the runtime and maximum-cost estimate for explicit budget
   approval.
+- [ ] Provision the two- and four-shard Stage B topologies: blocked on the Z3
+  `CPUS_PER_VM_FAMILY` quota, capped at 24 vCPUs in every region and denied
+  automatic increases, while a two-shard topology needs 28 and a four-shard
+  topology needs 56. Resume after a manually approved increase or an explicit
+  decision to replace the accepted Z3 leaf baseline.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
   with the completed same-cloud GCP run, then complete the two- and four-shard
   10 TB scaling matrix and run replicated failure-domain, sustained-ingestion,

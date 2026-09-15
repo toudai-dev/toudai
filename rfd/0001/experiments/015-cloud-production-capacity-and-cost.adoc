@@ -1132,7 +1132,9 @@ for $300 with a 24-hour provider-enforced deletion ceiling bounds the worst case
 at $298.76. The merged 36-hour default would bound it at $448.15 and is the
 safer choice if a load slower than expected must not be cut off mid-run. Either
 way each topology is destroyed immediately after its archives, node evidence,
-and cost report are verified.
+and cost report are verified. The user approved proceeding on the $300
+24-hour-ceiling option on 2026-09-15; the provisioning attempt and its quota
+outcome are recorded below.
 
 Two failure modes are expected rather than hypothetical. The 4-shard
 coordinator shares 16 GiB with its own ClickHouse server, so a coordinator
@@ -1142,3 +1144,66 @@ a configuration change. The load generator remains the ingestion bottleneck at
 every shard count. Horizontal scaling divides per-shard scan work; it does not
 make arbitrary ten-day scans interactive, and the results will be reported
 without that claim.
+
+=== Stage B scaling blocked by the Z3 per-family CPU quota
+
+The two-shard topology was planned and applied on 2026-09-15 with the
+provider-enforced lifetime ceiling reduced to 24 hours. The reviewed plan
+created nine resources and no replacements or deletions. The apply failed
+partway through: `google_compute_instance.leaf[0]` was created, and `leaf[1]`
+was rejected with:
+
+[source,text]
+----
+Error waiting for instance to create: Quota 'CPUS_PER_VM_FAMILY' exceeded.
+Limit: 24.0 in region us-central1.
+metric name = compute.googleapis.com/cpus_per_vm_family
+limit name = CPUS-PER-VM-FAMILY-per-project-region
+limit = 24
+dimensions = map[region:us-central1 vm_family:Z3]
+----
+
+The binding constraint is a per-VM-family CPU quota, not the regional CPU quota
+the preflight measured. `lighthouse-508219` allows 200 `CPUS` in `us-central1`
+and effectively unlimited `LOCAL_SSD_TOTAL_GB`, but only 24 `Z3` family vCPUs. A
+two-shard topology needs 28 and a four-shard topology needs 56, so neither can
+be provisioned as designed. The accepted one-shard baseline used 14 Z3 vCPUs
+and fit under the same cap, which is why the cap was not visible before.
+
+Two automatic quota preferences were filed through the Cloud Quotas API and both
+were denied within seconds:
+
+[options="header",cols="3*"]
+|===
+|Requested |Granted |Outcome
+
+|56 Z3 vCPUs in `us-central1`
+|24
+|Quota request denied
+
+|28 Z3 vCPUs in `us-central1`
+|24
+|Quota request denied
+|===
+
+The cap is neither project-specific nor region-specific. Every region that
+offers Z3 reports the same 24-vCPU limit, and all three projects on this billing
+account (`lighthouse-508219`, `homelab-503406`, and `meeru-480606`) report
+`Z3 = 24` in `us-central1`. `z3-highmem-8-highlssd` leaves would fit a two-shard
+topology at 16 vCPUs but still exceed 24 at four shards, and they would change
+the leaf shape away from the accepted baseline.
+
+Failure evidence and cleanup: the partial apply left `leaf-01`, both firewall
+rules, the benchmark service account, and both bucket bindings in OpenTofu
+state. The reviewed destroy plan contained zero creates, zero changes, and six
+destroys, and it completed on 2026-09-15. API inventory then confirmed that no
+Stage B instance, disk, firewall rule, or service account remained. The failed
+leaf was metered at 108 seconds of uptime, approximately $0.05, and the
+wall-clock window from creation to destroy was about seven minutes.
+
+Stage B horizontal scaling is therefore blocked on an external quota decision.
+Resuming requires either a manually approved Z3 `CPUS_PER_VM_FAMILY` increase to
+at least 56 in `us-central1`, or an explicit decision to abandon the accepted Z3
+leaf baseline and re-establish a comparable one on a family that is not capped.
+The second option invalidates direct comparison with the accepted one-shard
+result and requires its own baseline run before any scaling claim.
