@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2154  # extra_env and the LIGHTHOUSE_* names are substituted by OpenTofu
 # AWS user-data wrapper for the Stage B benchmark nodes.
 #
 # The node logic stays in a plain shell script and is written to disk before
