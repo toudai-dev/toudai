@@ -1495,6 +1495,24 @@ every one of the ten uploaded days was compared against the committed inventory
 and all ten match on object count and byte total, 1,116,601,405,252 bytes in
 total. The failed attempt cost about a minute of the three-node fleet.
 
+The same round exposed two more defects, both of which would have been silent
+and expensive rather than loud:
+
+- The node policy allowed writes only under `results/`, but every run archive
+  and per-day marker is written under `artifacts/stage-b/`. The stage script's
+  failure archive was rejected with `AccessDenied`, which means the *accepted*
+  run archive would have been rejected too: the entire benchmark record would
+  have been lost with the instances at teardown. Corpus objects stay read-only;
+  `artifacts/*` and `results/*` are now readable and writable.
+- The unattended finisher resolved its repository root one directory short, so
+  its evidence and cost collection targeted a path that does not exist and its
+  `tofu destroy` ran in a directory with no configuration. It failed safely and
+  left the topology running, but it would have failed the same way on a
+  successful run, which is the case where it matters.
+
+Both are fixed and the finisher's paths and destroy inputs are verified to
+resolve before the retry was started.
+
 === AWS Stage B scaling runtime and cost estimate
 
 The estimate carries over the phase timings measured on the accepted one-shard
