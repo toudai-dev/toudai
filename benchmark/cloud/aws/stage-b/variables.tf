@@ -102,3 +102,21 @@ variable "max_lifetime_hours" {
     error_message = "Stage B lifetime must be between 12 and 48 hours."
   }
 }
+
+variable "budget_name" {
+  description = "Name of the account-level budget the stop action attaches to; must match the guardrails module."
+  type        = string
+  default     = "lighthouse-exp015-stage-b-ceiling"
+}
+
+variable "budget_topic_arn" {
+  description = "SNS topic the stop action notifies, from the guardrails module. No stop action is created when empty."
+  type        = string
+  default     = ""
+}
+
+variable "budget_stop_action_enabled" {
+  description = "Whether the budget stops this fleet at the cost ceiling. Disable if AWS Budgets rejects the SSM action."
+  type        = bool
+  default     = true
+}
