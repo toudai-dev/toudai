@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# AWS user-data wrapper for the Stage B benchmark nodes.
+#
+# The node logic stays in a plain shell script and is written to disk before
+# being executed. That keeps every `$` in the node script out of OpenTofu
+# template interpolation, so the only values this template substitutes are the
+# explicitly listed environment variables. The executed copy is also left on
+# disk as part of the node's failure evidence.
+set -Eeuo pipefail
+
+install -d -m 0755 /var/lib/lighthouse-stage-b
+cat > /var/lib/lighthouse-stage-b/startup-node.sh <<'LIGHTHOUSE_STAGE_B_NODE_SCRIPT'
+${startup_script}
+LIGHTHOUSE_STAGE_B_NODE_SCRIPT
+chmod 0755 /var/lib/lighthouse-stage-b/startup-node.sh
+
+export LIGHTHOUSE_CLICKHOUSE_CONFIG_B64='${clickhouse_config}'
+export LIGHTHOUSE_CLICKHOUSE_USERS_B64='${clickhouse_users}'
+export LIGHTHOUSE_MAX_LIFETIME_MINUTES='${max_lifetime_minutes}'
+${extra_env}
+
+exec /var/lib/lighthouse-stage-b/startup-node.sh
