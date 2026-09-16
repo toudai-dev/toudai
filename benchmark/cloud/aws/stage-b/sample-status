@@ -24,9 +24,14 @@ log_file="${LIGHTHOUSE_SAMPLE_LOG:-${HOME}/lighthouse-benchmark/status-${stage_r
 [[ "${interval}" =~ ^[1-9][0-9]*$ ]] || { echo "LIGHTHOUSE_SAMPLE_SECONDS must be a positive integer" >&2; exit 2; }
 mkdir -p "$(dirname -- "${log_file}")"
 
-loadgen_id="$("${aws_cmd[@]}" ec2 describe-instances \
-  --filters "Name=tag:Name,Values=lighthouse-exp015-stage-b-loadgen" "Name=instance-state-name,Values=running" \
-  --query 'Reservations[].Instances[].InstanceId' --output text)"
+# The load generator holds the run state, so its instance ID is both what
+# `sample` talks to and the signal that the run still exists at all.
+loadgen_running() {
+  "${aws_cmd[@]}" ec2 describe-instances \
+    --filters "Name=tag:Name,Values=lighthouse-exp015-stage-b-loadgen" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[].Instances[].InstanceId' --output text
+}
+loadgen_id="$(loadgen_running)"
 if [[ -z "${loadgen_id}" ]]; then
   printf '%s\tno-loadgen\n' "$(date -u +%FT%TZ)" >> "${log_file}"
   exit 1
@@ -68,6 +73,13 @@ REMOTE
 
 printf '# sampled_at\tshards\trun_prefix\tstage\tload\tdays\trows\n' >> "${log_file}"
 while true; do
+  # Re-check every cycle. A startup-only check let this loop outlive a torn-down
+  # topology and append unreachable samples forever, so the run's own teardown
+  # could not end it.
+  if [[ -z "$(loadgen_running)" ]]; then
+    printf '%s\tno-loadgen\n' "$(date -u +%FT%TZ)" >> "${log_file}"
+    exit 0
+  fi
   state="$(sample 2>/dev/null || printf 'stage=unreachable\nload=unreachable\ndays=0\nunknown\n')"
   printf '%s\t%s\t%s\t%s\n' \
     "$(date -u +%FT%TZ)" "${shards}" "${run_prefix}" \
