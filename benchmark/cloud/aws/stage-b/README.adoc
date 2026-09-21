@@ -146,7 +146,8 @@ ssm_run "${loadgen_id}" "
   tar -xzf ~/lighthouse.tar.gz -C ~/lighthouse
   flox activate --dir /opt/lighthouse -- bash -c '
     clickhouse local --version
-    aws s3 ls ${bucket}/corpus/2026-08-01/ | head -2
+    aws s3api list-objects-v2 --bucket lighthouse-exp015-benchmark-828361646739 \\
+      --prefix corpus/2026-08-01/ --max-items 2 --query "Contents[].Key" --output text
     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator_ip} \\
     LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips} \\
       ~/lighthouse/benchmark/scripts/benchmark-clickhouse-remote-cluster status SHARDS'
@@ -166,6 +167,7 @@ ssm_run "${loadgen_id}" "
     export LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaf_ips}
     export LIGHTHOUSE_CORPUS_BUCKET=${bucket}
     export LIGHTHOUSE_CORPUS_INVENTORY=~/lighthouse/benchmark/cloud/aws/stage-b/corpus.tsv
+    export LIGHTHOUSE_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs
     export LIGHTHOUSE_LOAD_PARALLELISM=8
     export LIGHTHOUSE_BENCH_REVISION=${revision}
     setsid nohup benchmark/scripts/benchmark-load-distributed SHARDS LOAD_RUN \\
@@ -188,7 +190,7 @@ ssm_run "${loadgen_id}" "
     export LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=LOAD_RUN
     export LIGHTHOUSE_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs
     export LIGHTHOUSE_BENCH_REVISION=${revision}
-    setsid nohup benchmark/scripts/benchmark-run-distributed-stage SHARDS STAGE_RUN \\
+    setsid nohup benchmark/scripts/benchmark-run-distributed-stage SHARDS RUN_PREFIX \\
       > ~/stage.log 2>&1 < /dev/null &'
 "
 ----
@@ -196,7 +198,7 @@ ssm_run "${loadgen_id}" "
 Poll `status` and `days.tsv` on the load generator rather than assuming progress
 from a live process. The loader archives its run to
 `${bucket}/artifacts/stage-b/LOAD_RUN/` and the stage script to
-`${bucket}/artifacts/stage-b/STAGE_RUN/`, so results are durable without
+`${bucket}/artifacts/stage-b/RUN_PREFIX-stage/`, so results are durable without
 depending on the instance. After the stage archive uploads, run the node
 evidence collector and the cost collector, upload both bundles, and destroy the
 topology.
