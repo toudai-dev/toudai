@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
+# Guarded continuation for a distributed Stage B run.
+#
+# Renamed from `benchmark-run-gcp-distributed-stage` when the AWS Stage B
+# topology was added: the object store is selected from the bucket URI scheme,
+# so the continuation is cloud-neutral. The accepted GCP one-shard run was
+# produced by the previous name at the revision recorded in its own run
+# manifest.
 set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=lib/object-store.sh
+source "${repo_root}/benchmark/scripts/lib/object-store.sh"
 shards="${1:-}"
 run_prefix="${2:-}"
 coordinator="${LIGHTHOUSE_CLUSTER_COORDINATOR_HOST:-}"
 leaves="${LIGHTHOUSE_CLUSTER_LEAF_HOSTS:-}"
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
 load_run="${LIGHTHOUSE_DISTRIBUTED_LOAD_RUN:-}"
-bucket="${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}"
+# LIGHTHOUSE_CORPUS_BUCKET is the cloud-neutral name; the GCP-specific name is
+# still read so recorded runbooks keep working unchanged.
+bucket="${LIGHTHOUSE_CORPUS_BUCKET:-${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}}"
 expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-5689254359}"
 day_end="${LIGHTHOUSE_DISTRIBUTED_DAY_END:-2026-08-11 04:00:00}"
 ranges="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h,10d}"
@@ -16,6 +27,9 @@ query_max_memory="${LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY:-17179869184}"
 revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
 poll_seconds="${LIGHTHOUSE_STAGE_POLL_SECONDS:-60}"
 max_wait_seconds="${LIGHTHOUSE_STAGE_MAX_WAIT_SECONDS:-129600}"
+
+# Fail before any cluster work if the configured object store is unreachable.
+object_store_check "${bucket}"
 
 usage() {
   echo "usage: LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=RUN $0 SHARDS RUN_PREFIX" >&2
@@ -72,7 +86,7 @@ upload_archive() {
   [[ ! -d "${runs_root}/${raw_run}" ]] || paths+=("${raw_run}")
   [[ ! -d "${runs_root}/${acceleration_run}" ]] || paths+=("${acceleration_run}")
   tar -C "${runs_root}" -czf "${archive}" "${paths[@]}"
-  gcloud storage cp "${archive}" "${remote_archive}" --cache-control=no-store
+  object_store_put "${archive}" "${remote_archive}"
 }
 on_exit() {
   local rc=$?
@@ -140,4 +154,4 @@ echo completed > "${stage_dir}/status"
 upload_archive
 completed=1
 trap - EXIT
-echo "GCP distributed stage completed: ${stage_dir}"
+echo "distributed stage completed: ${stage_dir}"

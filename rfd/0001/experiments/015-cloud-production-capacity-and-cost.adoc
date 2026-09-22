@@ -931,3 +931,792 @@ This establishes the GCP one-shard Stage B baseline; it does not establish
 horizontal scaling efficiency or select a production platform. The two- and
 four-shard runs, current billing export, provider comparisons, replicated
 failure-domain tests, and soak work remain open.
+
+=== Stage B scaling preparation and approval packet
+
+Cost-free preparation for the two- and four-shard runs completed on 2026-09-15
+without creating billable resources. The immutable corpus was re-verified
+remotely against the committed inventory: every one of the ten days matched its
+expected object count and byte total, 2,245 Parquet objects and
+1,116,601,405,252 bytes in total. The project had no instance and no disk
+before preparation, the OpenTofu configuration still formats and validates, and
+the loader, cost, and evidence scripts pass ShellCheck.
+
+Three tooling gaps were closed before provisioning:
+
+- The loader re-read the entire accumulated corpus for a checksum before and
+  after every source batch. On the accepted one-shard run those scans added
+  approximately 7.8 hours to a load whose measured insert time was 8 hours
+  32 minutes 46 seconds. The pre-batch gate is now a metadata-only row count,
+  which still detects a partial source batch because a partial batch always
+  changes the row count. Every post-batch cumulative gate and the final total
+  gate keep their full checksum scan, so no validation semantics changed.
+  `benchmark/scripts/benchmark-load-distributed-test` drives the unmodified
+  loader against a local single-node ClickHouse instance and covers fresh load,
+  idempotent resume, recovery with a lost marker, partial-batch rejection, and
+  clean reload.
+- No run preserved metered cost. `benchmark/scripts/benchmark-gcp-stage-b-cost`
+  snapshots the live instance inventory, the metered
+  `compute.googleapis.com/instance/uptime` series, the machine-type shapes, and
+  the Cloud Billing Catalog SKUs for those shapes, then prices instance core,
+  RAM, integrated local SSD, and boot-disk hours.
+- Node hardware evidence was only recoverable by hand.
+  `benchmark/scripts/benchmark-collect-gcp-stage-b-evidence` reads the
+  coordinator and every leaf over IAP SSH, falls back to the serial console,
+  and writes a checksummed bundle. The startup scripts now mirror
+  `hardware.txt` to that console.
+
+=== Stage B scaling runtime and cost estimate
+
+The estimate uses the accepted one-shard run's metered uptime and the current
+public `us-central1` on-demand catalog, not extrapolation from instance
+specifications.
+
+Cloud Monitoring metered the accepted one-shard topology at 33.46 leaf hours,
+33.43 coordinator hours, and 33.34 load-generator hours for 21.4 hours of
+benchmark activity. At the catalog prices below that run cost $59.20 of leaf
+compute and local SSD, $4.48 of coordinator, $23.80 of load generator, and
+$1.37 of boot disk, or $88.85 in total. This is listed price for metered usage;
+because no billing export was preserved, the invoiced amount remains
+unverifiable and the same limitation applies to the runs below.
+
+[options="header",cols="3*"]
+|===
+|Billing SKU |Unit |USD per unit
+
+|Z3 Instance Core running in Americas
+|vCPU-hour
+|0.04965310
+
+|Z3 Instance Ram running in Americas
+|GiB-hour
+|0.00665530
+
+|Z3 Instance Local SSD running in Americas
+|GiB-month
+|0.08000000
+
+|E2 Instance Core running in Americas
+|vCPU-hour
+|0.02181159
+
+|E2 Instance Ram running in Americas
+|GiB-hour
+|0.00292353
+
+|N2 Custom Instance Core running in Americas
+|vCPU-hour
+|0.03319155
+
+|N2 Custom Instance Ram running in Americas
+|GiB-hour
+|0.00444885
+
+|Balanced PD Capacity
+|GiB-month
+|0.10000000
+
+|Network Inter Zone Data Transfer Out
+|GiB
+|0.01000000
+
+|Standard Storage US Regional
+|GiB-month
+|0.02000000
+|===
+
+[options="header",cols="4*"]
+|===
+|Derived rate |Shape |Storage |USD per hour
+
+|`z3-highmem-14-standardlssd`
+|14 vCPU, 112 GiB
+|3,000 GiB Titanium SSD
+|1.76930412
+
+|`e2-standard-4`
+|4 vCPU, 16 GiB
+|100 GiB boot disk
+|0.13402284
+
+|`n2-custom-14-57344`
+|14 vCPU, 56 GiB
+|100 GiB boot disk
+|0.71381730
+
+|Boot disk, counted separately
+|100 GiB `pd-balanced`
+|—
+|0.01369863
+|===
+
+The reload dominates both runs. The load generator, not the leaves, was the
+ingestion bottleneck at 184,921 measured rows/s, so the measured 8.53-hour
+insert phase is held constant while the one post-batch cumulative checksum scan
+per day parallelizes across shards and shrinks with shard count. The ten-day
+fixtures account for 86.6% of the one-shard raw phase and are expected to
+scale close to leaf count, while the shorter ranges carry fixed coordinator
+cost. Acceleration builds are leaf-local and split with shard count.
+
+[options="header",cols="4*"]
+|===
+|Phase |2 shards |4 shards |Basis
+
+|Provision and readiness
+|0.4 h
+|0.4 h
+|Validated image and startup scripts
+
+|Corpus reload and batch gates
+|11.5 h
+|10.5 h
+|8.53 h measured inserts plus parallelized cumulative checksum scans
+
+|Raw query matrix, 210 timings
+|2.2 h
+|1.5 h
+|One-shard raw phase was 3.39 h
+
+|Acceleration matrix, 150 timings and four builds
+|0.5 h
+|0.3 h
+|One-shard acceleration phase was 0.84 h
+
+|Evidence export, cost capture, and destroy
+|0.6 h
+|0.6 h
+|Archive upload, node collection, reviewed destroy
+
+|Total
+|15.2 h
+|13.3 h
+|
+|===
+
+[options="header",cols="4*"]
+|===
+|Topology |Hourly rate |Expected cost |Provider-enforced ceiling
+
+|2 shards x 1 replica
+|$4.4412429
+|$67.5 at 15.2 h
+|$159.88 at 36 h
+
+|4 shards x 1 replica
+|$8.0072484
+|$106.5 at 13.3 h
+|$288.26 at 36 h
+
+|Both topologies
+|—
+|$174.0
+|$448.15 at 36 h
+|===
+
+A 24-hour provider-enforced ceiling instead of the merged 36-hour default
+bounds both topologies at $298.76 and still leaves roughly 50% headroom over
+the expected 15.2-hour and 13.3-hour runs.
+
+Shared costs are outside both topologies. The corpus bucket currently holds
+2,266,758,374,310 bytes, 2,111 GiB, which is $42.23 per month at the listed
+regional Standard rate whether or not a benchmark runs; most of it is the
+rejected July corpus. Same-region object reads and all intra-zone traffic are
+free. Inter-zone egress is listed at $0.01/GiB and the one-shard coordinator
+reduction traffic was under 0.4 GB for an entire raw matrix, so even a
+zone-separated layout would add cents rather than dollars.
+
+Requested approval: the expected spend is $174.0 at the phase totals above. The
+planning figure with contingency is $208.06, which is 18 hours for the two-shard
+topology and 16 hours for the four-shard topology at the same rates. Approval
+for $300 with a 24-hour provider-enforced deletion ceiling bounds the worst case
+at $298.76. The merged 36-hour default would bound it at $448.15 and is the
+safer choice if a load slower than expected must not be cut off mid-run. Either
+way each topology is destroyed immediately after its archives, node evidence,
+and cost report are verified. The user approved proceeding on the $300
+24-hour-ceiling option on 2026-09-15; the provisioning attempt and its quota
+outcome are recorded below.
+
+Two failure modes are expected rather than hypothetical. The 4-shard
+coordinator shares 16 GiB with its own ClickHouse server, so a coordinator
+memory limit is the most likely new failure; the one-shard coordinator merged
+at a 6.1 MB peak, and any failure will be diagnosed from the query log before
+a configuration change. The load generator remains the ingestion bottleneck at
+every shard count. Horizontal scaling divides per-shard scan work; it does not
+make arbitrary ten-day scans interactive, and the results will be reported
+without that claim.
+
+=== Stage B scaling blocked by the Z3 per-family CPU quota
+
+The two-shard topology was planned and applied on 2026-09-15 with the
+provider-enforced lifetime ceiling reduced to 24 hours. The reviewed plan
+created nine resources and no replacements or deletions. The apply failed
+partway through: `google_compute_instance.leaf[0]` was created, and `leaf[1]`
+was rejected with:
+
+[source,text]
+----
+Error waiting for instance to create: Quota 'CPUS_PER_VM_FAMILY' exceeded.
+Limit: 24.0 in region us-central1.
+metric name = compute.googleapis.com/cpus_per_vm_family
+limit name = CPUS-PER-VM-FAMILY-per-project-region
+limit = 24
+dimensions = map[region:us-central1 vm_family:Z3]
+----
+
+The binding constraint is a per-VM-family CPU quota, not the regional CPU quota
+the preflight measured. `lighthouse-508219` allows 200 `CPUS` in `us-central1`
+and effectively unlimited `LOCAL_SSD_TOTAL_GB`, but only 24 `Z3` family vCPUs. A
+two-shard topology needs 28 and a four-shard topology needs 56, so neither can
+be provisioned as designed. The accepted one-shard baseline used 14 Z3 vCPUs
+and fit under the same cap, which is why the cap was not visible before.
+
+Two automatic quota preferences were filed through the Cloud Quotas API and both
+were denied within seconds:
+
+[options="header",cols="3*"]
+|===
+|Requested |Granted |Outcome
+
+|56 Z3 vCPUs in `us-central1`
+|24
+|Quota request denied
+
+|28 Z3 vCPUs in `us-central1`
+|24
+|Quota request denied
+|===
+
+The cap is neither project-specific nor region-specific. Every region that
+offers Z3 reports the same 24-vCPU limit, and all three projects on this billing
+account (`lighthouse-508219`, `homelab-503406`, and `meeru-480606`) report
+`Z3 = 24` in `us-central1`. `z3-highmem-8-highlssd` leaves would fit a two-shard
+topology at 16 vCPUs but still exceed 24 at four shards, and they would change
+the leaf shape away from the accepted baseline.
+
+Failure evidence and cleanup: the partial apply left `leaf-01`, both firewall
+rules, the benchmark service account, and both bucket bindings in OpenTofu
+state. The reviewed destroy plan contained zero creates, zero changes, and six
+destroys, and it completed on 2026-09-15. API inventory then confirmed that no
+Stage B instance, disk, firewall rule, or service account remained. The failed
+leaf was metered at 108 seconds of uptime, approximately $0.05, and the
+wall-clock window from creation to destroy was about seven minutes.
+
+Stage B horizontal scaling is therefore blocked on an external quota decision.
+Resuming requires either a manually approved Z3 `CPUS_PER_VM_FAMILY` increase to
+at least 56 in `us-central1`, or an explicit decision to abandon the accepted Z3
+leaf baseline and re-establish a comparable one on a family that is not capped.
+The second option invalidates direct comparison with the accepted one-shard
+result and requires its own baseline run before any scaling claim.
+
+=== Local-SSD family alternatives in `us-central1`
+
+After the manual Z3 increase was denied as well, every local-SSD family was
+checked against its own quota. The cap is not specific to Z3:
+
+[options="header",cols="4*"]
+|===
+|Family |Local SSD |`us-central1` vCPU cap |Four leaves of at least 1.5 TiB
+
+|Z3
+|Titanium, 3,000 GiB on an 8-vCPU shape
+|24, increase denied
+|No, needs 32
+
+|C3
+|Titanium, 375 GiB per disk
+|`C3-CPUS` = 24
+|No
+
+|C4, C4A, C4D
+|Titanium, 375 GiB per disk
+|24
+|No
+
+|H4D
+|Titanium, 375 GiB per disk
+|none
+|No shape below 192 vCPU, and Preview
+
+|Z4D
+|`lssd` shapes listed
+|none
+|No billing SKUs in `us-central1`, not orderable
+
+|N4, E4, H3, C4N
+|none
+|200, 200, 88, 384
+|Not applicable
+
+|N2, N1
+|documented by Google, no `us-central1` SKU
+|N2 = 200
+|Unverified
+|===
+
+Z3 is uniquely SSD-dense: it pairs 3,000 GiB with 8 vCPUs, which is why a
+vCPU-based cap binds so early. The families with quota headroom carry no local
+SSD in this region, and the only uncapped local-SSD families either have no
+shape below 192 vCPUs or are not orderable. The published Local SSD machine
+series support table lists N2 and N1 as supporting Local SSD, but no
+`us-central1` Local SSD SKU exists for them, so that path is unverified rather
+than available.
+
+Consequence: no GCP local-SSD topology can host four leaves of the capacity the
+ten-day corpus requires under this project's quotas. The remaining directions
+are a reduced Z3 matrix, a network-storage re-baseline on a family with quota
+headroom, or another provider whose local-NVMe quota can be raised.
+
+=== Stage B scaling moved to AWS
+
+Every local-SSD family in the GCP account was capped at 24 vCPUs, and both the
+automatic and the manually reviewed increases were denied, so the GCP path was
+abandoned rather than reduced. AWS replaces it for the scaling runs: the same
+Flox-pinned ClickHouse 26.8.2.7 closure, the same immutable corpus, the same
+schema, fixtures, cold/warm policy, telemetry, and correctness gates, and the
+same loader and stage scripts, which now select the object store from the bucket
+URI scheme instead of assuming Google Cloud.
+
+This is a hardware change, so the accepted GCP one-shard result is not a
+same-hardware baseline for a two- or four-shard AWS run. The AWS matrix
+therefore starts with its own one-shard topology, and scaling efficiency is
+measured within one hardware generation. The GCP one-shard result keeps its
+role as the accepted Stage B baseline and as the source of the measured phase
+timings the AWS estimate is built from.
+
+=== AWS Stage B topology and guardrails
+
+The AWS fleet is `shard_count` (1, 2, or 4) `i4i.4xlarge` serving leaves, one
+`m7i.xlarge` coordinator, and one `m7i.4xlarge` load generator in a single
+availability zone. A leaf carries 16 vCPU, 128 GiB RAM, and a 3,750 GB
+instance-store NVMe volume.
+
+The leaf shape follows from the accepted one-shard measurement rather than from
+convenience. That run left 1,400.6 GiB of hot parts plus 31.8 GiB of derived
+parts, with a 108.3 GiB largest part and a 150 GiB merge cap, so a leaf has to
+hold roughly 1,582 GiB before any reserve. The 1,875 GB `i7i.2xlarge` would sit
+at 90.6% full and would also halve the leaf vCPU count, which would confound the
+scaling measurement; `i4i.4xlarge` sits at 45.3%.
+
+EC2 has no provider-enforced `max_run_duration`, so the lifetime ceiling is
+enforced from outside the fleet. Every node schedules its own `shutdown -h` from
+user data, the topology sets `instance_initiated_shutdown_behavior =
+"terminate"`, and a scheduled watchdog Lambda independently terminates any
+instance tagged `experiment=015` that outlives the declared lifetime plus a
+grace period, whatever state its operating system is in. The watchdog's IAM
+policy is tag-conditioned, so it cannot terminate anything outside the
+experiment even if its own filters were wrong. A monthly account-wide budget
+adds forecasted and actual alerts and a stop action; the ceiling is account-wide
+because cost allocation tags need 24 hours to activate, which is longer than a
+topology lives.
+
+Cost controls that are not fixed by the experiment: single-AZ placement so no
+traffic is billed cross-AZ; a public subnet only so Session Manager and package
+mirrors work without a NAT gateway; a free S3 gateway endpoint for corpus reads
+and result writes; ClickHouse state on instance-store NVMe so no EBS data volume
+is provisioned; on-demand capacity only, because Spot would invalidate a
+multi-hour run by losing serving state; and a 45-day bucket expiry that removes
+a forgotten corpus without an operator.
+
+=== AWS Stage B preparation status
+
+Prepared and verified without a benchmark node ever running:
+
+- The dependency image was rebuilt on a disposable `m7i.large` and registered
+  as `ami-0298fd5dbaa1abaff` (`x86_64`, HVM, `/dev/xvda`). It carries the same
+  Flox-pinned ClickHouse 26.8.2.7 closure as the accepted GCP image plus the
+  Session Manager agent, and the builder was terminated at the end of the build.
+  The first attempt was unbootable and was replaced; see the defect records
+  below.
+- The benchmark network is applied: VPC `vpc-00332652707f3fb0e`, subnet
+  `subnet-0d75cb46215de24cb`, security group `sg-0bb5c65999c4db22d`, and a free
+  S3 gateway endpoint, all in `us-west-2a`.
+- The guardrails are applied and were exercised against the live API: the
+  watchdog Lambda returned a correct cutoff and terminated nothing, and the
+  budget exists at the current ceiling with an email subscription pending the
+  recipient's confirmation.
+- `benchmark/cloud/aws/stage-b/check-templates` passes all fifteen checks. It
+  caught one real defect: the user-data wrapper appended a trailing newline, so
+  the script a node executed was not byte-identical to the committed source. The
+  templates now trim the file and the preflight enforces the identity.
+- The immutable ten-day corpus is in S3, uploaded from the local copy at about
+  123 MiB/s. Every one of the ten days matches the committed inventory on object
+  count and byte total, 2,245 objects and 1,116,601,405,252 bytes, and six
+  boundary objects were additionally verified by full SHA-256 against the local
+  files. The upload also writes a SHA-256 manifest of every object; it is still
+  being generated locally because hashing 1.1 TB takes hours, and it is not a
+  prerequisite for any gate the loader applies.
+- The GCP side is fully torn down. Both benchmark images and the benchmark VPC,
+  subnet, and firewall rule are deleted; the 2,267,583,743,310-byte corpus
+  bucket is emptied and deleted; and API inventory reports zero instances,
+  disks, snapshots, addresses, benchmark images, benchmark service accounts, and
+  buckets. Only Google's own `default` network and its default firewall rules
+  remain, which are not this experiment's resources. The accepted and rejected
+  artifacts were archived to S3 under `results/gcp-stage-b-archive/` first, with
+  a prefix README that separates the accepted v8 stage and v6 load runs from the
+  rejected attempts; all seven held Stage A objects and six sampled corpus
+  objects were verified by full SHA-256 against the local copies before the
+  bucket was removed. The Stage A objects carried a temporary hold that the RFD
+  describes as lasting "until it moves to the project's permanent artifact
+  store"; that condition is now met, so the hold was released as part of the
+  teardown rather than left behind.
+
+=== AWS Stage B image defect and fix
+
+The first AWS image, `ami-0c18a88f454bbc3af`, was unbootable. The smoke test
+that caught it applied the real Stage B module at one shard with a twelve-hour
+lifetime ceiling, which created ten resources including the budget stop action,
+and then launched the fleet.
+
+Every instance failed in the same way: none registered with Session Manager,
+EC2 instance status checks went `impaired` and never recovered, network output
+stayed at zero, and the cached console output was empty. A minimal `m7i.large`
+probe launched from the same image in the default VPC with no user data, no
+benchmark security group, and no module involvement failed identically, which
+isolated the fault to the image rather than to the VPC, subnet, security group,
+instance profile, or user data.
+
+`aws ec2 get-console-output --latest` then gave the cause directly:
+
+[source,text]
+----
+[    9.371873] systemd[1]: System cannot boot: Missing /etc/machine-id and /etc is mounted read-only.
+----
+
+The provisioner generalized the image with
+`cloud-init clean --logs --machine-id`. That flag removes the machine identity,
+and Debian 12's systemd refuses to boot when `/etc/machine-id` is missing while
+`/etc` is still read-only during early boot. The instances never reached
+`network-online.target`, so the Session Manager agent never registered, the
+benchmark startup script failed, and the node was unusable. The GCP provisioner
+keeps `--machine-id` and boots correctly under Google's guest environment, so
+its recipe is unchanged.
+
+The fix is one line: the AWS provisioner now runs `cloud-init clean --logs`
+only, and the first boot regenerates the identity, which is what an EC2 image is
+expected to do. Two smaller lessons are folded into the tooling: the evidence
+collector now requests `--latest` console output, because the cached form is
+empty for an instance whose console has never been polled, and this record
+confirms the value of the smoke test, since the same fault would otherwise have
+surfaced only after the fleet was provisioned for a paid run.
+
+Failure cleanup: the unbootable image was deregistered and its snapshot deleted,
+the smoke topology was destroyed with all ten resources, and the probe instance
+was terminated. The failed attempt cost about $0.95 of metered usage: roughly
+46 minutes of `m7i.large` builder, 21 minutes of the three-node fleet, 8 minutes
+of probe, and their gp3 volumes.
+
+=== AWS Stage B bootstrap defects and the passing smoke test
+
+The rebuilt image booted and registered all three nodes with Session Manager,
+but the first smoke test still failed: `/mnt/disks/clickhouse` was unmounted and
+the ClickHouse service was inactive. The node's own startup log named the cause:
+
+[source,text]
+----
+expected exactly one instance-store device, found 3
+----
+
+AWS publishes three by-id aliases for a single instance-store device: a plain
+name, a `-ns-1` namespace alias, and a `_1` alias, all resolving to the same
+`/dev/nvme1n1`. The leaf counted three devices, failed its exactly-one
+assertion, and exited before formatting or mounting anything. The aliases are
+now resolved and deduplicated before counting, and the detection has a table
+test covering one device, two real devices, and none.
+
+Three further defects surfaced in the same round and are fixed together:
+
+- The readiness probe activated the Flox environment while systemd was
+  activating it for the server. Two concurrent first activations race on the
+  activation state directory, and the loser exits with `EACCES`, which restarted
+  the server twice before it settled and left the node without its `READY`
+  marker. The binary is now resolved once and reused, the unit gets a runtime
+  directory so Flox has a writable activation root, and the evidence collector
+  does the same. This also explains why the same recipe worked on GCP, where the
+  runtime directory exists.
+- Changing `user_data` stopped and started the instances rather than replacing
+  them, and cloud-init runs its per-instance modules once, so the node silently
+  kept running its old bootstrap and the first fix appeared not to work.
+  `user_data_replace_on_change` now forces a real replacement.
+- The evidence collector's remote command referenced a variable without escaping
+  it inside an unquoted here-document, so the local shell would have expanded it
+  to nothing before the command ever reached the node. ShellCheck caught it.
+
+The final smoke test passed: all three nodes registered with Session Manager,
+`NRestarts=0` with the service active, `READY` and `hardware.txt` written, the
+3.4 TB instance store mounted at `/mnt/disks/clickhouse`, ClickHouse answering
+`26.8.2.7`, `SELECT 1` succeeding from the load generator to the coordinator and
+from the coordinator to the leaf, the coordinator's `remote_servers` naming the
+leaf, and the evidence collector returning a checksummed bundle for all three
+nodes with no console fallback. The smoke topology was then destroyed, leaving
+no instance and no volume behind.
+
+The three smoke rounds together cost roughly $2 of metered usage, which is the
+price of finding all four defects before a paid run rather than during one.
+
+=== AWS Stage B first load attempt failed on a byte-formatting bug
+
+The first AWS phase started at 2026-09-15T21:49:19Z and failed its very first
+gate. The loader's own failure record named it exactly:
+
+[source,text]
+----
+reason=corpus-mismatch
+exit_code=1
+line=218
+command=return\ 1
+----
+
+and the log line showed why:
+
+[source,text]
+----
+2026-08-01 corpus mismatch: expected 224/113283993214, found 224/1.13284e+11
+----
+
+The object count was correct and the byte total was the same number written in
+scientific notation. Debian ships `mawk`, whose `print` renders a large integer
+that way, while the development machine's `gawk` prints it exactly; the shared
+object-store helper summed object sizes with `awk ... { print total }`. The gate
+was right to fail: a byte total that does not compare equal to the inventory
+cannot be trusted. The helper now uses `printf "%.0f"`, which is unambiguous
+across implementations, and the same latent bug in the GCS path — introduced by
+the object-store refactor, which converted the leading integer to a number
+instead of printing it as a string field — is fixed with it.
+
+The guarded continuation behaved as designed: it saw the loader fail, recorded
+`load-failed`, and uploaded its failure archive instead of proceeding to the
+query matrix. Two further defects were found and fixed before the retry: nodes
+could not read the staged benchmark revision because `results/` was write-only,
+and the runbook used `bash -lc` inside `flox activate`, where a login shell
+re-sources `/etc/profile` and wipes the `PATH` the activation just set.
+
+Re-verification after the fix is stronger than the sampled check it replaces:
+every one of the ten uploaded days was compared against the committed inventory
+and all ten match on object count and byte total, 1,116,601,405,252 bytes in
+total. The failed attempt cost about a minute of the three-node fleet.
+
+The same round exposed two more defects, both of which would have been silent
+and expensive rather than loud:
+
+- The node policy allowed writes only under `results/`, but every run archive
+  and per-day marker is written under `artifacts/stage-b/`. The stage script's
+  failure archive was rejected with `AccessDenied`, which means the *accepted*
+  run archive would have been rejected too: the entire benchmark record would
+  have been lost with the instances at teardown. Corpus objects stay read-only;
+  `artifacts/*` and `results/*` are now readable and writable.
+- The unattended finisher resolved its repository root one directory short, so
+  its evidence and cost collection targeted a path that does not exist and its
+  `tofu destroy` ran in a directory with no configuration. It failed safely and
+  left the topology running, but it would have failed the same way on a
+  successful run, which is the case where it matters.
+
+Both are fixed and the finisher's paths and destroy inputs are verified to
+resolve before the retry was started.
+
+=== AWS Stage B one-shard scaling baseline
+
+The accepted same-hardware AWS baseline,
+`experiment-015-stage-b-aws-1s-v3`, ran at repository revision
+`79bc7ae001611af3a7b809001240cc84af08b229`. The load completed all ten
+checksum-gated days and validated 5,689,254,359 rows. The stage archive reports
+`completed`, contains all 210 raw timings and 150 accelerated timings, and all
+150 raw-versus-accelerated correctness checks passed.
+
+[options="header",cols="3*"]
+|===
+|Phase |Measured wall time |Result
+
+|Load and cumulative validation
+|9 h 20 min 43 s
+|5,689,254,359 rows; 1,503,930,542,004 hot-table bytes; 91 active parts
+
+|Raw query matrix
+|3 h 1 min 36 s
+|210/210 timings
+
+|Acceleration builds and query matrix
+|48 min 15 s
+|150/150 timings and 150/150 correctness checks
+
+|Guarded stage
+|13 h 5 min 2 s
+|Completed and archive-verified
+|===
+
+The ten inserts themselves totaled 4 h 17 min 58 s; cumulative checksum gates
+and final storage validation account for the rest of the load wall time. The
+four acceleration builds produced 34,157,562,358 bytes of derived storage,
+2.27% of the hot-table bytes. Listed-price metered compute and root-volume cost
+captured before teardown was $32.188134 for approximately 13.33 node-hours per
+node, below the $44.66 estimate.
+
+The finisher captured checksummed node evidence, cost, and the readable stage
+archive before teardown. Its first destroy attempt failed because the AWS
+profile was passed to AWS CLI calls but not exported for OpenTofu. A manual
+state-backed destroy using the same profile removed all ten topology resources;
+all three instances reached `terminated`, their root volumes no longer exist,
+and the Stage B OpenTofu state is empty. `finish-phase` now exports
+`LIGHTHOUSE_AWS_PROFILE` as `AWS_PROFILE`, so the two- and four-shard runs use
+the same credentials for collection and destroy.
+
+Compact review evidence is committed under
+`experiments/015/aws-1s-v3/`. The full immutable load and stage archives, node
+evidence, and accepted result bundle remain in the private S3 experiment
+bucket.
+
+=== AWS Stage B scaling runtime and cost estimate
+
+The estimate carries over the phase timings measured on the accepted one-shard
+run and prices them with the current public `us-west-2` on-demand catalog, not
+with extrapolation from instance specifications. The measured loader wall clock
+was 17 hours 10 minutes 7 seconds, of which 8 hours 32 minutes 46 seconds was
+batch insert time and approximately 7.8 hours was the combined pre- and
+post-batch cumulative checksum scan. The pre-batch scan has since been replaced
+by a metadata-only row count, so the same run is expected to finish in roughly
+13.3 hours; the post-batch gates are unchanged.
+
+The AWS load generator has 16 vCPU against the accepted run's 14 and the leaf
+NVMe is at least as fast as the measured Titanium SSD, so carrying the GCP
+timings forward is conservative rather than optimistic.
+
+[options="header",cols="4*"]
+|===
+|Price |Unit |USD per unit |Source
+
+|`i4i.4xlarge` on-demand Linux
+|instance-hour
+|1.3730
+|AWS Price List bulk CSV, `us-west-2`
+
+|`m7i.xlarge` on-demand Linux
+|instance-hour
+|0.2016
+|AWS Price List bulk CSV, `us-west-2`
+
+|`m7i.4xlarge` on-demand Linux
+|instance-hour
+|0.8064
+|AWS Price List bulk CSV, `us-west-2`
+
+|gp3 EBS
+|GB-month
+|0.0800
+|AWS Price List bulk CSV, `us-west-2`
+
+|S3 Standard, first 51,200 GB
+|GB-month
+|0.0230
+|AWS Price List bulk CSV, `us-west-2`
+
+|Internet data transfer out, first 10,240 GB
+|GB
+|0.0900
+|AWS Price List bulk CSV, `us-west-2`
+|===
+
+The leaf rate already includes its 3,750 GB instance store, so unlike the GCP
+Z3 shape there is no separate local-SSD line item. Each node adds a 100 GB gp3
+root volume, which is 100 x 0.08 / 730 = $0.0109589 per hour.
+
+[options="header",cols="4*"]
+|===
+|Topology |Nodes |Hourly rate |Basis
+
+|1 shard x 1 replica
+|3
+|$2.4138767
+|1 leaf, coordinator, load generator, three root volumes
+
+|2 shards x 1 replica
+|4
+|$3.7978356
+|2 leaves, coordinator, load generator, four root volumes
+
+|4 shards x 1 replica
+|6
+|$6.5657534
+|4 leaves, coordinator, load generator, six root volumes
+|===
+
+[options="header",cols="4*"]
+|===
+|Phase |1 shard |2 shards |4 shards
+
+|Provision and readiness
+|0.4 h
+|0.4 h
+|0.4 h
+
+|Corpus reload and batch gates
+|13.3 h
+|11.5 h
+|10.5 h
+
+|Raw query matrix, 210 timings
+|3.4 h
+|2.2 h
+|1.5 h
+
+|Acceleration matrix, 150 timings and four builds
+|0.8 h
+|0.5 h
+|0.3 h
+
+|Evidence export, cost capture, and destroy
+|0.6 h
+|0.6 h
+|0.6 h
+
+|Total
+|18.5 h
+|15.2 h
+|13.3 h
+|===
+
+The one-shard reload is the measured optimized wall clock. The two- and
+four-shard figures reuse the phase model from the approved GCP scaling estimate,
+which held the load-generator-bound insert phase constant and shrank the
+parallelized cumulative checksum scans with shard count; the ten-day fixtures
+account for 86.6% of the one-shard raw phase and are expected to scale close to
+leaf count, while the shorter ranges carry fixed coordinator cost.
+
+[options="header",cols="4*"]
+|===
+|Topology |Expected cost |Ceiling at 24 h |Ceiling at 30 h
+
+|1 shard x 1 replica
+|$44.66 at 18.5 h
+|$57.93
+|$72.42
+
+|2 shards x 1 replica
+|$57.73 at 15.2 h
+|$91.15
+|$113.94
+
+|4 shards x 1 replica
+|$87.32 at 13.3 h
+|$157.58
+|$196.97
+
+|All three topologies
+|$189.71
+|$306.66
+|$383.32
+|===
+
+Shared costs sit outside every topology. The corpus is 1,116,601,405,252 bytes,
+1,116.6 GB, which is $25.68 per month at the listed Standard rate whether or not
+a benchmark runs; the 45-day expiry bounds its lifetime cost at roughly $38.5.
+Result archives add under 1 GB. Same-region object reads and all intra-zone
+traffic are free, the S3 gateway endpoint avoids the metered internet path, and
+S3 request charges for 2,245 corpus objects are under one cent, so network cost
+is effectively zero. The GCS bucket that this replaces cost about $42 per month
+and is deleted once the S3 copy is verified.
+
+The approved matrix has a $400 account-wide budget ceiling. The accepted
+one-shard run consumed $32.19 of listed-price metered compute and root-volume
+cost, leaving the sequential two- and four-shard runs. Their original expected
+cost is $145.05, and their 24-hour topology ceilings total $248.73. Each
+topology is destroyed immediately after its archives, node evidence, and cost
+report are verified, so no two fleets bill concurrently.

@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Upload an inventory-verified corpus to S3 for the AWS benchmark topology.
+#
+# Verifies each source day against the committed inventory before uploading,
+# runs a bounded number of days concurrently, and re-verifies object counts and
+# byte totals in S3 afterwards. Resumable: `aws s3 sync` skips objects whose
+# size and timestamp already match, so a re-run continues rather than restarts.
+set -Eeuo pipefail
+
+if [[ "${LIGHTHOUSE_AWS_UPLOAD_APPROVED:-}" != "1" ]]; then
+  echo "set LIGHTHOUSE_AWS_UPLOAD_APPROVED=1 after approving the cloud upload" >&2
+  exit 1
+fi
+
+corpus_root="${1:?usage: benchmark-upload-aws-corpus CORPUS_ROOT INVENTORY_TSV BUCKET_URI RUN_ID}"
+inventory="${2:?usage: benchmark-upload-aws-corpus CORPUS_ROOT INVENTORY_TSV BUCKET_URI RUN_ID}"
+bucket_uri="${3:?usage: benchmark-upload-aws-corpus CORPUS_ROOT INVENTORY_TSV BUCKET_URI RUN_ID}"
+run_id="${4:?usage: benchmark-upload-aws-corpus CORPUS_ROOT INVENTORY_TSV BUCKET_URI RUN_ID}"
+
+aws_profile="${LIGHTHOUSE_AWS_PROFILE:-default}"
+region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
+parallelism="${LIGHTHOUSE_AWS_UPLOAD_PARALLELISM:-4}"
+runs_root="${LIGHTHOUSE_BENCH_RUNS:-${HOME}/lighthouse-benchmark/runs}"
+run_dir="${runs_root}/${run_id}"
+manifest="${run_dir}/corpus-sha256.tsv"
+
+[[ -d "${corpus_root}" ]] || { echo "corpus root not found: ${corpus_root}" >&2; exit 1; }
+[[ -f "${inventory}" ]] || { echo "inventory not found: ${inventory}" >&2; exit 1; }
+[[ "${bucket_uri}" == s3://* ]] || { echo "bucket URI must start with s3://" >&2; exit 1; }
+[[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid run ID: ${run_id}" >&2; exit 1; }
+[[ "${parallelism}" =~ ^[1-9][0-9]*$ ]] || { echo "parallelism must be a positive integer" >&2; exit 1; }
+[[ ! -e "${run_dir}" ]] || { echo "run directory already exists: ${run_dir}" >&2; exit 1; }
+
+aws_cmd=(aws --profile "${aws_profile}" --region "${region}")
+mkdir -p "${run_dir}/days"
+printf 'day\tfiles\tbytes\tremote_files\tremote_bytes\tseconds\n' > "${run_dir}/days.tsv"
+{
+  printf 'run_id=%s\n' "${run_id}"
+  printf 'corpus_root=%s\n' "${corpus_root}"
+  printf 'inventory=%s\n' "${inventory}"
+  printf 'bucket_uri=%s\n' "${bucket_uri}"
+  printf 'profile=%s\n' "${aws_profile}"
+  printf 'region=%s\n' "${region}"
+  printf 'parallelism=%s\n' "${parallelism}"
+  printf 'inventory_sha256=%s\n' "$(sha256sum "${inventory}" | awk '{ print $1 }')"
+  printf 'started_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "${run_dir}/run.env"
+
+# The inventory is the contract: a day that does not match is never uploaded.
+verify_local() {
+  local day="$1" expected_files="$2" expected_bytes="$3"
+  local source_dir="${corpus_root}/${day}"
+  [[ -d "${source_dir}" ]] || { echo "${day}: source directory missing" >&2; return 1; }
+  local files bytes
+  files="$(find "${source_dir}" -maxdepth 1 -type f -name '*.parquet' | wc -l)"
+  bytes="$(find "${source_dir}" -maxdepth 1 -type f -name '*.parquet' -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }')"
+  if [[ "${files}" != "${expected_files}" || "${bytes}" != "${expected_bytes}" ]]; then
+    echo "${day}: local corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${files}/${bytes}" >&2
+    return 1
+  fi
+  printf '%s\t%s\n' "${files}" "${bytes}"
+}
+
+upload_day() {
+  local day="$1" expected_files="$2" expected_bytes="$3"
+  local prefix="${bucket_uri%/}/corpus/${day}"
+  local started finished
+  verify_local "${day}" "${expected_files}" "${expected_bytes}" > "${run_dir}/days/${day}.local"
+  started="$(date +%s)"
+  "${aws_cmd[@]}" s3 sync "${corpus_root}/${day}" "${prefix}/" \
+    --only-show-errors --no-progress
+  finished="$(date +%s)"
+  local remote
+  remote="$("${aws_cmd[@]}" s3 ls --recursive --summarize "${prefix}/" | awk -F: '
+    /Total Objects/ { gsub(/ /, "", $2); objects = $2 }
+    /Total Size/    { gsub(/ /, "", $2); bytes = $2 }
+    END { print objects "\t" bytes }')"
+  local remote_files remote_bytes
+  IFS=$'\t' read -r remote_files remote_bytes <<< "${remote}"
+  if [[ "${remote_files}" != "${expected_files}" || "${remote_bytes}" != "${expected_bytes}" ]]; then
+    echo "${day}: remote corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${remote_files}/${remote_bytes}" >&2
+    return 1
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${day}" "${expected_files}" "${expected_bytes}" \
+    "${remote_files}" "${remote_bytes}" "$((finished - started))" >> "${run_dir}/days.tsv"
+  echo "${day}: uploaded ${expected_files} objects, ${expected_bytes} bytes in $((finished - started))s"
+}
+
+pids=()
+failures=0
+while IFS=$'\t' read -r day expected_files expected_bytes _rows _checksum; do
+  [[ "${day}" == day ]] && continue
+  upload_day "${day}" "${expected_files}" "${expected_bytes}" &
+  pids+=("$!")
+  if [[ "${#pids[@]}" -ge "${parallelism}" ]]; then
+    for pid in "${pids[@]}"; do wait "${pid}" || failures=$((failures + 1)); done
+    pids=()
+  fi
+done < "${inventory}"
+for pid in "${pids[@]}"; do wait "${pid}" || failures=$((failures + 1)); done
+if (( failures > 0 )); then
+  echo "${failures} day(s) failed; re-run to resume" >&2
+  exit 1
+fi
+
+# The manifest is regenerated from the local bytes so the uploaded corpus can be
+# re-validated independently of this script.
+printf '# relative_path\tbytes\tsha256\n' > "${manifest}"
+while IFS=$'\t' read -r day _files _bytes _rows _checksum; do
+  [[ "${day}" == day ]] && continue
+  while IFS= read -r file; do
+    printf '%s/%s\t%s\t%s\n' "${day}" "${file}" \
+      "$(stat -c '%s' "${corpus_root}/${day}/${file}")" \
+      "$(sha256sum "${corpus_root}/${day}/${file}" | awk '{ print $1 }')" >> "${manifest}"
+  done < <(find "${corpus_root}/${day}" -maxdepth 1 -type f -name '*.parquet' -printf '%f\n' | LC_ALL=C sort)
+done < "${inventory}"
+"${aws_cmd[@]}" s3 cp "${manifest}" "${bucket_uri%/}/manifests/${run_id}.tsv" --only-show-errors
+
+{
+  printf 'completed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'manifest_sha256=%s\n' "$(sha256sum "${manifest}" | awk '{ print $1 }')"
+} >> "${run_dir}/run.env"
+touch "${run_dir}/COMPLETED"
+echo "AWS corpus upload completed: ${run_dir}"

@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+# Capture metered Stage B resource usage and price it with the current public
+# GCP catalog, so a run's observed cost is reproducible without a billing
+# export. Run this while the topology still exists: the instance inventory is
+# read from the Compute API, while metered uptime comes from Cloud Monitoring.
+set -Eeuo pipefail
+
+project="${LIGHTHOUSE_GCP_PROJECT:-lighthouse-508219}"
+zone="${LIGHTHOUSE_GCP_ZONE:-us-central1-a}"
+bucket="${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}"
+instance_filter="${LIGHTHOUSE_GCP_INSTANCE_FILTER:-labels.experiment=015 AND labels.stage=b}"
+
+run_id="${1:-}"
+out_dir="${2:-}"
+if [[ -z "${run_id}" || -z "${out_dir}" ]]; then
+  echo "usage: $0 RUN_ID OUTPUT_DIR" >&2
+  echo "env: LIGHTHOUSE_GCP_PROJECT, LIGHTHOUSE_GCP_ZONE, LIGHTHOUSE_GCP_CORPUS_BUCKET," >&2
+  echo "     LIGHTHOUSE_GCP_INSTANCE_FILTER, LIGHTHOUSE_GCP_INTERVAL_START/END" >&2
+  exit 2
+fi
+[[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid run ID: ${run_id}" >&2; exit 2; }
+
+mkdir -p "${out_dir}"
+instances_json="${out_dir}/instances.json"
+uptime_json="${out_dir}/uptime.json"
+skus_jsonl="${out_dir}/billing-skus.jsonl"
+machine_types_json="${out_dir}/machine-types.json"
+storage_txt="${out_dir}/bucket-storage.txt"
+
+echo "collecting instance inventory for filter: ${instance_filter}" >&2
+gcloud compute instances list --project "${project}" --filter="${instance_filter}" \
+  --format=json > "${instances_json}"
+if [[ "$(jq 'length' "${instances_json}")" == "0" ]]; then
+  echo "no matching instances; collect cost evidence before destroying the topology" >&2
+  exit 1
+fi
+
+interval_start="${LIGHTHOUSE_GCP_INTERVAL_START:-$(jq -r '[.[].creationTimestamp] | min' "${instances_json}" | cut -c1-20)Z}"
+interval_end="${LIGHTHOUSE_GCP_INTERVAL_END:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+echo "metered interval: ${interval_start} through ${interval_end}" >&2
+
+token="$(gcloud auth print-access-token)"
+monitoring_filter="metric.type=\"compute.googleapis.com/instance/uptime\" AND metadata.user_labels.experiment=\"015\""
+curl -fsS -H "Authorization: Bearer ${token}" \
+  "https://monitoring.googleapis.com/v3/projects/${project}/timeSeries?filter=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "${monitoring_filter}")&interval.startTime=${interval_start}&interval.endTime=${interval_end}&aggregation.alignmentPeriod=3600s&aggregation.perSeriesAligner=ALIGN_SUM&view=FULL" \
+  > "${uptime_json}"
+
+# Public list prices for the exact shapes in use. The catalog is authoritative
+# and is snapshotted so a later price change cannot silently alter the result.
+: > "${skus_jsonl}"
+page=""
+for _ in $(seq 1 40); do
+  url="https://cloudbilling.googleapis.com/v1/services/6F81-5844-456A/skus?currencyCode=USD&pageSize=5000"
+  [[ -n "${page}" ]] && url="${url}&pageToken=${page}"
+  curl -fsS -H "Authorization: Bearer ${token}" "${url}" > "${out_dir}/skus-page.json"
+  jq -c '.skus[]?' "${out_dir}/skus-page.json" >> "${skus_jsonl}"
+  page="$(jq -r '.nextPageToken // ""' "${out_dir}/skus-page.json")"
+  [[ -n "${page}" ]] || break
+done
+rm -f "${out_dir}/skus-page.json"
+
+: > "${machine_types_json}"
+for machine_type in $(jq -r '.[].machineType | split("/") | last' "${instances_json}" | sort -u); do
+  gcloud compute machine-types describe "${machine_type}" --project "${project}" --zone "${zone}" \
+    --format=json >> "${machine_types_json}"
+done
+
+if gcloud storage du --summarize "${bucket}" > "${storage_txt}" 2>/dev/null; then
+  :
+else
+  echo "0 bytes ${bucket}" > "${storage_txt}"
+fi
+
+python3 - "${run_id}" "${project}" "${zone}" "${out_dir}" <<'PY'
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+run_id, project, zone, out_dir = sys.argv[1:5]
+out = Path(out_dir)
+
+# Integrated Titanium SSD capacity is part of the Z3 shape and is not exposed by
+# the machine-type API. Stage B hardware evidence measured 3,221,225,472,000
+# bytes (3,000 GiB) on z3-highmem-14-standardlssd, so price it at that capacity.
+local_ssd_gib = {"z3-highmem-14-standardlssd": 3000}
+
+sku_names = {
+    "Z3 Instance Core running in Americas": "z3_core",
+    "Z3 Instance Ram running in Americas": "z3_ram",
+    "Z3 Instance Local SSD running in Americas": "z3_local_ssd",
+    "E2 Instance Core running in Americas": "e2_core",
+    "E2 Instance Ram running in Americas": "e2_ram",
+    "N2 Custom Instance Core running in Americas": "n2_core",
+    "N2 Custom Instance Ram running in Americas": "n2_ram",
+    "Balanced PD Capacity": "balanced_pd",
+    "Network Inter Zone Data Transfer Out": "inter_zone_egress",
+}
+hours_per_month = 730.0
+
+prices = {}
+for line in (out / "billing-skus.jsonl").read_text().splitlines():
+    sku = json.loads(line)
+    description = sku.get("description", "")
+    if description not in sku_names:
+        continue
+    if "us-central1" not in sku.get("serviceRegions", []):
+        continue
+    for pricing in sku.get("pricingInfo", []):
+        expression = pricing.get("pricingExpression", {})
+        unit = expression.get("usageUnit")
+        for tier in expression.get("tieredRates", []):
+            price = tier["unitPrice"]
+            nanos = int(price.get("units", 0)) + price.get("nanos", 0) / 1e9
+            prices[sku_names[description]] = {"sku_id": sku["skuId"], "description": description,
+                                             "unit": unit, "usd_per_unit": nanos}
+
+machine_types = {}
+for line in (out / "machine-types.json").read_text().splitlines():
+    machine = json.loads(line)
+    machine_types[machine["name"]] = {"vcpus": machine["guestCpus"], "gib_ram": machine["memoryMb"] / 1024.0}
+
+uptime_seconds = {}
+for series in json.loads((out / "uptime.json").read_text()).get("timeSeries", []):
+    instance_id = series["resource"]["labels"].get("instance_id")
+    total = 0.0
+    for point in series.get("points", []):
+        value = point["value"]
+        total += value.get("doubleValue", 0.0) or value.get("int64Value", 0.0)
+    uptime_seconds[instance_id] = uptime_seconds.get(instance_id, 0.0) + total
+
+instances = json.loads((out / "instances.json").read_text())
+rows = []
+totals = {}
+for instance in instances:
+    instance_id = str(instance["id"])
+    machine_type = instance["machineType"].split("/")[-1]
+    family = machine_type.split("-")[0]
+    shape = machine_types.get(machine_type, {"vcpus": 0, "gib_ram": 0.0})
+    seconds = uptime_seconds.get(instance_id, 0.0)
+    hours = seconds / 3600.0
+    purpose = instance.get("labels", {}).get("purpose", "unknown")
+    metered = {
+        f"{family}_core": shape["vcpus"] * hours,
+        f"{family}_ram": shape["gib_ram"] * hours,
+    }
+    if family == "z3":
+        metered["z3_local_ssd"] = local_ssd_gib.get(machine_type, 0) * hours
+    for disk in instance.get("disks", []):
+        if disk.get("boot"):
+            metered["balanced_pd"] = metered.get("balanced_pd", 0.0) + int(disk.get("diskSizeGb", 0)) * hours
+    for sku, quantity in metered.items():
+        price = prices.get(sku)
+        if price is None or quantity == 0:
+            continue
+        # Storage prices are quoted per GiB-month, but usage is metered in
+        # GiB-hours, so convert the rate before multiplying.
+        if price["unit"].endswith(".mo"):
+            unit = "GiBy.h"
+            unit_cost = price["usd_per_unit"] / hours_per_month
+        else:
+            unit = price["unit"]
+            unit_cost = price["usd_per_unit"]
+        cost = quantity * unit_cost
+        rows.append((run_id, instance["name"], purpose, machine_type, sku, round(quantity, 6),
+                     unit, round(unit_cost, 9), round(cost, 6), price["sku_id"]))
+        totals[sku] = totals.get(sku, 0.0) + cost
+
+# `gcloud storage du --summarize` prints the byte count immediately before the
+# URL for a whole bucket and with a space for a prefix, so take the leading
+# integer instead of splitting on whitespace.
+match = re.match(r"\s*(\d+)", (out / "bucket-storage.txt").read_text())
+bucket_bytes = int(match.group(1)) if match else 0
+gib = bucket_bytes / (1024 ** 3)
+
+with (out / "cost.tsv").open("w", encoding="utf-8") as handle:
+    handle.write("run_id\tinstance\tpurpose\tmachine_type\tsku\tmetered_quantity\tunit\tunit_price_usd\tcost_usd\tsku_id\n")
+    for row in rows:
+        handle.write("\t".join(str(field) for field in row) + "\n")
+
+summary = {
+    "run_id": run_id,
+    "project": project,
+    "zone": zone,
+    "prices_fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "interval": {
+        "start": min(i["creationTimestamp"] for i in instances),
+        "end": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    },
+    "instances": [
+        {
+            "name": instance["name"],
+            "machine_type": instance["machineType"].split("/")[-1],
+            "purpose": instance.get("labels", {}).get("purpose", "unknown"),
+            "created": instance["creationTimestamp"],
+            "metered_hours": round(uptime_seconds.get(str(instance["id"]), 0.0) / 3600.0, 4),
+        }
+        for instance in instances
+    ],
+    "prices": prices,
+    "cost_by_sku_usd": {sku: round(cost, 6) for sku, cost in sorted(totals.items())},
+    "compute_and_disk_total_usd": round(sum(totals.values()), 6),
+    "bucket_bytes": bucket_bytes,
+    "bucket_gib": round(gib, 3),
+    "notes": [
+        "Cost is listed-price-for-metered-usage, not a metered invoice.",
+        "Metered uptime comes from compute.googleapis.com/instance/uptime.",
+        "Storage prices are GiB-month; instance quantities are GiB-hours converted with 730 hours per month.",
+        "Single-zone placement means no inter-zone egress; price measured coordinator network at the listed inter-zone rate separately.",
+        "GCS object storage and request charges are ongoing and not attributed to a single topology.",
+    ],
+}
+(out / "cost.json").write_text(json.dumps(summary, indent=2) + "\n")
+print(json.dumps(summary["cost_by_sku_usd"], indent=2))
+print("compute and disk total USD:", summary["compute_and_disk_total_usd"])
+PY
+
+echo "wrote ${out_dir}/cost.tsv and ${out_dir}/cost.json" >&2

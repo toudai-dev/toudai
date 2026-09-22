@@ -1,0 +1,81 @@
+{
+  "run_id": "experiment-015-stage-b-aws-1s-v3-stage",
+  "region": "us-west-2",
+  "bucket": "s3://lighthouse-exp015-benchmark-828361646739",
+  "prices_fetched_at": "2026-09-15",
+  "prices_source": "AWS Price List bulk CSV for us-west-2, extracted 2026-09-15",
+  "collected_at": "2026-09-22T11:33:33Z",
+  "instances": [
+    {
+      "instance_id": "i-053dca12f7650cb20",
+      "name": "lighthouse-exp015-stage-b-loadgen",
+      "instance_type": "m7i.4xlarge",
+      "purpose": "load-generator",
+      "launched": "2026-09-21T22:13:51+00:00",
+      "state": "running"
+    },
+    {
+      "instance_id": "i-079ae3c880cea4d05",
+      "name": "lighthouse-exp015-stage-b-coordinator",
+      "instance_type": "m7i.xlarge",
+      "purpose": "coordinator",
+      "launched": "2026-09-21T22:13:37+00:00",
+      "state": "running"
+    },
+    {
+      "instance_id": "i-0907196966108d661",
+      "name": "lighthouse-exp015-stage-b-leaf-01",
+      "instance_type": "i4i.4xlarge",
+      "purpose": "serving-leaf",
+      "launched": "2026-09-21T22:13:15+00:00",
+      "state": "running"
+    }
+  ],
+  "prices": {
+    "ebs:gp3": {
+      "usd_per_unit": 0.08,
+      "unit": "usd_per_GB-month"
+    },
+    "instance:i4i.4xlarge": {
+      "usd_per_unit": 1.373,
+      "unit": "usd_per_hour"
+    },
+    "instance:m7i.4xlarge": {
+      "usd_per_unit": 0.8064,
+      "unit": "usd_per_hour"
+    },
+    "instance:m7i.large": {
+      "usd_per_unit": 0.1008,
+      "unit": "usd_per_hour"
+    },
+    "instance:m7i.xlarge": {
+      "usd_per_unit": 0.2016,
+      "unit": "usd_per_hour"
+    },
+    "s3:standard": {
+      "usd_per_unit": 0.023,
+      "unit": "usd_per_GB-month"
+    },
+    "transfer:out_to_internet_first_10tb": {
+      "usd_per_unit": 0.09,
+      "unit": "usd_per_GB"
+    }
+  },
+  "cost_by_sku_usd": {
+    "ebs:gp3": 0.438351,
+    "instance:i4i.4xlarge": 18.313824,
+    "instance:m7i.4xlarge": 10.74814,
+    "instance:m7i.xlarge": 2.687819
+  },
+  "compute_and_disk_total_usd": 32.188134,
+  "bucket_bytes": 1116621838773,
+  "bucket_gib": 1039.935,
+  "bucket_storage_usd_per_month": 23.918508,
+  "notes": [
+    "Cost is listed-price-for-metered-usage, not a metered invoice.",
+    "Instance hours are wall-clock from launch to collection; benchmark nodes are on-demand and never stopped.",
+    "Storage prices are GB-month; instance quantities are GB-hours converted with 730 hours per month.",
+    "Single-AZ placement means no inter-AZ data transfer, and inbound transfer and internet egress are free or unused.",
+    "S3 storage is an ongoing charge for the whole corpus and is reported per month, not per topology."
+  ]
+}

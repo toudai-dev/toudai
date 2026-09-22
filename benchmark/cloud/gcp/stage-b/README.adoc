@@ -17,10 +17,103 @@ destroy each topology immediately after exporting results and hardware evidence.
 Typical workflow is `tofu init`,
 `tofu plan -var shard_count=1 -out=stage-b.tfplan`, review, apply deliberately,
 start the resumable load, then launch
-`benchmark/scripts/benchmark-run-gcp-distributed-stage` as its guarded
+`benchmark/scripts/benchmark-run-distributed-stage` as its guarded
 continuation. The continuation waits for complete load validation before
 running raw queries and acceleration builds; it stops and uploads failure
-evidence if loading or either benchmark phase fails. Export the remaining host
-evidence and `tofu destroy` after completion.
+evidence if loading or either benchmark phase fails.
+
+After the stage archive is uploaded, capture the node-level evidence and the
+metered cost before destroying the topology:
+
+[source,shell]
+----
+benchmark/scripts/benchmark-collect-gcp-stage-b-evidence \
+  RUN_ID .tmp/experiment-015/stage-b/RUN_ID/nodes
+benchmark/scripts/benchmark-gcp-stage-b-cost \
+  RUN_ID .tmp/experiment-015/stage-b/RUN_ID/cost
+----
+
+The collector reads each node over IAP SSH and falls back to the serial console,
+where the startup scripts mirror their `hardware.txt`. The cost collector needs
+the instances to still exist. Upload both bundles to the private artifact
+prefix, then `tofu destroy`.
+
 Repeat for shard counts 2 and 4. Compute, Local SSD, persistent disk, network,
 and storage charges accrue until resources are destroyed or reach their cap.
+
+== Scaling run runbook
+
+Run one topology at a time and keep the exact revision on the load generator,
+which has no repository of its own. Every benchmark command needs the image's
+Flox environment, because `clickhouse` and `gcloud` are not on the default
+`PATH`.
+
+Transfer the committed revision to the load generator and verify the preflight
+before starting the long load:
+
+[source,shell]
+----
+revision="$(jj log -r @- --no-graph -T commit_id)"
+git archive --format=tar.gz -o "/tmp/lighthouse-${revision}.tar.gz" "${revision}"
+sha256sum "/tmp/lighthouse-${revision}.tar.gz"
+
+zone=us-central1-a
+loadgen=lighthouse-exp015-stage-b-loadgen
+gcloud compute scp --tunnel-through-iap --zone "${zone}" \
+  "/tmp/lighthouse-${revision}.tar.gz" "${loadgen}:~/"
+gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command \
+  "mkdir -p ~/lighthouse && tar -xzf ~/lighthouse-${revision}.tar.gz -C ~/lighthouse"
+----
+
+The preflight must show a ClickHouse version, a readable corpus listing, and a
+healthy coordinator plus every leaf before any load starts:
+
+[source,shell]
+----
+gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command \
+  "flox activate --dir /opt/lighthouse -- bash -lc '
+     clickhouse local --version
+     gcloud storage ls gs://lighthouse-508219-lighthouse-exp015/corpus/2026-08-01/ | head -2
+     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
+     LIGHTHOUSE_CLUSTER_LEAF_HOSTS=LEAF_IPS \
+       ~/lighthouse/benchmark/scripts/benchmark-clickhouse-remote-cluster status SHARDS'"
+----
+
+Start the loader detached so an interrupted SSH session cannot kill it. The
+loader is resumable at a validated source-batch boundary, so a lost session is
+recoverable rather than fatal:
+
+[source,shell]
+----
+gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command \
+  "flox activate --dir /opt/lighthouse -- bash -lc '
+     cd ~/lighthouse
+     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
+     LIGHTHOUSE_CLUSTER_LEAF_HOSTS=LEAF_IPS \
+     LIGHTHOUSE_GCP_LOAD_PARALLELISM=8 \
+     LIGHTHOUSE_BENCH_REVISION=${revision} \
+     setsid nohup benchmark/scripts/benchmark-load-distributed SHARDS LOAD_RUN \
+       > ~/load.log 2>&1 < /dev/null &'"
+----
+
+Launch the guarded continuation the same way. It waits for the loader's
+`completed` state, so starting it early is safe:
+
+[source,shell]
+----
+gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command \
+  "flox activate --dir /opt/lighthouse -- bash -lc '
+     cd ~/lighthouse
+     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
+     LIGHTHOUSE_CLUSTER_LEAF_HOSTS=LEAF_IPS \
+     LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=LOAD_RUN \
+     LIGHTHOUSE_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs \
+     LIGHTHOUSE_BENCH_REVISION=${revision} \
+     setsid nohup benchmark/scripts/benchmark-run-distributed-stage SHARDS STAGE_RUN \
+       > ~/stage.log 2>&1 < /dev/null &'"
+----
+
+Poll `status` and `days.tsv` through the SSH session rather than assuming
+progress from a live process. After the stage archive uploads, run the node
+evidence collector and the cost collector, upload both bundles, and destroy the
+topology.

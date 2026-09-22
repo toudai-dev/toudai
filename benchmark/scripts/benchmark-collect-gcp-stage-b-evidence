@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Collect per-node Stage B host evidence before the topology is destroyed.
+#
+# The startup scripts write hardware.txt on every node, but nothing else copies
+# it off the instance. This reads the coordinator and every leaf over IAP SSH,
+# falls back to the serial console when SSH is unavailable, and writes a
+# checksummed bundle of node-level evidence.
+set -Eeuo pipefail
+
+project="${LIGHTHOUSE_GCP_PROJECT:-lighthouse-508219}"
+zone="${LIGHTHOUSE_GCP_ZONE:-us-central1-a}"
+instance_filter="${LIGHTHOUSE_GCP_INSTANCE_FILTER:-labels.experiment=015 AND labels.stage=b}"
+ssh_attempts="${LIGHTHOUSE_GCP_SSH_ATTEMPTS:-3}"
+
+run_id="${1:-}"
+out_dir="${2:-}"
+if [[ -z "${run_id}" || -z "${out_dir}" ]]; then
+  echo "usage: $0 RUN_ID OUTPUT_DIR" >&2
+  echo "env: LIGHTHOUSE_GCP_PROJECT, LIGHTHOUSE_GCP_ZONE, LIGHTHOUSE_GCP_INSTANCE_FILTER" >&2
+  exit 2
+fi
+[[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid run ID: ${run_id}" >&2; exit 2; }
+
+mkdir -p "${out_dir}"
+nodes_file="${out_dir}/nodes.tsv"
+gcloud compute instances list --project "${project}" --filter="${instance_filter}" \
+  --format="csv[no-heading](name,zone.basename(),labels.purpose)" | LC_ALL=C sort > "${nodes_file}"
+if [[ ! -s "${nodes_file}" ]]; then
+  echo "no matching instances; collect evidence before destroying the topology" >&2
+  exit 1
+fi
+cat "${nodes_file}"
+
+# Runs on the remote node. Kept free of locally expanded variables so the same
+# text reaches the remote shell unchanged.
+read -r -d '' remote_command <<'REMOTE' || true
+set -u
+state=/var/lib/lighthouse-stage-b
+echo "### node"
+hostname
+date --utc --iso-8601=seconds
+echo "### hardware"
+cat "${state}/hardware.txt" 2>/dev/null || echo "hardware.txt missing"
+echo "### mount"
+df -h /mnt/disks/clickhouse 2>/dev/null || df -h /var/lib/lighthouse-clickhouse 2>/dev/null || df -h /
+echo "### block_devices"
+lsblk --bytes --output NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS
+echo "### clickhouse_version"
+flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT version()" 2>&1 || echo "clickhouse client unavailable"
+echo "### clickhouse_asynchronous_metrics"
+flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT metric, value FROM system.asynchronous_metrics WHERE metric IN ('MemoryResident', 'MemoryVirtual', 'Uptime', 'LoadAverage1', 'FilesystemMainPathAvailableBytes', 'FilesystemMainPathTotalBytes') ORDER BY metric FORMAT TSVRaw" 2>&1 || true
+echo "### table_storage"
+flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT table, sum(rows), sum(bytes_on_disk), count() FROM system.parts WHERE active AND database = 'benchmark_distributed' GROUP BY table ORDER BY table FORMAT TSVRaw" 2>&1 || true
+echo "### query_log"
+flox activate --dir /opt/lighthouse -- clickhouse client --query "SELECT count(), min(event_time), max(event_time) FROM system.query_log FORMAT TSVRaw" 2>&1 || true
+echo "### service"
+systemctl is-active lighthouse-clickhouse.service 2>&1 || true
+REMOTE
+
+failures=0
+while IFS=',' read -r name node_zone purpose; do
+  [[ -n "${name}" ]] || continue
+  target="${out_dir}/${name}.txt"
+  collected=0
+  for attempt in $(seq 1 "${ssh_attempts}"); do
+    if gcloud compute ssh "${name}" --project "${project}" --zone "${node_zone}" \
+      --tunnel-through-iap --command="${remote_command}" > "${target}" 2> "${target}.err"; then
+      collected=1
+      break
+    fi
+    echo "ssh attempt ${attempt} failed for ${name}" >&2
+    sleep $((attempt * 5))
+  done
+  if (( collected )); then
+    rm -f "${target}.err"
+    echo "collected ${purpose} ${name}"
+    continue
+  fi
+  echo "ssh unavailable for ${name}; falling back to serial console output" >&2
+  if gcloud compute instances get-serial-port-output "${name}" --project "${project}" \
+    --zone "${node_zone}" --port 1 > "${target}" 2>/dev/null; then
+    echo "serial-fallback ${purpose} ${name}"
+  else
+    echo "failed to collect evidence for ${name}" >&2
+    failures=$((failures + 1))
+  fi
+  rm -f "${target}.err"
+done < "${nodes_file}"
+
+{
+  echo "run_id=${run_id}"
+  echo "project=${project}"
+  echo "zone=${zone}"
+  echo "instance_filter=${instance_filter}"
+  echo "collected_at=$(date -u +%FT%TZ)"
+  echo "nodes=$(wc -l < "${nodes_file}")"
+} > "${out_dir}/collection.txt"
+
+if (( failures > 0 )); then
+  echo "${failures} node(s) produced no evidence" >&2
+  exit 1
+fi
+
+( cd "${out_dir}" && sha256sum ./*.txt > SHA256SUMS )
+echo "wrote ${out_dir}/SHA256SUMS"
+cat "${out_dir}/SHA256SUMS"

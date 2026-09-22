@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
+# Resumable distributed Stage B loader.
+#
+# Renamed from `benchmark-load-gcp-distributed` when the AWS Stage B topology
+# was added: the object store is selected from the bucket URI scheme, so the
+# loader is cloud-neutral. The accepted GCP one-shard run was produced by the
+# previous name at the revision recorded in its own run manifest.
 set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=lib/object-store.sh
+source "${repo_root}/benchmark/scripts/lib/object-store.sh"
 shards="${1:-}"
 run_id="${2:-}"
 coordinator="${LIGHTHOUSE_CLUSTER_COORDINATOR_HOST:-}"
 leaf_spec="${LIGHTHOUSE_CLUSTER_LEAF_HOSTS:-}"
-bucket="${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}"
+# LIGHTHOUSE_CORPUS_BUCKET is the cloud-neutral name; the GCP-specific name is
+# still read so recorded runbooks keep working unchanged.
+bucket="${LIGHTHOUSE_CORPUS_BUCKET:-${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}}"
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
 revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
-parallelism="${LIGHTHOUSE_GCP_LOAD_PARALLELISM:-2}"
-inventory="${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv"
+parallelism="${LIGHTHOUSE_LOAD_PARALLELISM:-${LIGHTHOUSE_GCP_LOAD_PARALLELISM:-2}}"
+inventory="${LIGHTHOUSE_CORPUS_INVENTORY:-${LIGHTHOUSE_GCP_CORPUS_INVENTORY:-${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv}}"
 transform="${repo_root}/benchmark/clickhouse/gcp-parquet-to-events.sql"
 structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
+
+# Fail before any cluster work if the configured object store is unreachable.
+object_store_check "${bucket}"
 
 usage() {
   echo "usage: LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=IP LIGHTHOUSE_CLUSTER_LEAF_HOSTS=IP,... $0 SHARDS RUN_ID" >&2
@@ -22,7 +35,7 @@ usage() {
 case "${shards}" in 1|2|4) ;; *) usage ;; esac
 [[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || usage
 if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 16 ]]; then
-  echo "LIGHTHOUSE_GCP_LOAD_PARALLELISM must be between 1 and 16" >&2
+  echo "LIGHTHOUSE_LOAD_PARALLELISM must be between 1 and 16" >&2
   exit 2
 fi
 IFS=',' read -r -a leaves <<< "${leaf_spec}"
@@ -142,6 +155,12 @@ global_state() {
     SELECT count(), sum(sipHash64(event_id, timestamp, attributes, resource, body))
     FROM benchmark_distributed.events FORMAT TSVRaw"
 }
+# MergeTree part headers answer count() without reading any column, so this is a
+# cheap state probe. The checksum scan above is O(accumulated corpus) and is
+# therefore reserved for the batch gates that actually need it.
+global_rows() {
+  "${client[@]}" --query "SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw"
+}
 expected_state() {
   local through_day="$1"
   awk -F '\t' -v through_day="${through_day}" \
@@ -160,7 +179,7 @@ load_object() (
   # a transient credential failure cannot turn a partial stream into an insert.
   for attempt in 1 2 3; do
     rm -f "${object_file}"
-    if gcloud storage cp "${object}" "${object_file}"; then
+    if object_store_get "${object}" "${object_file}"; then
       break
     fi
     if [[ "${attempt}" == 3 ]]; then
@@ -182,7 +201,6 @@ mv "${run_dir}/days.tsv.tmp" "${run_dir}/days.tsv"
 
 echo loading > "${run_dir}/status"
 previous_rows=0
-previous_checksum=0
 while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected_checksum; do
   [[ "${day}" == day ]] && continue
   marker="${state_dir}/${day}.done"
@@ -190,29 +208,34 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
 
   if [[ -f "${marker}" ]]; then
     previous_rows="${cumulative_rows}"
-    previous_checksum="${cumulative_checksum}"
     continue
   fi
 
   remote_prefix="${bucket%/}/corpus/${day}"
-  mapfile -t objects < <(gcloud storage ls "${remote_prefix}/**" | LC_ALL=C sort)
-  remote_bytes="$(gcloud storage du --summarize "${remote_prefix}" | awk '{print $1}')"
+  mapfile -t objects < <(object_store_list "${remote_prefix}")
+  remote_bytes="$(object_store_bytes "${remote_prefix}")"
   if [[ "${#objects[@]}" != "${expected_files}" || "${remote_bytes}" != "${expected_bytes}" ]]; then
     fail corpus-mismatch "${day} corpus mismatch: expected ${expected_files}/${expected_bytes}, found ${#objects[@]}/${remote_bytes}"
   fi
 
-  IFS=$'\t' read -r current_rows current_checksum <<< "$(global_state)"
-  if [[ "${current_rows}" == "${cumulative_rows}" && "${current_checksum}" == "${cumulative_checksum}" ]]; then
-    printf 'recovered\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
-    printf '%s\t%s\t%s\t0\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "$(date -u +%FT%TZ)" >> "${run_dir}/days.tsv"
-    previous_rows="${cumulative_rows}"
-    previous_checksum="${cumulative_checksum}"
-    continue
+  IFS=$'\t' read -r current_rows <<< "$(global_rows)"
+  if [[ "${current_rows}" == "${cumulative_rows}" ]]; then
+    # The accumulated rows may already include this batch if an earlier attempt
+    # was interrupted after inserting it and before writing its marker. Only
+    # that ambiguous state needs the full checksum; a partial batch always
+    # changes the row count, so the probe above detects it either way.
+    IFS=$'\t' read -r current_rows current_checksum <<< "$(global_state)"
+    if [[ "${current_rows}" == "${cumulative_rows}" && "${current_checksum}" == "${cumulative_checksum}" ]]; then
+      printf 'recovered\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
+      printf '%s\t%s\t%s\t0\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "$(date -u +%FT%TZ)" >> "${run_dir}/days.tsv"
+      previous_rows="${cumulative_rows}"
+      continue
+    fi
   fi
-  if [[ "${current_rows}" != "${previous_rows}" || "${current_checksum}" != "${previous_checksum}" ]]; then
+  if [[ "${current_rows}" != "${previous_rows}" ]]; then
     # Source folders can overlap event-time partitions, so a partial source
     # batch cannot be removed safely without source provenance.
-    fail partial-source-batch "${day}: expected prior state ${previous_rows}/${previous_checksum}, found ${current_rows}/${current_checksum}"
+    fail partial-source-batch "${day}: expected prior row count ${previous_rows}, found ${current_rows}"
   fi
 
   echo "${day}: loading ${expected_files} Parquet objects (${expected_rows} rows)"
@@ -248,10 +271,9 @@ while IFS=$'\t' read -r day expected_files expected_bytes expected_rows expected
   printf 'loaded\t%s\t%s\n' "${expected_rows}" "${expected_checksum}" > "${marker}"
   printf '%s\t%s\t%s\t%s\t%s\n' "${day}" "${expected_rows}" "${expected_checksum}" "${duration_ms}" "${completed_at}" >> "${run_dir}/days.tsv"
   previous_rows="${cumulative_rows}"
-  previous_checksum="${cumulative_checksum}"
   remote_marker="${bucket%/}/artifacts/stage-b/${run_id}/days/${day}.done"
-  if ! gcloud storage ls "${remote_marker}" >/dev/null 2>&1; then
-    gcloud storage cp "${marker}" "${remote_marker}" --cache-control=no-store
+  if ! object_store_exists "${remote_marker}"; then
+    object_store_put "${marker}" "${remote_marker}"
   fi
 done < "${inventory}"
 
@@ -281,7 +303,7 @@ EOF
 date -u +%FT%TZ > "${run_dir}/completed-at"
 echo completed > "${run_dir}/status"
 tar -C "${runs_root}" -czf "${run_dir}.tar.gz" "${run_id}"
-gcloud storage cp "${run_dir}.tar.gz" "${bucket%/}/artifacts/stage-b/${run_id}/${run_id}.tar.gz" --cache-control=no-store
+object_store_put "${run_dir}.tar.gz" "${bucket%/}/artifacts/stage-b/${run_id}/${run_id}.tar.gz"
 failed=0
 trap - EXIT
-echo "distributed GCP load completed: ${run_dir}"
+echo "distributed load completed: ${run_dir}"

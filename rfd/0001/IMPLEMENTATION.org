@@ -780,6 +780,32 @@ criterion.
 - [X] Complete, validate, preserve, and tear down the GCP Stage B one-shard
   baseline: 5.69B rows, 210 raw timings, 150 accelerated timings, complete
   coordinator and leaf query telemetry, and 150 passing correctness checks.
+- [X] Prepare the two- and four-shard Stage B scaling run: remove the redundant
+  pre-batch corpus scan from the distributed loader, add metered-cost and
+  node-evidence collectors, re-verify the immutable ten-day corpus inventory,
+  and record the runtime and maximum-cost estimate for explicit budget
+  approval.
+- [X] Complete, validate, preserve, and tear down the AWS Stage B one-shard
+  same-hardware baseline: 5.69B rows, 210 raw timings, 150 accelerated timings,
+  150 passing correctness checks, node evidence, and $32.19 metered listed-price
+  compute and root-volume cost. Record compact evidence under
+  =experiments/015/aws-1s-v3/= and fix the finisher to export its AWS profile to
+  OpenTofu before the remaining runs.
+- [ ] Provision and complete the AWS two- and four-shard Stage B topologies. The
+  GCP path is closed: every local-SSD family in the account is capped at 24 vCPUs
+  in every region and both the automatic and the manually reviewed
+  `CPUS_PER_VM_FAMILY` increases were denied, while a two-shard topology needs 28
+  and a four-shard topology needs 56. The scaling matrix moved to AWS and the
+  preparation is complete and verified: a single-AZ network, provider-side
+  lifetime watchdog and budget guardrails, a boot-tested
+  `ami-0298fd5dbaa1abaff` carrying the pinned
+  ClickHouse 26.8.2.7 closure, and the immutable ten-day corpus in S3 with its
+  object count and byte total matching the checksummed inventory exactly. A
+  one-shard smoke test and the accepted AWS one-shard baseline passed end to end
+  and were destroyed, and the GCP images, network, and corpus bucket are deleted
+  with the artifacts archived to S3. The remaining two- and four-shard runs are
+  approved, sequential, and bounded by 24-hour topology ceilings and the $400
+  account-wide budget.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
   with the completed same-cloud GCP run, then complete the two- and four-shard
   10 TB scaling matrix and run replicated failure-domain, sustained-ingestion,

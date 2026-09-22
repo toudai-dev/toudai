@@ -3,6 +3,9 @@
   "manifest": {
     "schema-version": "1.15.0",
     "install": {
+      "awscli2": {
+        "pkg-path": "awscli2"
+      },
       "cargo": {
         "pkg-path": "cargo"
       },
@@ -54,6 +57,38 @@
     }
   },
   "packages": [
+    {
+      "attr_path": "awscli2",
+      "broken": false,
+      "derivation": "/nix/store/w1qdkgk5k5v3vb0pl4rqsyzrhdh82av2-awscli2-2.35.11.drv",
+      "description": "Unified tool to manage your AWS services",
+      "install_id": "awscli2",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "name": "awscli2-2.35.11",
+      "pname": "awscli2",
+      "rev": "8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe",
+      "rev_count": 1070770,
+      "rev_date": "2026-09-10T02:20:05Z",
+      "scrape_date": "2026-09-11T06:06:40.525766Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.35.11",
+      "outputs_to_install": [
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "dist": "/nix/store/nbppn3jrc8h7gp9yc4w7vs7l7d0r3lx1-awscli2-2.35.11-dist",
+        "out": "/nix/store/f7cmpy9nszykh5gfjpxh5ks3pa78nssr-awscli2-2.35.11"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
     {
       "attr_path": "cargo",
       "broken": false,
@@ -361,6 +396,7 @@
       "unfree": false,
       "version": "2026-08-03",
       "outputs_to_install": [
+        "out",
         "out"
       ],
       "outputs": {

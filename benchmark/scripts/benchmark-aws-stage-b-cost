@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# Capture metered Stage B resource usage and price it with the public AWS price
+# list, so a run's observed cost is reproducible without a billing export.
+#
+# Run this while the topology still exists: instance type, launch time, and root
+# volume size are all read from the EC2 API, and terminated instances disappear
+# from that inventory.
+set -Eeuo pipefail
+
+region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
+profile_args=()
+[[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]] && profile_args=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
+instance_filter="${LIGHTHOUSE_AWS_INSTANCE_FILTER:-Name=tag:experiment,Values=015 Name=tag:stage,Values=b Name=instance-state-name,Values=running,pending}"
+bucket="${LIGHTHOUSE_CORPUS_BUCKET:-s3://lighthouse-exp015-benchmark-828361646739}"
+
+run_id="${1:-}"
+out_dir="${2:-}"
+if [[ -z "${run_id}" || -z "${out_dir}" ]]; then
+  echo "usage: $0 RUN_ID OUTPUT_DIR" >&2
+  echo "env: LIGHTHOUSE_AWS_PROFILE, LIGHTHOUSE_AWS_REGION, LIGHTHOUSE_CORPUS_BUCKET," >&2
+  echo "     LIGHTHOUSE_AWS_INSTANCE_FILTER, LIGHTHOUSE_AWS_PRICES_FILE" >&2
+  exit 2
+fi
+[[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid run ID: ${run_id}" >&2; exit 2; }
+
+aws_cmd=(aws "${profile_args[@]}" --region "${region}")
+mkdir -p "${out_dir}"
+instances_json="${out_dir}/instances.json"
+prices_tsv="${out_dir}/prices.tsv"
+storage_txt="${out_dir}/bucket-storage.txt"
+
+# Public list prices for the shapes and storage in use, read from the AWS Price
+# List bulk CSV for us-west-2 (identical to us-east-1 for these items). The
+# catalog is authoritative but only published as multi-hundred-megabyte bulk
+# files, so the extracted rates are pinned here and snapshotted with every run:
+# a later price change cannot silently alter a recorded result. Override the
+# whole table with LIGHTHOUSE_AWS_PRICES_FILE when re-verifying.
+if [[ -n "${LIGHTHOUSE_AWS_PRICES_FILE:-}" ]]; then
+  cp "${LIGHTHOUSE_AWS_PRICES_FILE}" "${prices_tsv}"
+else
+  cat > "${prices_tsv}" <<'PRICES'
+# sku	instance_type_or_class	unit_price_usd	unit
+instance	i4i.4xlarge	1.3730	usd_per_hour
+instance	m7i.large	0.1008	usd_per_hour
+instance	m7i.xlarge	0.2016	usd_per_hour
+instance	m7i.4xlarge	0.8064	usd_per_hour
+ebs	gp3	0.08	usd_per_GB-month
+s3	standard	0.023	usd_per_GB-month
+transfer	out_to_internet_first_10tb	0.09	usd_per_GB
+PRICES
+fi
+
+echo "collecting instance inventory for filter: ${instance_filter}" >&2
+# shellcheck disable=SC2086
+"${aws_cmd[@]}" ec2 describe-instances --filters ${instance_filter} --output json > "${instances_json}"
+if [[ "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["Reservations"]))' "${instances_json}")" == "0" ]]; then
+  echo "no matching instances; collect cost evidence before destroying the topology" >&2
+  exit 1
+fi
+
+# `describe-instances` omits volume size, so the root volumes are looked up
+# separately. The root mapping is matched by name in Python rather than in a
+# JMESPath filter, which cannot compare a field against a sibling field.
+root_volume_ids="$(python3 -c '
+import json, sys
+inventory = json.load(open(sys.argv[1]))
+ids = set()
+for reservation in inventory["Reservations"]:
+    for instance in reservation["Instances"]:
+        for mapping in instance.get("BlockDeviceMappings", []):
+            if mapping["DeviceName"] == instance.get("RootDeviceName") and "Ebs" in mapping:
+                ids.add(mapping["Ebs"]["VolumeId"])
+print(" ".join(sorted(ids)))
+' "${instances_json}")"
+volumes_tsv="${out_dir}/volumes.tsv"
+printf '# volume_id\tsize_gb\tvolume_type\n' > "${volumes_tsv}"
+if [[ -n "${root_volume_ids// /}" ]]; then
+  # shellcheck disable=SC2086
+  "${aws_cmd[@]}" ec2 describe-volumes --volume-ids ${root_volume_ids} \
+    --query 'Volumes[].[VolumeId, Size, VolumeType]' --output text | LC_ALL=C sort >> "${volumes_tsv}"
+fi
+
+# The bucket total is an ongoing storage line item rather than a per-topology
+# charge, but it is recorded here because the corpus only exists for the
+# benchmark and its cost has to be attributable somewhere.
+# shellcheck source=lib/object-store.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/benchmark/scripts/lib/object-store.sh"
+printf '%s\t%s\n' "$(object_store_bucket_bytes "${bucket}")" "${bucket}" > "${storage_txt}"
+
+python3 - "${run_id}" "${region}" "${bucket}" "${out_dir}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+run_id, region, bucket, out_dir = sys.argv[1:5]
+out = Path(out_dir)
+hours_per_month = 730.0
+
+prices = {}
+for line in (out / "prices.tsv").read_text().splitlines():
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    sku, name, price, unit = line.split("\t")
+    prices[(sku, name)] = {"usd_per_unit": float(price), "unit": unit}
+
+instances = []
+for reservation in json.loads((out / "instances.json").read_text())["Reservations"]:
+    for instance in reservation["Instances"]:
+        instances.append(instance)
+instances.sort(key=lambda i: i["InstanceId"])
+
+volumes = {}
+for line in (out / "volumes.tsv").read_text().splitlines():
+    if not line or line.startswith("#"):
+        continue
+    volume_id, size, volume_type = line.split("\t")
+    volumes[volume_id] = {"size_gb": int(size), "volume_type": volume_type}
+
+now = datetime.now(timezone.utc)
+rows = []
+totals = {}
+
+for instance in instances:
+    tags = {tag["Key"]: tag["Value"] for tag in instance.get("Tags", [])}
+    purpose = tags.get("role", "unknown")
+    name = tags.get("Name", instance["InstanceId"])
+    instance_type = instance["InstanceType"]
+    # Benchmark nodes are on-demand and are never stopped, so wall-clock time
+    # since launch is the billed instance time.
+    launched = datetime.fromisoformat(instance["LaunchTime"])
+    hours = (now - launched).total_seconds() / 3600.0
+
+    metered = {("instance", instance_type): hours}
+    for mapping in instance.get("BlockDeviceMappings", []):
+        if mapping["DeviceName"] != instance.get("RootDeviceName"):
+            continue
+        volume = volumes.get(mapping.get("Ebs", {}).get("VolumeId"))
+        if volume is None:
+            continue
+        metered[("ebs", volume["volume_type"])] = volume["size_gb"] * hours
+
+    for (sku, key), quantity in metered.items():
+        price = prices.get((sku, key))
+        if price is None or quantity == 0:
+            continue
+        # Storage rates are quoted per GB-month but usage is metered in
+        # GB-hours, so convert the rate before multiplying.
+        if price["unit"].endswith("month"):
+            unit = "GB-h"
+            unit_cost = price["usd_per_unit"] / hours_per_month
+        else:
+            unit = price["unit"].replace("usd_per_", "")
+            unit_cost = price["usd_per_unit"]
+        cost = quantity * unit_cost
+        rows.append((run_id, name, purpose, instance_type, f"{sku}:{key}", round(quantity, 6),
+                     unit, round(unit_cost, 9), round(cost, 6)))
+        totals[f"{sku}:{key}"] = totals.get(f"{sku}:{key}", 0.0) + cost
+
+# The bucket line is priced at the first-tier standard rate and reported as
+# GB-month rather than GB-hours, because it outlives every topology.
+bucket_bytes = int((out / "bucket-storage.txt").read_text().split()[0])
+bucket_gib = bucket_bytes / (1024 ** 3)
+s3_price = prices[("s3", "standard")]["usd_per_unit"]
+storage_cost = bucket_gib * s3_price
+
+with (out / "cost.tsv").open("w", encoding="utf-8") as handle:
+    handle.write("run_id\tinstance\tpurpose\tinstance_type\tsku\tmetered_quantity\tunit\tunit_price_usd\tcost_usd\n")
+    for row in rows:
+        handle.write("\t".join(str(field) for field in row) + "\n")
+
+summary = {
+    "run_id": run_id,
+    "region": region,
+    "bucket": bucket,
+    "prices_fetched_at": "2026-09-15",
+    "prices_source": "AWS Price List bulk CSV for us-west-2, extracted 2026-09-15",
+    "collected_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "instances": [
+        {
+            "instance_id": instance["InstanceId"],
+            "name": {tag["Key"]: tag["Value"] for tag in instance.get("Tags", [])}.get("Name"),
+            "instance_type": instance["InstanceType"],
+            "purpose": {tag["Key"]: tag["Value"] for tag in instance.get("Tags", [])}.get("role", "unknown"),
+            "launched": instance["LaunchTime"],
+            "state": instance["State"]["Name"],
+        }
+        for instance in instances
+    ],
+    "prices": {f"{sku}:{name}": value for (sku, name), value in sorted(prices.items())},
+    "cost_by_sku_usd": {sku: round(cost, 6) for sku, cost in sorted(totals.items())},
+    "compute_and_disk_total_usd": round(sum(totals.values()), 6),
+    "bucket_bytes": bucket_bytes,
+    "bucket_gib": round(bucket_gib, 3),
+    "bucket_storage_usd_per_month": round(storage_cost, 6),
+    "notes": [
+        "Cost is listed-price-for-metered-usage, not a metered invoice.",
+        "Instance hours are wall-clock from launch to collection; benchmark nodes are on-demand and never stopped.",
+        "Storage prices are GB-month; instance quantities are GB-hours converted with 730 hours per month.",
+        "Single-AZ placement means no inter-AZ data transfer, and inbound transfer and internet egress are free or unused.",
+        "S3 storage is an ongoing charge for the whole corpus and is reported per month, not per topology.",
+    ],
+}
+(out / "cost.json").write_text(json.dumps(summary, indent=2) + "\n")
+print(json.dumps(summary["cost_by_sku_usd"], indent=2))
+print("compute and disk total USD:", summary["compute_and_disk_total_usd"])
+print("bucket storage USD per month:", summary["bucket_storage_usd_per_month"])
+PY
+
+echo "wrote ${out_dir}/cost.tsv and ${out_dir}/cost.json" >&2
