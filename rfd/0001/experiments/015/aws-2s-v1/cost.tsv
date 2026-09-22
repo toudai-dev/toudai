@@ -1,0 +1,9 @@
+run_id	instance	purpose	instance_type	sku	metered_quantity	unit	unit_price_usd	cost_usd
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-leaf-01	serving-leaf	i4i.4xlarge	instance:i4i.4xlarge	8.981016	hour	1.373	12.330935
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-leaf-01	serving-leaf	i4i.4xlarge	ebs:gp3	898.101602	GB-h	0.000109589	0.098422
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-loadgen	load-generator	m7i.4xlarge	instance:m7i.4xlarge	8.971016	hour	0.8064	7.234227
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-loadgen	load-generator	m7i.4xlarge	ebs:gp3	897.101602	GB-h	0.000109589	0.098313
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-coordinator	coordinator	m7i.xlarge	instance:m7i.xlarge	8.974627	hour	0.2016	1.809285
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-coordinator	coordinator	m7i.xlarge	ebs:gp3	897.462713	GB-h	0.000109589	0.098352
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-leaf-02	serving-leaf	i4i.4xlarge	instance:i4i.4xlarge	8.980738	hour	1.373	12.330554
+experiment-015-stage-b-aws-2s-v1-stage	lighthouse-exp015-stage-b-leaf-02	serving-leaf	i4i.4xlarge	ebs:gp3	898.073824	GB-h	0.000109589	0.098419
