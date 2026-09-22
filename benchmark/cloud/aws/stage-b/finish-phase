@@ -16,7 +16,12 @@ load_run="${4:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 
 region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
 profile_args=()
-[[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]] && profile_args=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
+if [[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]]; then
+  profile_args=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
+  # OpenTofu cannot consume the AWS CLI's --profile arguments, so export the
+  # same profile or terminal-status teardown can leave the fleet billing.
+  export AWS_PROFILE="${LIGHTHOUSE_AWS_PROFILE}"
+fi
 aws_cmd=(aws "${profile_args[@]}" --region "${region}")
 bucket="${LIGHTHOUSE_CORPUS_BUCKET:-s3://lighthouse-exp015-benchmark-828361646739}"
 runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-/home/lighthouse/lighthouse-stage-b/runs}"
