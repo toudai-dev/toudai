@@ -1,0 +1,19 @@
+{
+  "run_id": "experiment-015-stage-b-aws-2s-v1-raw",
+  "repository_revision": "deea7845bb2126c21ae85262d3d032743abc0f2b",
+  "clickhouse_version": "26.8.2.7",
+  "load_run": "experiment-015-stage-b-aws-2s-v1-load",
+  "rows": 5689254359,
+  "shards": 2,
+  "replicas": 1,
+  "ranges": "5m,1h,6h,24h,10d",
+  "cache_modes": "clickhouse-cold,warm",
+  "repetitions": 3,
+  "query_max_memory": 17179869184,
+  "fixture_filter": "",
+  "service": "executor",
+  "severity": "ERROR",
+  "dynamic_value": "event_lifecycle",
+  "cache_policy": "ClickHouse-managed caches only; Linux page cache and ZFS ARC remain uncontrolled",
+  "execution": "serial"
+}

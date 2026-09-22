@@ -1564,6 +1564,54 @@ Compact review evidence is committed under
 evidence, and accepted result bundle remain in the private S3 experiment
 bucket.
 
+=== AWS Stage B two-shard result
+
+The accepted two-shard run, `experiment-015-stage-b-aws-2s-v1`, ran at
+repository revision `deea7845bb2126c21ae85262d3d032743abc0f2b`. It validated
+all 5,689,254,359 rows, completed 210 raw and 150 accelerated timings, and
+passed all 150 correctness checks. The two leaves held 2,844,611,612 and
+2,844,642,747 rows respectively, a difference of 31,135 rows (0.0011% of the
+per-leaf mean).
+
+[options="header",cols="4*"]
+|===
+|Phase |1 shard |2 shards |Two-shard speedup
+
+|Load and cumulative validation
+|9 h 20 min 43 s
+|6 h 50 min 14 s
+|1.37x
+
+|Raw query matrix
+|3 h 1 min 36 s
+|1 h 32 min 41 s
+|1.96x
+
+|Acceleration builds and query matrix
+|48 min 15 s
+|24 min 25 s
+|1.98x
+
+|Guarded stage
+|13 h 5 min 2 s
+|8 h 48 min 18 s
+|1.49x
+|===
+
+The ten inserts remained load-generator-bound at 4 h 20 min 50 s, within 1.1%
+of the one-shard insert total. The improved load wall time therefore comes from
+parallel cumulative checksum and final validation scans, while the near-2x raw
+and acceleration phase speedups show effective leaf fanout. The two leaves held
+1,568,092,561,505 hot-table bytes in 222 active parts. Acceleration tables used
+36,155,514,605 bytes. Listed-price metered compute and root-volume cost was
+$34.098506, versus the $57.73 estimate.
+
+The finisher verified the archive before destroying all eleven topology
+resources. Independent checks found all four instances terminated and the Stage
+B OpenTofu state empty. Compact review evidence is committed under
+`experiments/015/aws-2s-v1/`; complete archives and node evidence remain in the
+private experiment bucket.
+
 === AWS Stage B scaling runtime and cost estimate
 
 The estimate carries over the phase timings measured on the accepted one-shard
@@ -1715,8 +1763,8 @@ is effectively zero. The GCS bucket that this replaces cost about $42 per month
 and is deleted once the S3 copy is verified.
 
 The approved matrix has a $400 account-wide budget ceiling. The accepted
-one-shard run consumed $32.19 of listed-price metered compute and root-volume
-cost, leaving the sequential two- and four-shard runs. Their original expected
-cost is $145.05, and their 24-hour topology ceilings total $248.73. Each
-topology is destroyed immediately after its archives, node evidence, and cost
-report are verified, so no two fleets bill concurrently.
+one-shard and two-shard runs consumed $32.19 and $34.10 respectively in
+listed-price metered compute and root-volume cost. The remaining four-shard run
+has an original expected cost of $87.32 and a 24-hour topology ceiling of
+$157.58. Each topology is destroyed immediately after its archives, node
+evidence, and cost report are verified, so no two fleets bill concurrently.
