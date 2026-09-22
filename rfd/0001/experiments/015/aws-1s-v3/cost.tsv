@@ -1,0 +1,7 @@
+run_id	instance	purpose	instance_type	sku	metered_quantity	unit	unit_price_usd	cost_usd
+experiment-015-stage-b-aws-1s-v3-stage	lighthouse-exp015-stage-b-loadgen	load-generator	m7i.4xlarge	instance:m7i.4xlarge	13.328546	hour	0.8064	10.74814
+experiment-015-stage-b-aws-1s-v3-stage	lighthouse-exp015-stage-b-loadgen	load-generator	m7i.4xlarge	ebs:gp3	1332.854635	GB-h	0.000109589	0.146066
+experiment-015-stage-b-aws-1s-v3-stage	lighthouse-exp015-stage-b-coordinator	coordinator	m7i.xlarge	instance:m7i.xlarge	13.332435	hour	0.2016	2.687819
+experiment-015-stage-b-aws-1s-v3-stage	lighthouse-exp015-stage-b-coordinator	coordinator	m7i.xlarge	ebs:gp3	1333.243524	GB-h	0.000109589	0.146109
+experiment-015-stage-b-aws-1s-v3-stage	lighthouse-exp015-stage-b-leaf-01	serving-leaf	i4i.4xlarge	instance:i4i.4xlarge	13.338546	hour	1.373	18.313824
+experiment-015-stage-b-aws-1s-v3-stage	lighthouse-exp015-stage-b-leaf-01	serving-leaf	i4i.4xlarge	ebs:gp3	1333.854635	GB-h	0.000109589	0.146176

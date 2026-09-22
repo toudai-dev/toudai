@@ -1,0 +1,4 @@
+leaf	table	rows	bytes_on_disk	active_parts
+1	accel_attribute_string_local	3421500542	34112998132	126
+1	accel_duration_5m_local	23487	44202986	11
+1	accel_event_count_5m_local	79599	361240	11

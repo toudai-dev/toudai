@@ -1513,6 +1513,57 @@ and expensive rather than loud:
 Both are fixed and the finisher's paths and destroy inputs are verified to
 resolve before the retry was started.
 
+=== AWS Stage B one-shard scaling baseline
+
+The accepted same-hardware AWS baseline,
+`experiment-015-stage-b-aws-1s-v3`, ran at repository revision
+`79bc7ae001611af3a7b809001240cc84af08b229`. The load completed all ten
+checksum-gated days and validated 5,689,254,359 rows. The stage archive reports
+`completed`, contains all 210 raw timings and 150 accelerated timings, and all
+150 raw-versus-accelerated correctness checks passed.
+
+[options="header",cols="3*"]
+|===
+|Phase |Measured wall time |Result
+
+|Load and cumulative validation
+|9 h 20 min 43 s
+|5,689,254,359 rows; 1,503,930,542,004 hot-table bytes; 91 active parts
+
+|Raw query matrix
+|3 h 1 min 36 s
+|210/210 timings
+
+|Acceleration builds and query matrix
+|48 min 15 s
+|150/150 timings and 150/150 correctness checks
+
+|Guarded stage
+|13 h 5 min 2 s
+|Completed and archive-verified
+|===
+
+The ten inserts themselves totaled 4 h 17 min 58 s; cumulative checksum gates
+and final storage validation account for the rest of the load wall time. The
+four acceleration builds produced 34,157,562,358 bytes of derived storage,
+2.27% of the hot-table bytes. Listed-price metered compute and root-volume cost
+captured before teardown was $32.188134 for approximately 13.33 node-hours per
+node, below the $44.66 estimate.
+
+The finisher captured checksummed node evidence, cost, and the readable stage
+archive before teardown. Its first destroy attempt failed because the AWS
+profile was passed to AWS CLI calls but not exported for OpenTofu. A manual
+state-backed destroy using the same profile removed all ten topology resources;
+all three instances reached `terminated`, their root volumes no longer exist,
+and the Stage B OpenTofu state is empty. `finish-phase` now exports
+`LIGHTHOUSE_AWS_PROFILE` as `AWS_PROFILE`, so the two- and four-shard runs use
+the same credentials for collection and destroy.
+
+Compact review evidence is committed under
+`experiments/015/aws-1s-v3/`. The full immutable load and stage archives, node
+evidence, and accepted result bundle remain in the private S3 experiment
+bucket.
+
 === AWS Stage B scaling runtime and cost estimate
 
 The estimate carries over the phase timings measured on the accepted one-shard
@@ -1663,13 +1714,9 @@ S3 request charges for 2,245 corpus objects are under one cent, so network cost
 is effectively zero. The GCS bucket that this replaces cost about $42 per month
 and is deleted once the S3 copy is verified.
 
-Requested approval: $189.71 expected for the one-, two-, and four-shard AWS
-topologies together, plus the ongoing corpus storage. A 24-hour lifetime ceiling
-bounds the worst case at $306.66 and a 30-hour ceiling at $383.32; the
-30-hour ceiling is the recommended one because the one-shard reload has the
-least slack against its expected runtime. The current $250 budget ceiling is
-below both worst cases, so it should be raised before the runs: $350 with a
-24-hour ceiling, or $400 with the recommended 30-hour ceiling. Each topology is
-destroyed immediately after its archives, node evidence, and cost report are
-verified, so the expected spend is well under any of these ceilings.
-
+The approved matrix has a $400 account-wide budget ceiling. The accepted
+one-shard run consumed $32.19 of listed-price metered compute and root-volume
+cost, leaving the sequential two- and four-shard runs. Their original expected
+cost is $145.05, and their 24-hour topology ceilings total $248.73. Each
+topology is destroyed immediately after its archives, node evidence, and cost
+report are verified, so no two fleets bill concurrently.
