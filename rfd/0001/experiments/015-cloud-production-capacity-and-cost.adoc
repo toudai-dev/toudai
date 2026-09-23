@@ -1612,6 +1612,64 @@ B OpenTofu state empty. Compact review evidence is committed under
 `experiments/015/aws-2s-v1/`; complete archives and node evidence remain in the
 private experiment bucket.
 
+=== AWS Stage B four-shard result
+
+The accepted four-shard run, `experiment-015-stage-b-aws-4s-v1`, ran at
+repository revision `ad7fdff7ecfd78aa62025272a9e01bd594ab24b5`. It validated
+all 5,689,254,359 rows, completed 210 raw and 150 accelerated timings, and
+passed all 150 correctness checks. Leaf row counts ranged from 1,422,264,473 to
+1,422,347,139, a difference of 82,666 rows (0.0058% of the per-leaf mean).
+
+[options="header",cols="5*"]
+|===
+|Phase |1 shard |2 shards |4 shards |Four-shard speedup over 1 shard
+
+|Load and cumulative validation
+|9 h 20 min 43 s
+|6 h 50 min 14 s
+|5 h 31 min 18 s
+|1.69x
+
+|Raw query matrix
+|3 h 1 min 36 s
+|1 h 32 min 41 s
+|48 min 48 s
+|3.72x
+
+|Acceleration builds and query matrix
+|48 min 15 s
+|24 min 25 s
+|12 min 50 s
+|3.76x
+
+|Guarded stage
+|13 h 5 min 2 s
+|8 h 48 min 18 s
+|6 h 33 min 50 s
+|1.99x
+|===
+
+The ten inserts totaled 4 h 16 min 39 s, within 0.5% of the one-shard insert
+total. Load scaling therefore remains bounded by the single load generator,
+while raw queries and the acceleration phase scale close to linearly through
+four leaves. The four leaves held 1,621,183,056,198 hot-table bytes in 486
+active parts. Acceleration tables used 38,577,910,865 bytes. Listed-price
+metered compute and root-volume cost was $45.380822, versus the $87.32 estimate.
+
+Across the accepted same-hardware matrix, query-heavy phases improved nearly in
+proportion to shard count: raw queries reached 1.96x at two shards and 3.72x at
+four, while acceleration reached 1.98x and 3.76x. End-to-end stage speedup was
+1.49x and 1.99x because the approximately 4.3-hour serial insert floor does not
+shrink with leaf count. The three accepted runs cost $111.667462 in total,
+below the $189.71 estimate and $400 guardrail.
+
+The finisher verified the archive before destroying all thirteen topology
+resources. Independent checks found all six instances terminated, their root
+volumes gone, the fleet budget action removed, and the Stage B OpenTofu state
+empty. Compact review evidence is committed under
+`experiments/015/aws-4s-v1/`; complete archives and checksummed node evidence
+remain in the private experiment bucket.
+
 === AWS Stage B scaling runtime and cost estimate
 
 The estimate carries over the phase timings measured on the accepted one-shard
@@ -1762,9 +1820,8 @@ S3 request charges for 2,245 corpus objects are under one cent, so network cost
 is effectively zero. The GCS bucket that this replaces cost about $42 per month
 and is deleted once the S3 copy is verified.
 
-The approved matrix has a $400 account-wide budget ceiling. The accepted
-one-shard and two-shard runs consumed $32.19 and $34.10 respectively in
-listed-price metered compute and root-volume cost. The remaining four-shard run
-has an original expected cost of $87.32 and a 24-hour topology ceiling of
-$157.58. Each topology is destroyed immediately after its archives, node
-evidence, and cost report are verified, so no two fleets bill concurrently.
+The approved matrix had a $400 account-wide budget ceiling. The accepted
+one-, two-, and four-shard runs consumed $32.19, $34.10, and $45.38 respectively
+in listed-price metered compute and root-volume cost, for $111.67 total. Each
+topology was destroyed after its archives, node evidence, and cost report were
+verified, so no two fleets billed concurrently.

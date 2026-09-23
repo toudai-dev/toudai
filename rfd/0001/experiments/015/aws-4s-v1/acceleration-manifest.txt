@@ -1,0 +1,17 @@
+{
+  "run_id": "experiment-015-stage-b-aws-4s-v1-acceleration",
+  "repository_revision": "ad7fdff7ecfd78aa62025272a9e01bd594ab24b5",
+  "clickhouse_version": "26.8.2.7",
+  "load_run": "experiment-015-stage-b-aws-4s-v1-load",
+  "raw_query_run": "experiment-015-stage-b-aws-4s-v1-raw",
+  "rows": 5689254359,
+  "shards": 4,
+  "replicas": 1,
+  "ranges": "5m,1h,6h,24h,10d",
+  "repetitions": 3,
+  "query_max_memory": 17179869184,
+  "dynamic_low_value": "event_lifecycle",
+  "dynamic_high_value": "306e56de-c041-4b4d-9a62-d59e742bf58b",
+  "accelerations": ["type", "workspace_id", "service_name_count_5m", "duration_all_and_caller_5m"],
+  "execution": "parallel leaf-local builds; serial distributed queries"
+}
