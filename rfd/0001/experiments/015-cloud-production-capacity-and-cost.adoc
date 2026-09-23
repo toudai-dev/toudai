@@ -1670,6 +1670,106 @@ empty. Compact review evidence is committed under
 `experiments/015/aws-4s-v1/`; complete archives and checksummed node evidence
 remain in the private experiment bucket.
 
+=== AWS Stage B query latency
+
+The following tables preserve the per-query latency comparison so it does not
+need to be reconstructed from the committed timing files. Every value is the
+median wall-clock latency of three serial repetitions in milliseconds. The
+`clickhouse-cold` policy clears ClickHouse-managed caches before each query; it
+does not clear the host operating-system page cache. Three repetitions support
+a median but not a meaningful p95 or p99.
+
+The median across the seven raw fixture medians summarizes how latency scales
+with query range. Short queries are dominated by coordinator and fanout
+overhead, while larger scans approach linear scaling with shard count.
+
+[options="header",cols="5*"]
+|===
+|Range |1 shard cold |2 shards cold |4 shards cold |4-shard speedup
+
+|5 minutes |102 ms |100 ms |95 ms |1.07x
+|1 hour |306 ms |215 ms |167 ms |1.83x
+|6 hours |1,133 ms |622 ms |387 ms |2.93x
+|24 hours |3,203 ms |1,658 ms |908 ms |3.53x
+|10 days |30,440 ms |14,806 ms |7,914 ms |3.85x
+|===
+
+The full-range raw medians expose the individual query behavior. Heavy raw
+scans remain non-interactive even at four shards despite their near-linear
+speedup.
+
+[options="header",cols="8*"]
+|===
+|Ten-day raw fixture |1 shard cold |1 shard warm |2 shards cold |2 shards warm
+|4 shards cold |4 shards warm |4-shard cold speedup
+
+|Recent tail
+|177 ms |129 ms |182 ms |152 ms |146 ms |141 ms |1.21x
+
+|Time-range count
+|20,111 ms |16,662 ms |8,573 ms |8,428 ms |4,415 ms |4,462 ms |4.56x
+
+|Service and severity
+|19,521 ms |19,241 ms |9,790 ms |9,807 ms |5,084 ms |5,184 ms |3.84x
+
+|Dynamic filter
+|441,879 ms |185,452 ms |219,073 ms |108,749 ms |111,239 ms |60,137 ms |3.97x
+
+|Rate by service
+|30,440 ms |29,458 ms |14,806 ms |14,906 ms |7,914 ms |7,960 ms |3.85x
+
+|Duration heatmap
+|537,690 ms |533,702 ms |268,342 ms |269,348 ms |138,406 ms |138,605 ms |3.88x
+
+|Percentiles by caller
+|450,511 ms |453,083 ms |227,940 ms |229,690 ms |118,041 ms |116,682 ms |3.82x
+|===
+
+The accelerated full-range medians show that purpose-built data paths matter
+more than adding shards for dashboard queries. `Raw-to-accelerated` compares
+the corresponding four-shard cold raw fixture; Stage B had no corresponding
+raw `workspace_id` fixture for the high-cardinality row.
+
+[options="header",cols="9*"]
+|===
+|Ten-day accelerated fixture |1 shard cold |1 shard warm |2 shards cold
+|2 shards warm |4 shards cold |4 shards warm |4-shard cold speedup
+|4-shard raw-to-accelerated
+
+|Dynamic low-cardinality
+|3,958 ms |3,928 ms |2,049 ms |2,013 ms |1,126 ms |1,085 ms |3.52x |98.8x
+
+|Dynamic high-cardinality
+|758 ms |727 ms |441 ms |420 ms |280 ms |276 ms |2.71x |Not measured
+
+|Rate by service
+|129 ms |127 ms |145 ms |141 ms |153 ms |155 ms |0.84x |51.7x
+
+|Duration heatmap
+|95 ms |95 ms |89 ms |92 ms |98 ms |95 ms |0.97x |1,412.3x
+
+|Percentiles by caller
+|137 ms |135 ms |127 ms |127 ms |125 ms |128 ms |1.10x |944.3x
+|===
+
+Once an aggregate query reaches approximately 100--150 ms, coordinator and
+fanout overhead dominate and additional shards provide no latency benefit; the
+small regressions for rate and heatmap are within that overhead-bound regime.
+The four-shard acceleration path reduces the ten-day heatmap from 138.4 seconds
+to 98 ms, percentiles from 118.0 seconds to 125 ms, rate from 7.9 seconds to
+153 ms, and the dynamic filter from 111.2 seconds to 1.13 seconds.
+
+The dynamic fixture names are historical labels, not accurate descriptions of
+this natural corpus. As documented by
+link:008-tenant-attribute-acceleration.adoc[Experiment 008], `type` (the
+"low-cardinality" fixture) has approximately 66,101 distinct values, while
+`workspace_id` (the "high-cardinality" fixture) has approximately 42,919.
+Equality-query cost depends more directly on the selected value's frequency
+and resulting key range than on the field's global distinct count. The measured
+plans read 59,228,160 rows for the selected `type` value but only 16,678,912
+rows for the selected `workspace_id` value, explaining why the former remains
+slower across all three Stage B topologies.
+
 === AWS Stage B scaling runtime and cost estimate
 
 The estimate carries over the phase timings measured on the accepted one-shard
