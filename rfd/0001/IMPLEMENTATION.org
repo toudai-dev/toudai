@@ -796,27 +796,18 @@ criterion.
   150 passing correctness checks, node evidence, and $34.10 metered listed-price
   compute and root-volume cost. Record compact evidence under
   =experiments/015/aws-2s-v1/=.
-- [ ] Provision and complete the AWS four-shard Stage B topology. The
-  GCP path is closed: every local-SSD family in the account is capped at 24 vCPUs
-  in every region and both the automatic and the manually reviewed
-  `CPUS_PER_VM_FAMILY` increases were denied, while a two-shard topology needs 28
-  and a four-shard topology needs 56. The scaling matrix moved to AWS and the
-  preparation is complete and verified: a single-AZ network, provider-side
-  lifetime watchdog and budget guardrails, a boot-tested
-  `ami-0298fd5dbaa1abaff` carrying the pinned
-  ClickHouse 26.8.2.7 closure, and the immutable ten-day corpus in S3 with its
-  object count and byte total matching the checksummed inventory exactly. A
-  one-shard smoke test and the accepted AWS one-shard baseline passed end to end
-  and were destroyed; the accepted two-shard run subsequently passed end to end
-  and was destroyed. The GCP images, network, and corpus bucket are deleted with
-  the artifacts archived to S3. The remaining four-shard run is approved and
-  bounded by a 24-hour topology ceiling and the $400 account-wide budget.
+- [X] Complete, validate, preserve, and tear down the AWS Stage B four-shard run:
+  5.69B rows balanced within 0.0058%, 210 raw timings, 150 accelerated timings,
+  150 passing correctness checks, node evidence, and $45.38 metered listed-price
+  compute and root-volume cost. Record compact evidence under
+  =experiments/015/aws-4s-v1/= and the final same-hardware scaling comparison in
+  the experiment report. The complete 1/2/4-shard matrix cost $111.67 against
+  the $189.71 estimate and remained below the $400 account-wide guardrail.
 - [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning
-  with the completed same-cloud GCP run, then complete the two- and four-shard
-  10 TB scaling matrix and run replicated failure-domain, sustained-ingestion,
-  failure, and 24-to-72-hour soak tests only on finalists; compare full
-  infrastructure, object storage, network, source-cloud egress, and
-  operational cost.
+  with the completed same-cloud GCP run and AWS 1/2/4-shard scaling matrix, then
+  run replicated failure-domain, sustained-ingestion, failure, and 24-to-72-hour
+  soak tests only on finalists; compare full infrastructure, object storage,
+  network, source-cloud egress, and operational cost.
 - [ ] Validate object-storage or cold-tier behavior on selected partitions.
 - [ ] Compare transparent ClickHouse tiering with an explicit hot/archive query
   split for selected aggregate and raw-event fixtures.

@@ -1,0 +1,29 @@
+= Experiment 015 AWS Stage B four-shard evidence
+
+link:../../015-cloud-production-capacity-and-cost.adoc[Experiment report] ·
+link:../../../README.adoc[RFD 0001]
+
+This directory preserves the compact, reviewable evidence for the accepted AWS
+four-shard run, `experiment-015-stage-b-aws-4s-v1`. It intentionally excludes
+the production-derived corpus, query result rows, and verbose node and query-log
+bundles.
+
+== Contents
+
+- `load-*.tsv` and `load-manifest.txt` record all ten checksum-validated
+  source days and final per-leaf storage.
+- `raw-timings.tsv` and `raw-manifest.txt` record all 210 raw query executions.
+- `acceleration-*.tsv` and `acceleration-manifest.txt` record four builds, 150
+  accelerated executions, derived storage, and 150 passing correctness checks.
+- `cost.tsv` and `cost-details.txt` record listed-price metered compute and
+  root-volume cost captured while all nodes were still running. The `*.txt`
+  manifest and cost-detail files contain JSON objects so deliberate evidence is
+  not hidden by the repository-wide generated-JSON ignore.
+- `phase-result.txt` records the finisher's completed and verified acceptance
+  result.
+- `SHA256SUMS` covers every evidence file in this directory except itself.
+
+The complete immutable load and stage archives remain in the private experiment
+bucket under `artifacts/stage-b/experiment-015-stage-b-aws-4s-v1-*`. Node
+evidence and the accepted phase bundle remain under
+`results/experiment-015-stage-b-aws-4s-v1-stage/`.

@@ -1,0 +1,13 @@
+leaf	table	rows	bytes_on_disk	active_parts
+1	accel_attribute_string_local	855386036	9606843959	104
+1	accel_duration_5m_local	23175	33321732	11
+1	accel_event_count_5m_local	77217	370507	11
+2	accel_attribute_string_local	855379267	9610823993	96
+2	accel_duration_5m_local	23191	33305665	11
+2	accel_event_count_5m_local	77103	369465	11
+3	accel_attribute_string_local	855357879	9614448185	106
+3	accel_duration_5m_local	23195	33314694	11
+3	accel_event_count_5m_local	77183	370093	11
+4	accel_attribute_string_local	855377360	9611060899	102
+4	accel_duration_5m_local	23183	33312075	11
+4	accel_event_count_5m_local	77142	369598	11
