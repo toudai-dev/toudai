@@ -1,0 +1,357 @@
+= Experiments
+
+This section records benchmark methodology, evidence, and decision gates. Detailed records remain in `experiments/`.
+
+== Measured evidence
+
+The benchmark corpus is GCP Logging data originally represented as JSON and
+compacted into Parquet. GCP-equivalent logical bytes use the available monthly
+32 TB billing-scale estimate provisionally; the exact source metric and scope
+remain to be verified.
+
+* link:experiments/006-one-day-map-json-scale-load.adoc[Experiment 006] loaded a
+  547,356,173-row natural day. `Map` completed while native JSON was stopped at
+  63.2% after descriptor, part-count, and inode pressure. This selects `Map` for
+  the current MVP, not for every possible workload.
+* link:experiments/007-full-day-map-query-baseline.adoc[Experiment 007] established
+  raw full-day latency and showed that repeated dynamic predicates can benefit
+  materially from ClickHouse's query-condition cache, while broad scans still
+  require workload-aware acceleration.
+* link:experiments/008-tenant-attribute-acceleration.adoc[Experiment 008] showed
+  schema-stable promoted fields and configured aggregate states can accelerate
+  measured tenant workloads, but their storage and maintenance cost requires
+  tenant budgets rather than global promotion of arbitrary fields.
+* link:experiments/009-split-hot-events-payload.adoc[Experiment 009] preserved
+  matching rows and checksums while splitting normalized hot events from exact
+  payload. Exact lookup was about 12 ms on SSD and 351 ms on bulk storage in the
+  measured fixture.
+* link:experiments/010-ten-day-split-storage-load.adoc[Experiment 010] loaded and
+  checksum-validated 5,689,254,359 rows across 240 hourly windows: 10.81 TB of
+  logical input became 1,000.85 GiB of normalized hot data and 708.48 GiB of
+  exact payload, 16.98% of logical input in total.
+* link:experiments/011-ten-day-query-baseline.adoc[Experiment 011] completed 60
+  controlled ten-day raw measurements. Schema-stable service/severity filtering
+  was fastest at about 12 seconds. Dynamic `Map` predicates took 15.5 to 16.3
+  minutes cold and 6.9 to 8.1 minutes warm; heatmap and percentile scans took
+  12.1 to 16.8 minutes. Deterministic exact payload lookup took 919 ms on its
+  first ClickHouse-cold access and 62 to 73 ms thereafter.
+* link:experiments/012-ten-day-acceleration-validation.adoc[Experiment 012]
+  rebuilt two configured attribute indexes and two dashboard aggregate paths
+  over all ten days. Derived storage was 31.80 GiB, or 3.18% of normalized hot
+  storage. Attribute indexes improved demanding exact full-match aggregates by
+  49x to 263x but still took 3.7 to 9.3 seconds for highly prevalent values.
+  Dashboard aggregate states answered rate, heatmap, and percentile fixtures in
+  75 to 124 ms, improving raw execution by 448x to 13,315x. All 30 correctness
+  anchor checks passed.
+* link:experiments/013-event-sort-key-comparison.adoc[Experiment 013] selected
+  `(tenant_id, dataset, timestamp, event_id)` as the base event ordering. It
+  improved full-day tail latency to 124 ms and avoids coupling the base layout
+  to one service dimension, at a measured 40.1% storage cost versus the prior
+  hour/service ordering.
+* link:experiments/014-local-distributed-cluster-simulation.adoc[Experiment 014]
+  validated exact standard ClickHouse `Distributed` fanout over one, two, and
+  four local shards with stable event-identity hashing. Four-shard placement
+  deviated at most 0.0058% from the mean. Raw full-day scans showed diminishing
+  returns and dynamic `Map` filtering regressed to 81.5 seconds, while shared
+  attribute indexes answered in 258-550 ms and distributed dashboard aggregate
+  states remained at 78-104 ms. Host sampling showed the four-process load was
+  constrained by shared CPU and an asymmetric SSD stripe, so this is semantic
+  and relative-fanout evidence rather than production capacity.
+* link:experiments/015-cloud-production-capacity-and-cost.adoc[Experiment 015]
+  completed the AWS Stage B same-hardware one-, two-, and four-shard matrix over
+  5.69 billion rows. Each run captured 210 raw and 150 accelerated timings with
+  150 passing correctness checks. Placement remained within 0.0058% of the mean,
+  and metered listed-price compute and root-volume cost totaled $111.67. This is
+  independent-node scaling evidence; replicated failure-domain, sustained
+  ingestion, failure, and soak tests remain outstanding.
+
+These results support the split `Map`-based serving baseline and demonstrate
+that ten-day retained capacity fits the current host. They also reject broad raw
+`Map` scans as an interactive path and require bounded indexes, metadata
+catalogs, and mergeable aggregate states with raw fallback. Standard
+`Distributed` fanout is validated locally, and the Stage B matrix provides
+independent-node scaling evidence. Sustained production ingestion, mixed
+concurrency, replicas and recovery, cold-tier aggregate routing, and the 100 TB
+architecture remain unproven.
+
+== Reference Evidence
+
+== Honeycomb model
+
+Honeycomb's current public model treats logs and spans as structured events
+whose fields can be queried without a predefined schema. Native metrics use
+dedicated metrics datasets and metric-specific operations. Its unified
+experience therefore does not require one physical model for every telemetry
+signal.
+
+Relevant references:
+
+* https://docs.honeycomb.io/get-started/honeycomb/traces-metrics-logs
+* https://www.honeycomb.io/blog/introducing-honeycomb-telemetry-pipeline
+* `experiments/000-gcp-parquet-corpus-profile.adoc`
+* link:README.adoc[RFD 0001]
+
+== Scuba product model
+
+Facebook's original Scuba system established the product and query model that
+Lighthouse is targeting: self-describing structured events, arbitrary
+slice-and-dice exploration, time series, histograms, percentiles, comparisons,
+and drill-down to individual events. Its shared-nothing query path scanned all
+time-relevant leaves, computed partial aggregates locally, and merged them
+through a fanout tree. It intentionally used no general index beyond batch time
+ranges and accepted sampling, short retention, and incomplete results to reach
+sub-second latency.
+
+Lighthouse adopts Scuba's flexible event exploration and storage-node partial
+aggregation, but not Scuba's requirement choices around ingestion sampling,
+memory-primary serving, short retention, or best-effort incomplete results.
+Accepted events remain available at full resolution. If a bounded-latency query
+omits unavailable data, the response must report freshness and coverage rather
+than presenting the result as complete.
+
+Relevant references:
+
+* https://www.vldb.org/pvldb/vol6/p1057-wiener.pdf
+* link:README.adoc[RFD 0001]
+
+== Supporting Meta-scale evidence
+
+Kraken is not the Lighthouse product model; it is supporting evidence about
+operating a later-generation analytics data plane at Meta scale. Its published
+study ranged from 50 GB datasets with 1B records to a 150 TB dataset with 1.27T
+records, more than 3,500 columns, and 8,192 shards. Flash-backed columnar blocks,
+RAM caches, deterministic dataset partitions, and separation of storage
+management from query serving show plausible later optimizations, but do not
+establish that Lighthouse needs a custom virtual-partition control plane before
+standard ClickHouse distributed fanout is measured.
+
+Relevant reference:
+
+* https://www.vldb.org/pvldb/vol15/p3522-mo.pdf
+
+This evidence adds four architecture directions that require explicit
+validation rather than being assumed from the single-node experiments:
+
+* accepted events should enter a durable replay path before ClickHouse serving
+  state, so serving tables can be reconstructed;
+* immutable archived batches should contain enough canonical event and exact
+  payload data to rebuild normalized tables;
+* hot and archived data may need separate physical query paths behind one
+  logical query contract rather than transparent part movement alone; and
+* query diagnostics need independent aggregation-accuracy, input-completeness,
+  and ingestion-freshness signals.
+
+== Proof-of-concept findings
+
+The proof of concept used typed nested key/value arrays, fingerprints,
+attribute index tables, rollups, and alternate tail layouts. Its staging data
+showed the principal failure mode to avoid:
+
+[source,text]
+----
+logs                         62.40M rows   10.55 GiB
+logs_string_fingerprints      3.73B rows   69.42 GiB
+----
+
+The string fingerprint index had about 60 rows per source event. Broad metadata
+queries still read tens to hundreds of GiB, timed out, or exceeded a 14.4 GiB
+memory limit. A wide inverted index is therefore not a substitute for a raw
+event layout, promoted fields, and bounded metadata catalogs.
+
+== Current corpus
+
+Parquet footer metadata reports:
+
+[source,text]
+----
+files                         2,685
+Parquet bytes                 1,332,877,136,312
+rows                          6,674,704,383
+event-time coverage           12 complete 24-hour periods
+daily rows                    433M-734M
+average daily rows            556M
+----
+
+A representative 3.63M-row file has about 22.6 `labels` keys and 5 resource
+keys per event. Its average `raw_entry` is 3.58 KB. Re-serializing the Parquet
+columns as canonical JSON produces about 5.46 KB per row, but this is not the
+same measurement as GCP Logging's billable entry size because it adds textual
+field names and escapes the embedded raw entry.
+
+GCP reports approximately 32 TB of monthly Logging storage/ingestion for this
+workload. GCP defines storage volume as the actual size of log entries before
+indexing. Projecting the observed row rate to a 30-day month gives about 16.7B
+events, or a provisional average of 1.9 KB of GCP-equivalent input per event.
+
+The benchmark must verify the exact GCP metric and period before treating this
+calibration as final. Until then, use it for capacity planning:
+
+[source,text]
+----
+1 TB GCP-equivalent input       ~520M events
+10 TB GCP-equivalent input      ~5.2B events
+32 TB GCP-equivalent input      ~16.7B events
+100 TB GCP-equivalent input     ~52B events
+1 PB GCP-equivalent input       ~520B events
+----
+
+The current 12-day corpus represents approximately 12.8 TB on this calibrated
+scale. It can supply natural subsets for the 1 TB and 10 TB tests. A 100 TB test
+will require roughly eight time-shifted passes over the corpus.
+
+== Lighthouse benchmark results to date
+
+The architecture in this plan is grounded in the completed experiments, not
+only in the Scuba workload model:
+
+* Experiment 006 loaded all 547,356,173 rows (approximately 1.04 TB logical) to
+  `Map` in 4.67 hours with 1.42 GiB peak insert memory and a 172.45 GiB table.
+  Native `JSON` stopped at 63.2% after file-descriptor, part-count, inode, and
+  free-space failures; a complete day projected to 206.2 GiB, 19.6% larger than
+  `Map`. `Map` is therefore the selected long-tail serving representation for
+  the MVP, rather than an open candidate among `JSON` and typed arrays.
+* Experiment 007 showed why the raw representation cannot be the only
+  interactive path. Promoted-column queries over the same day took 1.6-6.9
+  seconds cold, while dynamic filters took 84-88 seconds and full-day heatmap
+  and percentile queries took 77-95 seconds. Raw field discovery took 28
+  seconds. These results require bounded catalogs, asynchronous exact scans,
+  and derived dashboard paths rather than pretending every arbitrary query is
+  instant.
+* Experiment 008 added two configured dynamic-field indexes and aggregate
+  states. The indexes occupied 3.06 GiB and all rollups about 4.4 MiB, for 1.78%
+  derived-storage amplification. Dynamic filters improved from 83-85 seconds
+  cold to 205-447 ms; rate, heatmap, and percentile fixtures improved from
+  5-93 seconds to 6-33 ms. All 30 correctness checks passed. This supports a
+  schema-stable, tenant-scoped acceleration registry, not indexing every field.
+* Experiment 009 split one 547,356,173-row day into 104.23 GiB of normalized
+  hot `Map` events and 72.95 GiB of exact payload on bulk storage, with matching
+  row counts and checksums. Exact source lookup took about 12 ms on SSD and 351
+  ms from bulk storage. This supports separate query-serving and exact-payload
+  paths behind one logical event contract.
+* Experiment 010 loaded and checksum-validated 5,689,254,359 rows across ten
+  natural days and 240 hourly windows: approximately 10.81 TB logical input,
+  1,000.85 GiB of normalized hot events, and 708.48 GiB of exact payloads. The
+  combined physical representation is 16.98% of logical input, or 5.89×
+  effective compression. At final capture the hot dataset retained 785 GiB of
+  headroom. The run also validated resumability across truncation failures and
+  an executor replacement, but its interrupted wall duration and concurrent
+  bulk-pool writes are not production ingestion-throughput evidence.
+
+Relevant experiment records:
+
+* `experiments/006-one-day-map-json-scale-load.adoc`
+* `experiments/007-full-day-map-query-baseline.adoc`
+* `experiments/008-tenant-attribute-acceleration.adoc`
+* `experiments/009-split-hot-events-payload.adoc`
+* `experiments/010-ten-day-split-storage-load.adoc`
+
+== Benchmark Volume Definition
+
+Each test records three independent byte measurements:
+
+1. `logical_input_bytes`: GCP-equivalent pre-index event bytes. This defines the
+   1 TB, 10 TB, and 100 TB test levels.
+2. `clickhouse_uncompressed_bytes`: `system.parts.data_uncompressed_bytes` for
+   the internal columnar representation.
+3. `physical_bytes`: `system.parts.bytes_on_disk` summed across base tables,
+   indexes, projections, and derived tables.
+
+Report:
+
+[source,text]
+----
+base compression ratio      = logical_input_bytes / base_table_physical_bytes
+storage amplification       = all_physical_bytes / base_table_physical_bytes
+effective physical ratio    = logical_input_bytes / all_physical_bytes
+----
+
+Volume and ingestion rate are separate benchmark axes. A retained 100 TB corpus
+must be tested while ingestion continues at representative rates rather than
+only as a static database.
+
+Provisional daily-rate targets at 1.9 KB/event are:
+
+[source,text]
+----
+500M events/day       5,787 events/sec       ~0.96 TB/day
+1B events/day        11,574 events/sec       ~1.9 TB/day
+3B events/day        34,722 events/sec       ~5.8 TB/day
+----
+
+== Corpus Scaling Method
+
+* Select natural, contiguous event-time subsets for 1 TB and 10 TB.
+* Preserve the original distribution, width, nullability, and attribute
+  cardinality during schema comparisons.
+* Build 100 TB by replaying the complete corpus into distinct shifted daily
+  partitions.
+* Regenerate timestamps and event IDs for each replay.
+* Rotate or regenerate selected naturally changing high-cardinality dimensions,
+  such as pod, task, and instance IDs, so long-retention cardinality does not
+  remain artificially fixed.
+* Keep the same transformed corpus for every physical design under comparison.
+* Record that repeated body distributions remain a limitation of the synthetic
+  100 TB corpus.
+* Do not benchmark with exact duplicate inserts in the same time partition.
+
+== Representative Query Inventory
+
+Every physical design must run the same parameterized inventory:
+
+1. Recent unscoped tail by dataset and time.
+2. Recent tail scoped by service and severity.
+3. Body token/text search.
+4. Exact filter on a promoted low-cardinality field.
+5. Exact filter on a dynamic low-cardinality field.
+6. Exact lookup on a dynamic high-cardinality identifier.
+7. Multiple dynamic-field conjunction with mixed selectivity.
+8. Field-name discovery.
+9. Allowed field-value discovery.
+10. Trace waterfall lookup by trace ID.
+11. Trace lookup including correlated logs.
+12. Count/rate time series over a promoted grouping.
+13. Duration heatmap over a promoted grouping.
+14. Approximate p50/p90/p95/p99 over a promoted grouping.
+15. Approximate percentile grouped by an arbitrary dynamic field.
+16. Exact percentile over a bounded raw window.
+17. High-cardinality arbitrary group-by with planner guardrails.
+18. Standard dashboard query set under concurrent ingestion.
+19. Concurrent dashboard and exploratory workloads.
+20. Cold/object-storage versions of selected exploration queries.
+
+Each run records:
+
+* cold and warm latency, including p50 and p95 over repeated runs;
+* rows and bytes read;
+* peak query memory;
+* result rows and correctness checksum;
+* selected parts, granules, indexes, and projections;
+* CPU time and query concurrency;
+* background merges, pending parts, and ingest lag;
+* physical bytes for every supporting schema object.
+
+Latency, concurrency, freshness, retention, and ingestion acceptance thresholds
+must be agreed before this draft becomes the MVP contract and before the 10 TB
+query validation. Relative improvement alone is not a product acceptance
+criterion.
+
+== Decision Gates
+
+== After 1 TB
+
+The benchmark-selected event attribute representation is `Map`. Record its base
+sort key, partitioning, identifier representation, trace access path, and
+initial promoted columns. Do not proceed with the rejected native `JSON` or
+typed-array candidates at 10 TB.
+
+== After 10 TB
+
+Confirm that the chosen schema, dashboard materializations, metadata catalogs,
+and query planner meet product thresholds without unbounded storage
+amplification. Size the physical environment required for 100 TB.
+
+== After 100 TB
+
+Decide the production sharding, replication, storage-tier, workload-isolation,
+and recovery architecture. Treat 1 PB as a separate distributed-systems test,
+not a linear extrapolation.

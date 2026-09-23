@@ -1,0 +1,46 @@
+= Replication and recovery
+
+This section defines distribution, replication, fanout, and recovery direction.
+
+== Distribution and growth
+
+Beyond one node, local `ReplicatedMergeTree` tables sit behind ClickHouse's
+`Distributed` engine. Events use a stable hash of `(tenant_id, dataset,
+event_id)`, allowing a large tenant to consume all shards. Tenant/dataset/time
+queries initially fan out broadly and aggregate locally. Adding shards may let
+old placement expire with retention rather than requiring immediate retained
+data redistribution.
+
+Lighthouse will not implement a Kraken-style virtual-partition placement layer
+before measurements show that fixed per-shard latency, fanout traffic, dataset
+placement requirements, or topology churn justify its versioned metadata and
+recovery complexity. Stable identities preserve that future option.
+
+Before a real multi-machine capacity test, a local native multi-instance
+ClickHouse harness will compare one, two, and four shards using actual
+`Distributed` protocol fanout and leaf-local aggregation. This simulation can
+validate sharding correctness, coordinator overhead, skew, cancellation, and
+partial-result metadata, but shared CPU, memory, storage, and loopback networking
+mean it cannot establish scale-out throughput or production recovery capacity.
+
+Production sizing will then use staged cloud and dedicated-host measurements:
+an inexpensive 1 TB provider calibration, 1/2/4-shard scaling over the 10.81 TB
+corpus, a replicated failure-domain candidate, and a 24-to-72-hour ingestion and
+query soak. Cost comparisons include hot serving, replication, durable stream,
+object storage, cross-zone traffic, and source-cloud egress; cheaper compute
+alone is not a production cost result.
+
+== Distributed execution path
+
+Use a local MergeTree table per shard and expose one ClickHouse `Distributed`
+table as the initial cluster-wide query path. A stable hash over tenant,
+dataset, and event identity spreads large tenants across all shards. Local
+servers scan and compute mergeable partial aggregates; the initiating server
+merges those states.
+
+The initial design deliberately sends tenant/dataset/time queries to every
+shard. Adding shards does not require immediate historical redistribution:
+queries remain correct across all shards, new events use the expanded topology,
+and old placement converges through retention. Measure fanout latency and
+network traffic before adding virtual partitions, targeted routing, or a custom
+placement service.

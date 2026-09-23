@@ -1,0 +1,79 @@
+= Tenant policy and isolation
+
+This section defines tenant governance, metadata, privacy, and isolation.
+
+== Cardinality and multi-tenancy
+
+Cardinality is a control-plane and query-admission concern, not a reason to
+delete source values. The ingestion stream maintains bounded sketches for field
+presence, type, approximate distinct count, top-K, value size, and growth rate.
+It never materializes a complete high-cardinality value dictionary merely to
+measure cardinality.
+
+Budgets apply per tenant and dataset to event size, field count, field-name
+growth, ingestion rate, retained bytes, derived bytes, scan bytes, result
+groups, memory, and concurrent work. High-cardinality grouping can use bounded
+top-K or approximate distinct algorithms in interactive mode; guarded exact
+execution remains available when its estimated cost fits policy or as an
+asynchronous job. Dashboards and exploratory scans use separate workload
+classes so one tenant cannot consume the cluster.
+
+== Privacy and operations
+
+Sensitive fields are classified and redacted before durable acceptance.
+Policies include reserved-field ownership, token and secret detection,
+field-level access controls, tenant isolation, encryption, audit logs, raw
+export restrictions, retention, and deletion workflows. Arbitrary request
+bodies, headers, SQL parameters, or credentials are not accepted by default.
+
+The system publishes ingestion acceptance and lag, archive durability, schema
+conflicts, field growth, storage and derived amplification, partition skew,
+query queue and stage latency, scan cost, coverage, cancellation, and expensive
+tenant telemetry to an independent operational path.
+
+== Metadata catalogs
+
+Maintain a small versioned registry for datasets, field definitions, privacy
+classification, retention, quotas, and accelerations. A stream consumer, not
+the ingestion gateway, maintains bounded time-aware observations for:
+
+* known field names and observed types;
+* field presence and last-seen time;
+* approximate distinct counts using mergeable sketches;
+* bounded top-K values and value-size distributions;
+* type conflicts and cardinality growth rates; and
+* promoted, indexed, and aggregated fields with coverage watermarks.
+
+High-cardinality values such as event, trace, span, request, account, or run IDs
+must not be enumerated for broad autocomplete. Their events are still retained
+and exact filtering remains possible; cardinality governance limits metadata,
+group result size, and acceleration cost rather than deleting accepted data.
+
+Per-tenant and per-dataset policies bound event bytes, field count, field-name
+growth, string length, indexed fields, derived bytes, groups returned, scan
+bytes, query memory, and concurrent work. A cardinality spike creates a visible
+policy event and may stop new acceleration or expensive grouping, but must not
+silently sample already accepted events.
+
+== Privacy and operational instrumentation
+
+Field classification, secret/token detection, PII redaction or hashing,
+tenant isolation, field-level access, query audit logs, and deletion workflows
+must be designed before broad producer adoption. Arbitrary headers, request
+bodies, SQL parameters, and authentication material are rejected or redacted by
+default rather than relying on short retention after collection.
+
+Lighthouse must expose telemetry outside its own serving path for at least:
+
+* events received, accepted, rejected, dropped, and upstream-sampled;
+* bytes and field counts by tenant and dataset;
+* producer-to-durable, durable-to-archive, and durable-to-query lag;
+* malformed events, type conflicts, policy versions, and replay backlog;
+* cardinality, field-name growth, value sizes, and top-K churn;
+* hot and archive bytes, parts, merges, retention, and acceleration coverage;
+* query queue and execution latency, scans, groups, memory, cancellation, and
+  timeouts; and
+* response freshness, shard coverage, accuracy mode, and partial-result rate.
+
+The telemetry system will become production-critical, so its minimum health,
+durability, and alerting signals cannot depend exclusively on Lighthouse.

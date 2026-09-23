@@ -1,0 +1,10 @@
+= Replication And Recovery implementation
+
+Checklist ownership: link:replication-and-recovery.adoc[Replication And Recovery].
+
+== Phase 5: 100 TB architectural validation
+
+* [ ] Measure replica rebuild and failure-recovery behavior.
+
+The staged replicated candidate and soak work remains owned by
+link:experiments-impl.adoc[the experiment plan].

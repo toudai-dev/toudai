@@ -1,0 +1,12 @@
+= Product Contract Implementation
+
+Checklist ownership: link:product-contract.adoc[Product Contract].
+
+Product readiness is also governed by the cross-cutting
+link:README.adoc#_cross_cutting_exit_criteria[exit criteria].
+
+== Phase 2: unified query semantics
+
+* [ ] Prove logs, spans, and application events can be queried together.
+
+* [ ] Prove trace rendering includes span events and correlated logs.

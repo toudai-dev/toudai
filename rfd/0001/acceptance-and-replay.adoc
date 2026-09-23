@@ -1,0 +1,51 @@
+= Acceptance and replay
+
+This section defines durable acceptance, replay, and serving-state reconstruction.
+
+== Serving and durability architecture
+
+The MVP has three logical planes:
+
+* The ingestion plane authenticates, validates, redacts, applies quotas,
+  durably accepts immutable compressed batches, and feeds idempotent consumers.
+* The query plane stores recent normalized events in ClickHouse, computes local
+  partial aggregates, and merges them behind a coordinator with deadlines,
+  cancellation, scan/group/memory budgets, and workload isolation.
+* The control plane owns datasets, schemas, retention, privacy classes, quotas,
+  field observations, acceleration policy, and query audit records.
+
+The durable log and immutable object archive are authoritative for replay;
+ClickHouse is reconstructable serving state. A normalized hot event table owns
+common routing, time, service, severity, trace, and typed measure columns plus
+the benchmark-selected flexible long tail. An exact payload table or archive is
+joined only for bounded drill-down, not ordinary aggregation.
+
+== Ingestion plane
+
+Stateless Lighthouse gateways authenticate tenant and dataset, validate the
+versioned envelope and field types, enforce event/string/field-count limits,
+redact or reject classified data, and apply tenant byte/event quotas. Gateways
+use cached, versioned policy snapshots so control-plane unavailability does not
+turn into a per-event database dependency. Policy versions are recorded with
+accepted batches.
+
+The durable transport is the acceptance boundary. Acknowledgement, retry, and
+duplicate semantics must be explicit; stable event IDs and immutable batch IDs
+make idempotent consumers and replay possible. ClickHouse serving consumers and
+the canonical archive consumer advance independently. Queue lag and archive
+lag are visible separately from ClickHouse query freshness.
+
+== Durable ingestion and rebuild
+
+Treat ClickHouse as the query-serving copy rather than assuming its local parts
+are the only source of truth. The production design should acknowledge accepted
+events through a durable replay boundary, assign immutable event and batch
+identities, and persist canonical batches to an economical archive. ClickHouse
+and optional accelerators consume this stream and must be reconstructable from
+the archive plus replay position.
+
+The ten-day benchmark's bulk `event_payloads` table measures the immediate
+storage and lookup tradeoff; it is not by itself a final durable log or object
+archive design. Record the acknowledgement, retry, deduplication, replay, and
+archive-format contracts in a separate decision before production ingestion is
+implemented.

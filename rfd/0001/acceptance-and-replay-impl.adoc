@@ -1,0 +1,9 @@
+= Acceptance And Replay implementation
+
+Checklist ownership: link:acceptance-and-replay.adoc[Acceptance And Replay].
+
+== Phase 2: unified query semantics
+
+* [ ] Define and version the common event envelope, dimension/measure typing, upstream sampling metadata, and stable event and batch identities.
+
+* [ ] Establish the durable acceptance boundary, canonical immutable batch archive, idempotent ClickHouse consumer, and replay validation.

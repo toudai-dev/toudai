@@ -1,0 +1,153 @@
+= Queries and acceleration
+
+This section defines query semantics, execution paths, and bounded acceleration.
+
+== Physical event representation
+
+Long-tail fields use ClickHouse `Map` for the MVP. Common schema-stable fields
+become physical columns only when they are broadly useful across tenants or
+required for routing and correctness. Per-tenant arbitrary columns are not
+added to the shared table.
+
+Tenant-specific acceleration is expressed through bounded secondary objects:
+indexes for selective equality predicates, aggregate states or projections for
+known dashboard shapes, metadata catalogs for field discovery, and normalized
+query-result caching. Raw events remain the semantic fallback. Acceleration is
+manual or dashboard-requested initially; workload observation may recommend it,
+but automatic activation waits for proven per-tenant storage, cardinality,
+backfill-CPU, and maintenance budgets.
+
+The system does not array-join every attribute into an inverted index. The
+initial proof of concept expanded 62.4 million events into 3.73 billion string
+index rows while leaving broad metadata scans unsafe, demonstrating why derived
+storage must be bounded and justified by measured workload benefit.
+
+== Query semantics and result truthfulness
+
+Exact versus approximate math is independent from complete versus partial data
+coverage. Every result reports the execution mode, selected storage path,
+freshness watermark, expected and scanned shards or partitions, source sampling
+adjustment, bytes and rows scanned, and whether the answer is partial.
+Billing, compliance, security enforcement, and other complete-result workloads
+must reject incomplete execution or use a separate policy.
+
+Mergeable local aggregates include count, sum, min/max, sum-plus-count average,
+compatible histograms, t-digest or DDSketch quantiles, HyperLogLog distinct
+counts, and bounded heavy hitters. Coordinators receive aggregate states rather
+than matching raw rows except for explicitly bounded event samples.
+
+== Architecture overview
+
+This architecture is a proposed MVP, not an accepted final design. It separates
+three concerns so that the interactive ClickHouse copy can be rebuilt and
+tenant policy can evolve without placing a metadata lookup on every event:
+
+[source,text]
+----
+OTel / wide-event SDKs
+          |
+          v
+stateless ingestion gateways <----- cached, versioned tenant policy
+          |
+          v
+durable Kafka/Redpanda acceptance boundary
+          |---------------------> immutable canonical batch archive
+          |
+          v
+normalization consumers -------> ClickHouse local ReplicatedMergeTree tables
+                                  behind a Distributed table
+                                             |
+                                             v
+                                  query planner and Scuba-style UI
+
+stream copy ---> field/cardinality sketches ---> metadata and policy registry
+query history ---------------------------------> acceleration recommendations
+----
+
+== Primary raw path
+
+The normalized hot table optimizes tenant, dataset, time, and common
+service-scoped reads. Its dynamic attributes are the exact normalized fallback
+for every supported event query. Exact source reconstruction joins or fetches
+the separately retained canonical payload only when requested; normal filters
+and aggregations do not pay payload I/O.
+
+== Trace path
+
+Add a narrow projection or derived trace table ordered by tenant and trace ID.
+It should contain enough fields to render a waterfall and identify correlated
+logs without duplicating every dynamic attribute. Benchmark projection storage
+and trace-fetch latency before choosing projection versus table.
+
+== Dashboard aggregate states
+
+Materialized dashboard tables may store mergeable states such as:
+
+[source,sql]
+----
+countState()
+sumState(duration_ns)
+minState(duration_ns)
+maxState(duration_ns)
+quantilesTDigestState(0.5, 0.9, 0.95, 0.99)(duration_ns)
+----
+
+Initial rollups cover only saved dashboards and measured repeated workflows.
+Experiment 008 shows that this can reduce 5-93 second raw aggregate fixtures to
+6-33 ms with only about 4.4 MiB of aggregate states on the measured day. Do not
+construct a cube over every dynamic attribute. Unsupported groupings use the
+normalized raw table.
+
+Acceleration creation is asynchronous and disposable:
+
+1. A dashboard explicitly requests required aggregate states.
+2. Query history may recommend an equality index or aggregate for an expensive,
+   repeated tenant-field shape and estimate its build and storage cost.
+3. Activation is manual initially; later automatic activation is permitted only
+   within tenant field-count, cardinality, storage, and backfill-CPU budgets.
+4. The planner uses an acceleration only inside its complete coverage watermark
+   and falls back to raw execution elsewhere.
+5. Unused accelerations expire without changing or expiring accepted events.
+
+== Exact and approximate modes
+
+* `auto`: use mergeable approximate states or raw approximate functions when
+  they satisfy the query.
+* `exact`: execute against full-resolution values with stricter cost limits.
+* `raw`: force raw-event execution for validation and forensic workflows.
+
+Exact and approximate results must be clearly identified in API responses and
+query diagnostics.
+
+Mathematical accuracy, input completeness, and freshness are independent. Every
+response reports the execution mode, data watermark, expected and participating
+shards or partitions, scanned events/bytes, and whether upstream sampling
+weights were applied. Alerts, billing, security, or compliance workflows may
+require complete execution even when an interactive exploration permits a
+clearly labeled bounded-latency partial result.
+
+== Storage tiers
+
+The MVP uses normalized events on ClickHouse's fast serving tier and immutable
+canonical batches on economical bulk or object storage. Experiment 009 validates
+the immediate physical split and exact lookup, but its bulk ClickHouse payload
+table is not itself the final durability design. Querying archived normalized
+events through ClickHouse object-backed parts versus a distinct archive executor
+remains an experiment; either path must preserve one logical query contract and
+report its source, freshness, and completeness.
+
+== Query and exploration plane
+
+The planner requires tenant, dataset, and bounded time range, then chooses raw,
+trace, metadata, attribute-index, aggregate-state, or archive execution. It
+pushes mergeable partial aggregation to ClickHouse shards and returns raw rows
+only for a bounded event sample or explicit reconstruction request. Deadlines,
+cancellation, concurrency limits, maximum scans/groups/result rows, and workload
+priority protect dashboards and tenants from one another.
+
+The MVP user workflow is Scuba-style rather than SQL-first: compare periods,
+add or remove filters, group by a field, view top values/cardinality before an
+expensive grouping, inspect time series/heatmaps/percentiles, and drill into
+representative exact events. Saved queries and dashboard panels use the same
+query contract and expose approximation, freshness, coverage, and upstream
+sampling indicators.

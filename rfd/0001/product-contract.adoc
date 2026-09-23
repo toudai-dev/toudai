@@ -1,0 +1,295 @@
+= Product contract
+
+This section defines the product boundary and common event contract.
+
+== Product contract
+
+The target workflow is:
+
+....
+alert -> compare time ranges -> group by any retained field
+      -> identify an outlier -> inspect exact representative events
+....
+
+Lighthouse adopts Scuba's flexible event exploration, mandatory time bounds,
+storage-node partial aggregation, and fast drill-down. It does not adopt
+Scuba's memory-authoritative serving, silent sampling, short-only retention, or
+unlabelled incomplete answers. Kraken is supporting evidence for future scale
+techniques, not the product model or an immediate reason to build a custom data
+plane.
+
+The MVP supports filtering, grouping, time series, rates, histograms, heatmaps,
+percentiles, top-K, comparisons, and bounded raw-event retrieval. Joins and
+arbitrary general-purpose database workloads are outside the interactive path.
+Every query requires a tenant, dataset, and bounded time range.
+
+Freshness, p50/p95 latency by query class, concurrency, retention, and cost
+budgets remain open until controlled multi-day query measurements are complete.
+
+== Event and instrumentation contract
+
+Producers emit a versioned envelope containing tenant and dataset identity,
+stable event and immutable batch identities, source and observed timestamps,
+event kind, service and deployment context, trace correlation, structured
+attributes, exact payload, and explicit upstream sampling metadata.
+
+Instrumentation libraries must be asynchronous, batched, compressed, and
+backpressure-aware. They expose accepted, rejected, retried, sampled, and
+dropped counts. They must not silently sample. Upstream-sampled events carry a
+probability or weight so aggregates can compensate and disclose that they did
+so.
+
+Ingestion validates field count, field-name growth, event and string sizes,
+declared types, reserved fields, and sensitive-data policy before acknowledging
+the durable batch. Additive fields are permitted; incompatible type changes are
+recorded and rejected or isolated according to versioned tenant policy.
+
+== Implementation language
+
+Lighthouse uses Rust for the service and benchmark load generators. This was a
+low-cost choice because the repository contained only a three-line Go
+placeholder and no Go dependencies, generated code, or tests. Rust provides
+the asynchronous I/O, explicit resource control, and Arrow/Parquet ecosystem
+needed by the ingestion and replay paths without making a custom storage engine
+part of the MVP. ClickHouse remains the serving engine. Revisit the language
+only if implementation uncovers a concrete interoperability gap that is more
+expensive than maintaining a second runtime.
+
+== Alternatives
+
+Separate log and span tables were rejected as the user-facing storage boundary
+because cross-event exploration and trace-correlated logs are core behavior.
+Separate physical components remain permissible behind the unified contract
+when measured access paths require them.
+
+Putting native metrics into the event table was rejected because it combines
+incompatible semantics without improving event exploration. Keeping only raw
+JSON was rejected because common routing and filtering repeatedly pay extraction
+cost. Indexing every field was rejected because its amplification is unbounded.
+Ingestion sampling was rejected because it conflicts with full-resolution
+accepted data.
+
+== Open decisions
+
+The proposal cannot move to `committed` until the implementation checklist's
+MVP exit criteria are met. The key unresolved choices are explicit SLOs and
+retention, durable acknowledgement and deduplication semantics, initial tenant
+budgets, synchronous versus asynchronous exact-query limits, object-backed
+ClickHouse versus explicit archive routing, and the shard count or workload at
+which broad fanout merits virtual partitions.
+
+== References
+
+* https://www.vldb.org/pvldb/vol6/p1057-wiener.pdf[Scuba: Diving into Data at Facebook]
+* https://docs.honeycomb.io/get-started/honeycomb/traces-metrics-logs[Honeycomb: Traces, Metrics, and Logs]
+* https://www.honeycomb.io/blog/introducing-honeycomb-telemetry-pipeline[Honeycomb Telemetry Pipeline]
+* https://www.vldb.org/pvldb/vol15/p3522-mo.pdf[Meta's next-generation realtime monitoring and analytics platform]
+
+== Context
+
+Lighthouse is being designed as a ClickHouse-backed, Scuba-style telemetry
+system for recent-data exploration. The initial proof of concept lives at
+`~/workspace/inngest/lighthouse` and provides useful ingestion, query-planning,
+Prometheus compatibility, schema, and staging performance evidence. This
+repository is not required to preserve the proof of concept's physical schema.
+
+The product workload, rather than Scuba's exact implementation, is the north
+star: an engineer should be able to move from an alert to a time comparison,
+group by any useful field, identify an outlier, and inspect representative exact
+events without first predicting that query at ingestion time. The MVP contract
+is intentionally not final until freshness, query-latency, concurrency, and
+retention targets are agreed and the current multi-day benchmark is complete.
+
+The product should provide a high-level event model rather than force users to
+choose between logs and traces:
+
+* logs, trace spans, and application-wide events share one event medium;
+* a trace is a rendering of correlated events with span relationships;
+* raw events remain available at full resolution without ingestion sampling;
+* users can filter, group, aggregate, build heatmaps, and calculate percentiles
+  over any retained event field;
+* common dashboards remain fast through derived storage without limiting raw
+  exploration;
+* native metrics use separate time-series storage because their data model and
+  access patterns differ from events.
+
+The available performance corpus is under `~/storage/lighthouse`. It originated
+as JSON log entries retrieved from GCP Logging and was compacted into Parquet.
+
+== Goals
+
+* Store logs, spans, and arbitrary structured events through one logical event
+  medium with a common envelope. The query-serving columns and exact payload
+  may use separate physical tables or tiers.
+* Retain every accepted event and its queryable context at full resolution.
+* Support exact raw queries and approximate or exact aggregate execution.
+* Make interactive, arbitrary exploration possible without predeclaring every
+  future query dimension.
+* Accelerate known dashboard and incident workflows with bounded attribute
+  indexes, materialized aggregate states, metadata catalogs, caching, and query
+  routing while preserving raw fallback.
+* Preserve field-type information in the logical contract and canonical event;
+  use the benchmark-selected `Map` serving representation plus typed promoted
+  columns or aggregate inputs only when measurement justifies them.
+* Validate behavior at 1 TB, 10 TB, and 100 TB of GCP-equivalent uncompressed
+  event data before considering a 1 PB clustered test.
+* Measure storage amplification across the complete schema, not only base-table
+  compression.
+
+== Non-goals
+
+* LogSQL or LogQL compatibility is not required in the initial design.
+* A 1 PB benchmark is deferred until the 100 TB architecture is understood.
+* Native metrics do not need to share the physical event table.
+* Every arbitrary query is not required to have dashboard-class latency.
+* Rollups do not replace or expire the full-resolution source events.
+* Fully automatic physical-schema mutation is not an MVP requirement.
+  Dashboards may request accelerations explicitly, and workload observation may
+  recommend them; automatic activation requires per-tenant storage, field,
+  cardinality, and backfill-CPU budgets.
+
+== Settled Design Principles
+
+== Unified events
+
+One logical `events` medium stores logs, spans, and application events. Its
+normalized query-serving table and exact canonical payload may be physically
+separate. An `event_kind` discriminator affects ingestion validation and
+rendering, not the event's queryability. Common queries can aggregate all event
+kinds together.
+
+Trace-specific fields such as trace ID, span ID, parent span ID, span kind, and
+duration are nullable or have empty defaults for non-span events. Logs carrying
+trace context are returned with spans when querying a trace.
+
+== Separate native metrics
+
+Native Prometheus or OpenTelemetry metrics remain in signal-specific tables.
+Prometheus API compatibility remains useful for native metrics and dashboards,
+but it must not define the event query model.
+
+Event-derived counts, rates, histograms, heatmaps, and percentiles are computed
+from raw events or event aggregate states. They do not require conversion into
+native metric samples unless a later interoperability feature needs it.
+
+== Full-resolution acceptance and retention
+
+Lighthouse does not silently sample accepted events. An event is accepted only
+after a durable replay boundary, and accepted events remain reconstructable at
+full resolution from immutable batches or their canonical archive. Producer
+drops or upstream sampling must be reported; sampled events carry an explicit
+sampling probability or weight. Approximate percentile, distinct-count, top-K,
+or histogram functions may be used for interactive execution, but this changes
+the aggregation algorithm rather than the retained data. Exact execution
+remains available with cost guardrails or as an asynchronous job.
+
+== Raw fallback
+
+Attribute indexes, materialized aggregate states, and projections accelerate
+supported query shapes. A query using an unmaterialized field falls back to raw
+events rather than becoming invalid. Query responses must disclose whether an
+aggregate is exact or approximate.
+
+== Standard distributed data plane
+
+Scale beyond one node with local `ReplicatedMergeTree` tables behind a
+`Distributed` table. Initially shard by a stable hash of `tenant_id`, `dataset`,
+and `event_id` so high-volume tenants use the whole cluster. Accept broad query
+fanout until measurements show that its fixed cost or network use justifies a
+virtual-partition placement layer. See
+link:README.adoc[RFD 0001].
+
+== Bounded derived storage
+
+Do not expand every attribute of every event into inverted index rows. Derived
+tables must have a measured query benefit and a bounded amplification model.
+Field-name and field-value discovery must use metadata catalogs rather than
+array-joining the raw corpus at request time.
+
+== Draft MVP Event Contract
+
+Instrumentation emits a versioned common envelope. Logs, spans, and application
+events use the same acceptance and query path; `event_kind` controls validation
+and rendering rather than selecting a separate store. The logical contract
+contains at least:
+
+[source,text]
+----
+identity       tenant_id, dataset, event_id, immutable ingest_batch_id
+time           source timestamp, observed timestamp
+kind           event, log, or span
+common fields  event name, service, environment, region, host, build, severity
+trace context  trace ID, span ID, parent span ID, span kind, duration
+dimensions     sparse string, boolean, and integer fields
+measures       sparse integer and floating-point fields
+sampling       sampling probability or weight when sampling occurred upstream
+payload        exact canonical source event or immutable payload reference
+schema         envelope and field-policy versions
+----
+
+The producer SDK and gateway contract is part of the data model. Producers must
+batch and compress asynchronously, never block the application indefinitely,
+report dropped events and backpressure, set source timestamps and stable event
+IDs, and avoid sending known secrets or unrestricted request bodies. OpenTelemetry
+is the default transport vocabulary, with a custom wide-event API where OTel's
+signal APIs do not express the event cleanly.
+
+The MVP ClickHouse serving table uses fixed columns for the routing and commonly
+queried envelope plus `Map`-based long-tail attributes. Exact payload is kept in
+the immutable archive and may also be retained in a separately ordered bulk
+ClickHouse table for recent reconstruction. This is a physical implementation
+of one logical event medium, not separate log and trace products.
+
+The final DDL remains open only where the benchmarks have not decided it. Tests
+must still determine:
+
+* the number and boundaries of attribute namespaces;
+* the correct timestamp bucket in the sorting key;
+* whether `service_name` belongs before or after the time bucket;
+* the best ClickHouse representation for event and trace identifiers;
+* which GCP and OpenTelemetry fields deserve fixed or materialized columns;
+* how logical dimension and measure types are preserved alongside the selected
+  `Map` serving representation;
+* appropriate partition granularity, retention behavior, and archive format;
+  and
+* whether payload lookup remains a ClickHouse bulk table, moves to direct object
+  retrieval, or uses both by retention window.
+
+Multi-tenancy does not imply one promoted column per tenant field. Fixed or
+materialized columns are reserved for common envelope fields or fields with
+exceptionally broad, measured benefit. Tenant-specific equality acceleration
+uses the schema-stable `(tenant_id, dataset, field_name, field_value, timestamp,
+event_id)` shape validated in Experiment 008; tenant-specific dashboard
+rollups likewise store configured dimensions as data. This allows different
+tenants to accelerate different fields without divergent ClickHouse DDL.
+
+== Open Questions
+
+* What exact GCP metric and bucket scope produced the 32 TB monthly figure?
+* What retention targets apply to local, object-backed, and archival data?
+* What are the interactive p50/p95 latency targets by query class and time
+  range?
+* What dashboard and exploratory concurrency must one deployment support?
+* What maximum producer-to-query and producer-to-archive lag defines healthy
+  ingestion?
+* Is the acceptance contract at-least-once with query-time duplicates,
+  idempotent insertion by stable event ID, or bounded deduplication by immutable
+  batch ID?
+* Is exact aggregation required synchronously above a bounded scan cost, or may
+  it run as an asynchronous query job?
+* Which common envelope fields justify physical columns across tenants, and
+  what evidence threshold permits adding one?
+* What initial per-tenant event-size, field-count, field-name-growth,
+  cardinality, scan, group, and derived-storage budgets are safe?
+* At what shard count or workload mix does broad `Distributed` fanout justify
+  targeted virtual partitions?
+* Which fields must be searchable as text versus exact structured values?
+* How long must exact canonical payload remain online, and when may it move from
+  recent bulk lookup to archival retrieval?
+* What durable log, immutable batch format, acknowledgement boundary, and replay
+  contract make ClickHouse serving state safely reconstructable?
+* Should archived canonical events be queried through ClickHouse object-backed
+  parts or through a separate archive execution path?
+* Which registry technology should own dataset, field, privacy, quota, and
+  acceleration policy, and what degraded behavior is allowed when it is
+  unavailable?

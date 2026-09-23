@@ -1,0 +1,17 @@
+= Tenant Policy And Isolation implementation
+
+Checklist ownership: link:tenant-policy-and-isolation.adoc[Tenant Policy And Isolation].
+
+== Phase 2: unified query semantics
+
+* [ ] Implement a stateless ingestion gateway with authentication, validation, redaction, quotas, and cached versioned tenant policy.
+
+* [ ] Implement the dataset and field-policy registry.
+
+* [ ] Implement stream-derived field presence, type, cardinality, top-K, value-size, and growth-rate observations without enumerating high-cardinality values.
+
+== Phase 3: dashboard and metadata acceleration
+
+* [ ] Implement bounded field-name and field-value catalogs.
+
+* [ ] Add query cost estimation and guardrails for raw exact and high-cardinality operations.

@@ -1,0 +1,29 @@
+= Queries And Acceleration implementation
+
+Checklist ownership: link:queries-and-acceleration.adoc[Queries And Acceleration].
+
+== Phase 2: unified query semantics
+
+* [ ] Define the event filter, grouping, time-series, heatmap, percentile, and raw-result query contract.
+
+* [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
+
+* [ ] Implement and expose exact, approximate, and raw execution modes.
+
+* [ ] Return plan diagnostics including selected storage path and approximation mode.
+
+* [ ] Define ingestion watermarks, expected shard coverage, and complete versus bounded-latency execution independently of exact versus approximate math.
+
+== Phase 3: dashboard and metadata acceleration
+
+* [x] Measure schema-stable tenant attribute indexes and configured aggregate states against the full-day Map baseline.
+
+* [ ] Implement the minimum measured aggregate states needed by the dashboard fixture.
+
+* [ ] Route eligible dashboard queries to aggregate states with raw fallback.
+
+* [ ] Add normalized query-result caching and measure hit behavior.
+
+* [ ] Implement dashboard-requested acceleration and workload recommendations; keep activation manual until tenant budgets and maintenance cost are proven.
+
+* [ ] Verify derived storage remains within the agreed amplification budget.
