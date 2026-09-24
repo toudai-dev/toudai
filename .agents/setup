@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+#
+# Orb setup for lighthouse.
+#
+# Installs current upstream stable Nix (single-user, so no system daemon has to
+# stay alive across orb pause/resume) and realizes the repository's flake
+# development shell. The complete shell environment is then persisted into
+# ~/.bash_profile, because Amp and supervised services start in non-interactive
+# login shells that never run `nix develop` themselves.
+#
+# Non-interactive and idempotent: a warm run only re-checks its guards and reuses
+# the Nix store, profile, and login-shell hook from the snapshot.
+
+set -euo pipefail
+
+# Current upstream stable Nix, verified against https://nixos.org/download.
+nix_version="2.35.2"
+
+nix_profile="${HOME}/.nix-profile"
+nix_bin="${nix_profile}/bin/nix"
+nix_conf="${HOME}/.config/nix/nix.conf"
+bash_profile="${HOME}/.bash_profile"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+flake_lock="${repo_root}/flake.lock"
+hook_marker="# lighthouse Nix development shell"
+
+setup_started_at=${SECONDS}
+step_started_at=${SECONDS}
+step() {
+  local label="$1"
+  shift
+  step_started_at=${SECONDS}
+  printf '[setup] %s\n' "${label}"
+  "$@"
+  printf '[setup] %s (%ss)\n' "${label}" "$((SECONDS - step_started_at))"
+}
+
+install_nix() {
+  # The installer always fetches the current stable release, so a pinned version
+  # mismatch means the snapshot carries an older or newer Nix and must be
+  # refreshed.
+  local installed_version=""
+  if [[ -x "${nix_bin}" ]]; then
+    installed_version="$("${nix_bin}" --version 2>/dev/null || true)"
+  fi
+  if [[ "${installed_version}" == *"${nix_version}"* ]]; then
+    printf '[setup] Nix %s is already installed\n' "${nix_version}"
+    return 0
+  fi
+  local installer
+  installer="$(mktemp)"
+  curl --proto '=https' --tlsv1.2 -sSfL https://nixos.org/nix/install -o "${installer}"
+  # --no-daemon: single-user install, no daemon to restart after a resume.
+  # --yes: the installer must never prompt during setup.
+  sh "${installer}" --no-daemon --yes
+  rm -f "${installer}"
+}
+
+configure_nix() {
+  mkdir -p "$(dirname "${nix_conf}")"
+  # Flakes and the nix CLI are still experimental features; login shells and
+  # services cannot pass --extra-experimental-features per command.
+  if ! grep -Fqx 'experimental-features = nix-command flakes' "${nix_conf}" 2>/dev/null; then
+    printf 'experimental-features = nix-command flakes\n' >> "${nix_conf}"
+  fi
+}
+
+realize_dev_shell() {
+  # `nix develop --command true` realizes every store path the development shell
+  # references; `print-dev-env` alone only computes the environment. Nix may
+  # update a stale flake.lock here, so warn rather than leave a silent
+  # repository modification behind.
+  local lock_before=""
+  if [[ -f "${flake_lock}" ]]; then
+    lock_before="$(sha256sum "${flake_lock}")"
+  fi
+  "${nix_bin}" develop "${repo_root}" --command true
+  if [[ -n "${lock_before}" ]] && [[ "$(sha256sum "${flake_lock}")" != "${lock_before}" ]]; then
+    printf '[setup] WARNING: flake.lock was out of date and changed; commit it\n' >&2
+  fi
+}
+
+persist_login_shell() {
+  if grep -Fqx "${hook_marker}" "${bash_profile}" 2>/dev/null; then
+    printf '[setup] login-shell hook is already present\n'
+    return 0
+  fi
+  # print-dev-env keeps activation inside the login shell instead of spawning a
+  # nested `nix develop` supervisor process. The IN_NIX_SHELL and marker guards
+  # stop login shells started inside the development shell from re-activating.
+  cat >> "${bash_profile}" <<EOF
+
+${hook_marker}
+if [[ -z "\${IN_NIX_SHELL:-}" && -z "\${LIGHTHOUSE_NIX_DEV_ENV:-}" && ( "\${PWD}" == "${repo_root}" || "\${PWD}" == "${repo_root}"/* ) ]]; then
+  if [[ -e "${nix_profile}/etc/profile.d/nix.sh" ]]; then
+    . "${nix_profile}/etc/profile.d/nix.sh"
+  fi
+  if __lighthouse_dev_env="\$("${nix_bin}" print-dev-env "${repo_root}" 2>/dev/null)"; then
+    eval "\${__lighthouse_dev_env}"
+    export LIGHTHOUSE_NIX_DEV_ENV=1
+  else
+    printf 'lighthouse: could not load the Nix development shell\n' >&2
+  fi
+  unset __lighthouse_dev_env
+fi
+EOF
+}
+
+verify_login_shell() {
+  # A minimal environment and a fresh login shell prove the persisted hook, not
+  # this script's own environment.
+  local report
+  # shellcheck disable=SC2016  # the inner script must expand in the login shell
+  if ! report="$(cd "${repo_root}" && env -i HOME="${HOME}" USER="${USER}" TERM=dumb /bin/bash -lc '
+    missing=""
+    for tool in cargo rustc cargo-clippy rustfmt rust-analyzer clickhouse goose buf protoc git-cliff asciidoctor docker-compose docker-buildx fio jq tofu packer sar; do
+      command -v "${tool}" >/dev/null 2>&1 || missing="${missing} ${tool}"
+    done
+    [[ -n "${missing}" ]] && printf "missing:%s\n" "${missing}"
+    printf "rustc: %s\n" "$(rustc --version)"
+    printf "clickhouse: %s\n" "$(clickhouse local --version | head -n 1)"
+    printf "tofu: %s\n" "$(tofu version | head -n 1)"
+    printf "fio: %s\n" "$(fio --version)"
+  ')"; then
+    printf '[setup] ERROR: fresh login shell could not load the development shell\n' >&2
+    return 1
+  fi
+  printf '%s\n' "${report}" | sed 's/^/[setup] /'
+  if [[ "${report}" == *"missing:"* ]]; then
+    printf '[setup] ERROR: fresh login shell is missing required tools\n' >&2
+    return 1
+  fi
+}
+
+step "install upstream Nix ${nix_version}" install_nix
+step "configure Nix" configure_nix
+step "realize flake development shell" realize_dev_shell
+step "persist development shell for login shells" persist_login_shell
+step "verify development shell in a fresh login shell" verify_login_shell
+
+printf '[setup] ready in %ss\n' "$((SECONDS - setup_started_at))"
