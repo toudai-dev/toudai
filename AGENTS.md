@@ -71,10 +71,11 @@ This is a ClickHouse-backed telemetry service designed to be compatible with the
 
 When implementing an RFD in `rfd/NNNN/`:
 
-- Keep stable design and decision context in `README.adoc`; keep checkboxes out
-  of the proposal.
-- Treat `IMPLEMENTATION.org` or `IMPLEMENTATION.md` as the source of truth for
-  progress.
+- Keep `README.adoc` as the umbrella and stable design context in flat
+  `<section>.adoc` files; keep checkboxes out of design documents.
+- Treat each `<section>-impl.adoc` as the source of truth for that section's
+  progress. Each checklist item has one owner. Legacy unsplit RFDs may use
+  `IMPLEMENTATION.org` or `IMPLEMENTATION.md` instead.
 - Before code changes, identify the phase/checklist items being worked.
 - Update checklist items incrementally as work completes.
 - Do not mark an item complete unless the named code/test/docs work is actually done.

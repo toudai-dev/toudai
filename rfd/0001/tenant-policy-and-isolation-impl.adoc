@@ -1,0 +1,38 @@
+= Tenant Policy And Isolation implementation
+
+Checklist ownership: link:tenant-policy-and-isolation.adoc[Tenant Policy And Isolation].
+
+== PoC-required: authorization and policy
+
+Depends on the event/tenant contract and product fixture. Authentication and
+authorization precede both acceptance and query execution; workload-isolation
+tests follow the working raw and accelerated paths.
+
+* [ ] Define account/workspace/dataset records and workspace-scoped ingestion keys, including multiple keys per workspace, rotation, revocation/cache-expiry behavior, and separate write/read/admin permissions.
+* [ ] Implement key-derived trusted workspace scope before Collector batching; verify dataset routing stays within it, unknown datasets fail, and producer scope attributes cannot override ownership or leak credentials.
+
+* [ ] Integrate authentication, validation, redaction, quotas, and cached versioned tenant policy with Collector gateways before normal and overflow export; reuse available components and justify any custom extension.
+
+* [ ] Implement the dataset and field-policy registry.
+
+* [ ] Test workspace authorization across ingestion, queries, metadata, and exact payload retrieval using sibling workspaces in one account and a workspace in another account with colliding dataset/event/trace names and IDs; reject cross-workspace access on every path, including batching, overflow, and catch-up.
+* [ ] Specify and test new-request rejection after key revocation and workspace deletion separately from already admitted backlog handling; verify catch-up retains original ownership without requiring the producer credential.
+
+== PoC-required: canonical privacy and deletion
+
+* [ ] Define canonical post-policy payload semantics and transformation versioning; inject secret markers into attributes/body and verify absence from retained payloads, queues under our control, overflow, derived data, and diagnostic logs.
+* [ ] Choose retention clock, duration, late/future-event policy, and logical/physical expiry deadlines; test just inside/at/outside expiry and prove retries, catch-up, and restore do not renew record lifetime.
+* [ ] Implement whole-workspace/dataset deletion fences and completion barriers; test stale policy caches, in-flight queries/writes, colliding recreated names, and backlog replay without resurrecting deleted scope.
+* [ ] Inventory purge progress and backup expiry; restore a pre-deletion backup into isolation, apply current deletion state, and verify no deleted raw, payload, metadata, or aggregate result is exposed. Fail closed if current deletion state cannot be recovered.
+
+== PoC-required: bounded exploration and work
+
+* [ ] Implement bounded single-authority admission and versioned policy caching; test unknown/expired policy, registry outage, revocation within the proposed 60-second staleness bound, queue exhaustion, and independent dashboard/raw budgets without claiming uncoordinated per-replica limits are global quotas.
+
+* [ ] Implement stream-derived field presence, type, cardinality, top-K, value-size, and growth-rate observations without enumerating high-cardinality values.
+
+* [ ] Implement bounded field-name and field-value catalogs.
+
+* [ ] Add query cost estimation and guardrails for raw exact and high-cardinality operations.
+
+* [ ] Run a small mixed-tenant fixture with dashboard queries, expensive raw scans, and ingestion; verify prospective queue/execution/freshness limits, observable rejections, and cancellation of leaf work after deadlines.

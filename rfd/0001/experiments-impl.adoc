@@ -1,0 +1,173 @@
+= Experiments implementation
+
+Checklist ownership: link:experiments.adoc[Experiments].
+
+== Milestone scope
+
+The phases below preserve historical benchmark progress. They are not the PoC
+execution order. The section implementation plans own application correctness
+and small-fixture failure tests; this plan owns reproducibility, measured
+thresholds, and scale/qualification evidence.
+
+Before PoC acceptance runs, complete the threshold task below for the named PoC
+workload, including freshness, recovery time, and a run-cost ceiling. Record the
+fixture, commands, expected results, and observed results under `experiments/`.
+Existing completed experiments remain characterization, not retroactive passes
+against those thresholds.
+
+The PoC workload manifest must name hardware, retained rows/bytes and time range,
+workspace skew, offered ingestion rate, burst duration, query mix, and clients.
+Proposed starting latency targets are p95 <= 2 seconds for eligible dashboards,
+p95 <= 5 seconds for bounded event/trace/payload lookup, and p95 <= 10 seconds
+producer-to-query freshness under healthy load. Raw exploration has a 30-second
+execution deadline and may return a limit error; do not classify that error as a
+successful latency sample. Target leaf cancellation within 5 seconds after the
+deadline and policy revocation propagation within 60 seconds. These are proposed
+PoC gates, not benchmark-derived guarantees or production SLOs.
+
+Choose offered rates, admission budgets, queue-wait limits, permitted error rate,
+overflow-drain/rebuild time, storage amplification, and the run-cost ceiling before
+execution. Until these are fixed, the workload is characterization, not a passing
+acceptance run. Record request/sample counts and distributions; require at least
+1,000 requests per evaluated interactive class for a provisional p95, and do not
+claim p99 qualification from that small run. Report offered/completed/rejected
+load, end-to-end queue plus execution latency, CPU/memory, merge pressure, and
+replica/overflow backlog. Under fault injection, separately report availability,
+loss/duplicates, and recovery; never omit failed requests to manufacture a pass.
+
+The remaining full-inventory, retained-volume, layout-comparison, and cold-tier
+tasks are later validation. Independent-host production capacity, provider
+comparisons, cross-zone failure domains, and long soaks are production
+qualification. Neither category blocks the small end-to-end PoC; do not mark
+these larger tests complete based on a small-fixture pass.
+
+== Phase 0: benchmark contract and reproducibility
+
+* [x] Inventory the Parquet corpus by files, rows, bytes, and daily coverage.
+
+* [x] Establish the provisional GCP monthly calibration and distinguish it from canonical JSON reconstruction size.
+
+* [x] Establish experiment and architecture decision record conventions.
+
+* [x] Record the initial corpus profile and unified-event storage boundary.
+
+* [x] Adopt Rust as the project implementation language and replace the empty Go scaffold and stale Go-only development commands.
+
+* [x] Profile local benchmark storage, runtime options, and safe data placement.
+
+* [x] Add and smoke-test an isolated native ClickHouse benchmark harness.
+
+* [ ] Verify the exact GCP metric, bucket scope, exclusions, and calendar period represented by the 32 TB monthly figure.
+
+* [x] Define the repeatable transformation from Parquet rows to each candidate event schema.
+
+* [x] Define provisional GCP-equivalent logical input byte accounting and persist it with benchmark runs.
+
+* [ ] Complete the versioned query fixture inventory; promoted, dynamic-field, field-discovery, time-series, heatmap, and percentile fixtures are present, while trace, concurrency, exact-percentile, and cold-tier fixtures remain.
+
+* [ ] Agree query latency, concurrency, ingestion, and maximum amplification acceptance thresholds.
+
+* [x] Capture hardware, ClickHouse settings, caches, and storage configuration with every run.
+
+== Phase 1: 1 TB schema bakeoff
+
+* [x] Implement native JSON, Map, and typed-array candidate tables.
+
+* [x] Load the approximately 1 TB natural subset into Map and attempt the same load into native JSON; terminate JSON at 63.2% after measured descriptor, part-count, and inode exhaustion.
+
+* [x] Measure Map ingestion, merge behavior, base compression, and total storage, and record native JSON's operational failure bounds.
+
+* [x] Establish the full-day Map baseline for the current query fixtures and record the query-condition cache's effect on repeated dynamic predicates.
+
+* [x] Measure splitting exact raw payloads onto bulk storage before the ten-day retained-data benchmark.
+
+* [x] Select `Map` as the MVP long-tail serving representation based on the completed scale load and raw query baseline; do not carry native `JSON` or typed arrays into the 10 TB load.
+
+* [ ] Run the complete query inventory with cold and warm cache conditions.
+
+* [x] Compare candidate sort keys and timestamp bucket widths; Experiment 013 rejects the hour/timestamp compromise and records the timestamp-first versus hour/service compression and query trade-off.
+
+* [x] Backfill exact or explicitly non-reconstructable `EXPLAIN indexes = 1` evidence for every SELECT-performance experiment through Experiment 013.
+
+* [x] Correlate index-stage part and granule selection with measured rows, bytes, CPU, memory, and latency without inferring unsupported causes.
+
+* [ ] Compare trace projection and derived trace-table approaches using a deterministic correlated-event fixture.
+
+* [ ] Record the `Map` representation, final sort key, identifier types, and promoted-column baseline in a written decision record.
+
+== Phase 4: 10 TB validation
+
+* [x] Load and checksum-validate the first five natural days: 3.07B rows and approximately 5.84 TB logical, with normalized events on striped SSD and exact payloads on bulk storage.
+
+* [x] Preserve the loader's phase, command, line, exit code, and combined output on failure, then resume without discarding the five validated days.
+
+* [x] Complete and checksum-validate all ten natural days: 5.69B rows and approximately 10.81 TB logical input.
+
+* [ ] Measure a representative sustained ingestion rate separately from the backfill load; concurrent external bulk-pool writes make current elapsed backfill throughput unsuitable as a production SLO.
+
+* [x] Run the Experiment 011 ten-day raw fixture set under ClickHouse-cold and warm conditions and validate deterministic exact payload lookup; trace lookup and broader workload coverage remain open.
+
+* [x] Build the selected tenant indexes and dashboard aggregate states over ten days, then measure storage, build/backfill cost, correctness anchors, and query speedup.
+
+* [ ] Measure live accelerator maintenance cost during sustained ingestion and merges.
+
+* [ ] Run the mixed-concurrency workload.
+
+* [ ] Validate dashboard isolation from exploratory scans.
+
+* [ ] Measure query performance during merges and after restart.
+
+* [x] Build a local native multi-instance ClickHouse harness and compare one-, two-, and four-shard fanout, placement skew, coordinator work, acceleration behavior, and unavailable-shard semantics over one natural day.
+
+* [ ] Run synthetic multi-tenant concurrency, dashboard/raw workload isolation, and slow-leaf cancellation on independent hosts; the shared local CPU and SSD stripe reached their limits before those profiles could represent scale-out.
+
+* [x] Prepare and apply the GCP Stage A private network, build and boot-validate the pinned dependency image, create the guarded regional corpus bucket, and checksum-inventory and upload the one-day corpus before starting compute.
+
+* [x] Provision the approved private GCP Stage A Spot leaf and load generator with six-hour provider-enforced deletion, least-privilege corpus access, and load-generator-only ClickHouse ingress.
+
+* [x] Complete the GCP Stage A load and benchmark, preserve its artifacts, and destroy the topology before the six-hour deletion guardrail.
+
+* [x] Build and boot-test the corrected ClickHouse 26.8.2.7 Stage B image, and define a private, provider-capped 1/2/4-shard topology plus a checksum-checked, day-resumable GCS loader without starting idle compute.
+
+* [x] Upload and inventory the exact Experiment 010 ten-day corpus for Stage B; do not use the initially uploaded 5.03B-row July set as the 5.69B-row comparison corpus.
+
+* [x] Complete, validate, preserve, and tear down the GCP Stage B one-shard baseline: 5.69B rows, 210 raw timings, 150 accelerated timings, complete coordinator and leaf query telemetry, and 150 passing correctness checks.
+
+* [x] Prepare the two- and four-shard Stage B scaling run: remove the redundant pre-batch corpus scan from the distributed loader, add metered-cost and node-evidence collectors, re-verify the immutable ten-day corpus inventory, and record the runtime and maximum-cost estimate for explicit budget approval.
+
+* [x] Complete, validate, preserve, and tear down the AWS Stage B one-shard same-hardware baseline: 5.69B rows, 210 raw timings, 150 accelerated timings, 150 passing correctness checks, node evidence, and $32.19 metered listed-price compute and root-volume cost. Record compact evidence under `experiments/015/aws-1s-v3/` and fix the finisher to export its AWS profile to OpenTofu before the remaining runs.
+
+* [x] Complete, validate, preserve, and tear down the AWS Stage B two-shard run: 5.69B rows balanced within 0.0011%, 210 raw timings, 150 accelerated timings, 150 passing correctness checks, node evidence, and $34.10 metered listed-price compute and root-volume cost. Record compact evidence under `experiments/015/aws-2s-v1/`.
+
+* [x] Complete, validate, preserve, and tear down the AWS Stage B four-shard run: 5.69B rows balanced within 0.0058%, 210 raw timings, 150 accelerated timings, 150 passing correctness checks, node evidence, and $45.38 metered listed-price compute and root-volume cost. Record compact evidence under `experiments/015/aws-4s-v1/` and the final same-hardware scaling comparison in the experiment report. The complete 1/2/4-shard matrix cost $111.67 against the $189.71 estimate and remained below the $400 account-wide guardrail.
+
+* [ ] Calibrate serious cloud and dedicated-host candidates at 1 TB, beginning with the completed same-cloud GCP run and AWS 1/2/4-shard scaling matrix, then run replicated failure-domain, sustained-ingestion, failure, and 24-to-72-hour soak tests only on finalists; compare full infrastructure, object storage, network, source-cloud egress, and operational cost.
+
+* [ ] Validate object-storage or cold-tier behavior on selected partitions.
+
+* [ ] Compare transparent ClickHouse tiering with an explicit hot/archive query split for selected aggregate and raw-event fixtures.
+
+* [x] Confirm the single-node retained-capacity assumption: normalized hot plus exact payload uses 1,709.33 GiB, with 785 GiB hot-tier headroom at capture.
+
+* [ ] Record any schema or planner changes required before scaling further.
+
+== Phase 5: 100 TB architectural validation
+
+* [ ] Generate the approximately 100 TB transformed corpus reproducibly.
+
+* [ ] Load it at the 1B-events/day rate and then at the 3B-events/day rate.
+
+* [ ] Run hot, mixed-age, and cold query workloads during sustained ingestion.
+
+* [ ] Validate merge capacity, part counts, retention movement, and recovery.
+
+* [ ] Validate standard ClickHouse `Distributed` fanout using a stable hash of tenant, dataset, and event identity.
+
+* [ ] Measure whether small-dataset fanout latency or network use justifies a virtual-partition placement layer.
+
+Replica rebuild and failure recovery are tracked in
+link:replication-and-recovery-impl.adoc[the replication implementation plan].
+
+* [ ] Produce a cost and capacity model per retained logical TB.
+
+* [ ] Decide whether the design is ready for a later 1 PB clustered benchmark.

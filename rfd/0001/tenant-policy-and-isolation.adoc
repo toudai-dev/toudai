@@ -1,0 +1,205 @@
+= Tenant policy and isolation
+
+This section defines tenant governance, metadata, privacy, and isolation.
+
+== Accounts, workspaces, and keys
+
+The resource hierarchy is `account -> workspace -> dataset`. An account owns
+multiple workspaces; each workspace belongs to one account and contains its own
+datasets, ingestion keys, policy, and telemetry. Workspace is the telemetry
+isolation boundary. Names may repeat across workspaces; use stable workspace IDs,
+not display names, for authorization and storage scope.
+
+An ingestion key belongs to exactly one workspace. Multiple keys may target the
+same workspace for independent rotation and revocation. The authenticated key
+resolves the workspace and its owning account; producer attributes or dataset
+selectors cannot override that binding. Ingestion keys grant write access within
+that workspace, not read access or account/workspace administration.
+
+Dataset routing is separate from authentication and stays within the resolved
+workspace. A workspace may contain data from multiple services; `service.name`
+does not implicitly create a workspace or necessarily define a dataset. The PoC
+uses explicitly provisioned datasets and a configured default or explicit dataset
+selector. Unknown datasets are rejected; automatic dataset creation is a later,
+explicit permission decision rather than an ingestion side effect.
+
+Use standard OTLP exporter headers for credentials, in SDKs or customer-managed
+Collectors. The public header name and credential format remain implementation
+choices. On a shared server-side Collector, authenticate each request and attach
+trusted workspace scope before batching can discard request context. Never store
+the raw API key in event attributes, overflow objects, or diagnostic logs.
+Conflicting producer-supplied reserved scope fields must not change ownership.
+
+Normal export, overflow, and catch-up preserve the original trusted workspace
+scope. A catch-up service credential authorizes replay; it does not supply a new
+owner for the records. Workspace deletion and key revocation need distinct
+policies for already admitted backlog versus new requests; specify those policies
+before enabling recovery rather than reusing a revoked producer key to replay.
+
+Queries and administrative operations use separately authorized principals.
+Authorize the requested workspace and dataset before planning, including metadata,
+trace lookup, payload retrieval, exports, and future caches/jobs. Account ownership
+of sibling workspaces does not make a workspace ingestion key valid in a sibling.
+User roles and account-wide administration remain separate control-plane design
+work; they do not weaken workspace scoping on telemetry APIs.
+
+Existing design prose uses "tenant" as shorthand for this workspace isolation
+scope. Historical benchmark `tenant_id` columns are not evidence of account-level
+authorization: implementation must map that scope to a globally unique workspace
+ID (or explicitly migrate the column). Do not reuse an account ID as `tenant_id`.
+The corpus's ordinary `workspace_id` attribute is source telemetry, not a trusted
+Lighthouse workspace identifier. Benchmark schemas and results stay unchanged.
+
+== Cardinality and multi-tenancy
+
+Cardinality is a control-plane and query-admission concern, not a reason to
+delete source values. The ingestion stream maintains bounded sketches for field
+presence, type, approximate distinct count, top-K, value size, and growth rate.
+It never materializes a complete high-cardinality value dictionary merely to
+measure cardinality.
+
+Budgets apply per tenant and dataset to event size, field count, field-name
+growth, ingestion rate, retained bytes, derived bytes, scan bytes, result
+groups, memory, and concurrent work. High-cardinality grouping can use bounded
+top-K or approximate distinct algorithms in interactive mode; guarded exact
+execution remains available when its estimated cost fits policy or as an
+asynchronous job. Dashboards and exploratory scans use separate workload
+classes so one tenant cannot consume the cluster.
+
+== PoC admission and policy availability
+
+Start with one logical admission authority and a static, versioned workspace
+policy configuration. Do not claim deployment-wide quotas by multiplying a
+per-process limit across Collector replicas. Before scaling admission, either
+partition the total budget explicitly or introduce coordinated enforcement.
+
+Separate hard limits (record/request bytes, queue capacity, concurrency, deadline,
+memory/result bounds) from asynchronously observed field growth/cardinality.
+Sketches and catalogs support estimates and alerts; they cannot guarantee a
+synchronous global field-count or cardinality quota. Bound catalog entry count,
+sketch count, and lifetime as well as each sketch's size. Unknown fields remain
+subject to record limits without requiring a metadata write on every event.
+
+Use a finite policy-cache lifetime; the initial proposed maximum is 60 seconds,
+to be tested as a PoC target rather than asserted as implemented. An unknown key,
+missing policy, or expired cached policy fails closed when the authority is
+unavailable. A valid cached snapshot may serve until expiry. Rotation/revocation
+tests must include the resulting staleness window. Deletion completion still
+requires the stronger barrier described below, not merely expiry of one cache.
+
+Bound queues and apply explicit rejection/backpressure when full. Separate
+dashboard and exploratory admission budgets so costly raw work cannot occupy
+all query slots. Enforce execution limits at ClickHouse leaves as well as the
+coordinator; a canceled HTTP request is not proof that leaf work stopped. Record
+rejected and timed-out requests alongside successful latency, and preserve
+observable counters during downstream outages. Choose numeric budgets in the
+experiment workload manifest before running tests, not after observing results.
+
+== Privacy and operations
+
+Sensitive fields are classified and redacted before downstream persistent queues,
+database export, or overflow storage. Any upstream SDK/agent storage is a separate
+producer-side policy boundary and must be documented rather than assumed scrubbed.
+Policies include reserved-field ownership, token and secret detection,
+field-level access controls, tenant isolation, encryption, audit logs, raw
+export restrictions, retention, and deletion workflows. Arbitrary request
+bodies, headers, SQL parameters, or credentials are not accepted by default.
+
+The system publishes ingestion acceptance and lag, archive durability, schema
+conflicts, field growth, storage and derived amplification, partition skew,
+query queue and stage latency, scan cost, coverage, cancellation, and expensive
+tenant telemetry to an independent operational path.
+
+== Canonical content, retention, and deletion
+
+"Exact payload" means semantic reconstruction of the policy-approved canonical
+event received by Lighthouse after declared transformations, not the original
+unredacted request or original protobuf wire encoding. Preserve its types and
+record the mapping/policy version. Redacted values must not survive in a second
+raw-body copy, overflow object, diagnostic log, or derived field. Tests use known
+secret markers to inspect every persisted representation, not only query output.
+
+Full-resolution retention is bounded by workspace/dataset policy; it does not
+mean retaining data forever. Before implementation, choose the retention clock
+(event time or trusted ingestion time), duration, late/future-event handling, and
+physical purge deadline. Retried or replayed records must not acquire a fresh
+retention lifetime. If ingestion time is used, preserve the original trusted
+time through catch-up and rebuild. Read-path expiry and asynchronous physical
+cleanup are distinct guarantees, both measured in the PoC.
+
+The initial deletion scope is a whole workspace or dataset, using immutable IDs;
+recreating a display name must not resurrect the deleted identity. Arbitrary
+per-event/subject erasure and field-level access controls are later work, not
+claimed capabilities of the initial PoC. Until stronger requirements are met,
+use synthetic or explicitly approved non-sensitive fixtures.
+
+Persist a deletion fence in control-plane state before acknowledging logical
+deletion. Deny new writes and reads for the scope and prevent stale policy caches,
+in-flight work, and catch-up from making its data visible again. Specify the
+propagation/barrier behavior; a requested deletion is not complete while a gateway
+can still serve the scope. Key revocation alone rejects new authentication after
+its declared propagation bound; it does not delete historical data or prohibit
+authorized recovery of previously admitted data in a live workspace.
+
+Track logical deletion separately from physical purge across raw and payload
+tables, replicas, indexes/aggregates, metadata catalogs, overflow, and any caches
+or queued jobs introduced later. Block or invalidate affected derived generations
+until cleanup/rebuild is safe; not all aggregate states support subtraction.
+Retain deletion fences until no permitted replay/restore source can reintroduce
+the scope. Store fences separately from telemetry backups and recover current
+deletion state before reopening a restored service; if that state is unavailable,
+do not publish restored data.
+
+Backups may retain deleted bytes until their declared expiry. Record that window
+and restrict backup access; do not describe logical deletion as immediate physical
+erasure. Restore into an isolated target, apply current deletion/retention policy,
+validate, then expose it. Independent archives, if selected later, join the same
+deletion inventory. Compliance-grade erasure, legal holds, and provider-specific
+backup destruction need separate qualification before promises to customers.
+
+== Metadata catalogs
+
+Maintain a small versioned registry for datasets, field definitions, privacy
+classification, retention, quotas, and accelerations. A stream consumer, not
+the ingestion gateway, maintains bounded time-aware observations for:
+
+* known field names and observed types;
+* field presence and last-seen time;
+* approximate distinct counts using mergeable sketches;
+* bounded top-K values and value-size distributions;
+* type conflicts and cardinality growth rates; and
+* promoted, indexed, and aggregated fields with coverage watermarks.
+
+High-cardinality values such as event, trace, span, request, account, or run IDs
+must not be enumerated for broad autocomplete. Their events are still retained
+and exact filtering remains possible; cardinality governance limits metadata,
+group result size, and acceleration cost rather than deleting accepted data.
+
+Per-tenant and per-dataset policies bound event bytes, field count, field-name
+growth, string length, indexed fields, derived bytes, groups returned, scan
+bytes, query memory, and concurrent work. A cardinality spike creates a visible
+policy event and may stop new acceleration or expensive grouping, but must not
+silently sample already accepted events.
+
+== Privacy and operational instrumentation
+
+Field classification, secret/token detection, PII redaction or hashing,
+tenant isolation, field-level access, query audit logs, and deletion workflows
+must be designed before broad producer adoption. Arbitrary headers, request
+bodies, SQL parameters, and authentication material are rejected or redacted by
+default rather than relying on short retention after collection.
+
+Lighthouse must expose telemetry outside its own serving path for at least:
+
+* events received, accepted, rejected, dropped, and upstream-sampled;
+* bytes and field counts by tenant and dataset;
+* producer-to-durable, durable-to-archive, and durable-to-query lag;
+* malformed events, type conflicts, policy versions, and replay backlog;
+* cardinality, field-name growth, value sizes, and top-K churn;
+* hot and archive bytes, parts, merges, retention, and acceleration coverage;
+* query queue and execution latency, scans, groups, memory, cancellation, and
+  timeouts; and
+* response freshness, shard coverage, accuracy mode, and partial-result rate.
+
+The telemetry system will become production-critical, so its minimum health,
+durability, and alerting signals cannot depend exclusively on Lighthouse.

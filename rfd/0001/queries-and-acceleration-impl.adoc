@@ -1,0 +1,53 @@
+= Queries And Acceleration implementation
+
+Checklist ownership: link:queries-and-acceleration.adoc[Queries And Acceleration].
+
+== PoC-required: raw query semantics
+
+Depends on the versioned event contract, authenticated query scope, and the
+acceptance plan's materialized fixture. Validate raw results against independent
+fixture expectations before using them as acceleration comparison anchors.
+
+* [ ] Define the event filter, grouping, time-series, heatmap, percentile, and raw-result query contract.
+
+* [ ] Compare companion-type and tagged-value Map encodings against the typed fixture; verify lossless canonical round-trip, type-sensitive filters/groups, numeric rather than lexical ordering, presence semantics, aggregate type errors/overflow, and lossless response encoding; record storage and execution cost before selecting the PoC DDL.
+
+* [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
+
+* [ ] Implement independent accuracy, path, and completeness controls; table-test exact rollup selection, raw approximate execution with permission, unknown source coverage, missing execution shards, and budget failures without silent downgrade.
+
+* [ ] Preserve and validate known/unknown sampling metadata and provenance; test identical retained events with different declared probabilities produce unchanged observed-event aggregates and explicit adjustment=none, while invalid metadata and unsupported correction requests never produce falsely corrected results.
+
+* [ ] Return plan diagnostics including selected storage path and approximation mode.
+
+* [ ] Define ingestion watermarks, expected shard coverage, and complete versus bounded-latency execution independently of exact versus approximate math.
+
+* [ ] Execute the required raw query shapes against the deterministic fixture; verify expected rows/aggregates and diagnostic accuracy, including rejected and failed requests.
+
+== PoC-required: minimal acceleration
+
+Depends on passing raw-query tests. Use only the configured paths needed by the
+operator fixture; complete live-maintenance correctness before scale testing.
+
+* [x] Measure schema-stable tenant attribute indexes and configured aggregate states against the full-day Map baseline.
+
+* [ ] Implement the minimum measured aggregate states needed by the dashboard fixture.
+
+* [ ] Route eligible dashboard queries to aggregate states with raw fallback.
+
+* [ ] Implement and table-test eligibility for half-open time bounds, bucket origin/timezone, workspace/dataset, field types, filters, groupings, algorithm version, and sampling treatment; use asymmetric boundary fixtures and verify full raw fallback or a policy error rather than rounded or partial aggregate answers.
+* [ ] Define a verifiable source-set boundary and acceleration-generation lifecycle for the Collector path; test late arrivals, backfill/live handoff, overflow catch-up, partial build failure, activation/retirement during queries, and invalidation without assuming a global log offset or event-time completeness.
+* [ ] Validate histogram bins, normalized rates, time-by-duration heatmaps, and approximate quantile tolerances against independently known distributions with unequal shard populations; do not treat count/sum anchors alone as aggregate correctness.
+
+* [ ] Validate raw/accelerated equivalence for the fixture during live ingestion, retries, and backfill; document tolerances for approximate results and verify raw fallback for unsupported shapes.
+
+* [ ] Verify derived storage remains within the agreed amplification budget.
+
+== Later validation and optimization
+
+The PoC uses explicitly configured accelerations. Caching and recommendation
+automation are not prerequisites for demonstrating the operator workflow.
+
+* [ ] Add normalized query-result caching and measure hit behavior.
+
+* [ ] Implement dashboard-requested acceleration and workload recommendations; keep activation manual until tenant budgets and maintenance cost are proven.

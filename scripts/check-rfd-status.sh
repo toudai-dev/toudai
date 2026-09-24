@@ -71,8 +71,29 @@ for entry in "${entries[@]}"; do
   implementations=()
   [[ -f "${entry}/IMPLEMENTATION.org" ]] && implementations+=(IMPLEMENTATION.org)
   [[ -f "${entry}/IMPLEMENTATION.md" ]] && implementations+=(IMPLEMENTATION.md)
-  if [[ "${#implementations[@]}" == 0 ]]; then
-    problem "missing implementation checklist: ${name}/IMPLEMENTATION.org or IMPLEMENTATION.md"
+  shopt -s nullglob
+  section_plans=("${entry}"/*-impl.adoc)
+  shopt -u nullglob
+  if [[ "${#section_plans[@]}" -gt 0 ]]; then
+    [[ "${#implementations[@]}" == 0 ]] || problem "mixed legacy and section implementation checklists: ${name}"
+    for plan in "${section_plans[@]}"; do
+      implementation="$(basename "${plan}")"
+      design="${implementation%-impl.adoc}.adoc"
+      [[ -f "${entry}/${design}" ]] || problem "missing design companion: ${name}/${design}"
+      grep -Eq '^= .+' "${plan}" || problem "missing implementation title: ${name}/${implementation}"
+      grep -Fq "link:${design}[" "${plan}" || problem "implementation must link to its design: ${name}/${implementation}"
+      grep -Fq "link:${implementation}[" "${source}" || problem "RFD must link to its implementation checklist: ${name}/${implementation}"
+      grep -Fq "link:${design}[" "${source}" || problem "RFD must link to its design section: ${name}/${design}"
+    done
+    for design_source in "${entry}"/*.adoc; do
+      [[ "${design_source}" == *-impl.adoc || "${design_source}" == "${source}" ]] && continue
+      [[ -f "${design_source%.adoc}-impl.adoc" ]] || problem "missing implementation companion: ${design_source%.adoc}-impl.adoc"
+      if grep -Eq '^\* \[[ xX]\]' "${design_source}"; then
+        problem "implementation checkboxes belong in a separate implementation document: ${name}/$(basename "${design_source}")"
+      fi
+    done
+  elif [[ "${#implementations[@]}" == 0 ]]; then
+    problem "missing implementation checklist: ${name} requires section -impl.adoc files or IMPLEMENTATION.org/IMPLEMENTATION.md"
   elif [[ "${#implementations[@]}" -gt 1 ]]; then
     problem "multiple implementation checklist formats: ${name}"
   else

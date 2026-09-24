@@ -1,0 +1,279 @@
+= Queries and acceleration
+
+This section defines query semantics, execution paths, and bounded acceleration.
+
+== Physical event representation
+
+Long-tail fields use ClickHouse `Map` for the MVP. Common schema-stable fields
+become physical columns only when they are broadly useful across tenants or
+required for routing and correctness. Per-tenant arbitrary columns are not
+added to the shared table.
+
+The string-valued benchmark Map is performance evidence, not the complete
+link:product-contract.adoc#_poc_typed_value_contract[typed-value contract].
+For the PoC, evaluate a schema-stable Map value encoding with an explicit type tag
+and lossless value representation; carry the same type identity into indexes and
+group keys. Compare a companion type Map with a tagged-value Map on the same small
+fixture before choosing DDL. Neither requires per-workspace columns or a return
+to the rejected native-JSON scale experiment. Raw comparisons and aggregates must
+use the declared type rather than lexical string order or implicit parsing.
+Measure type-tag overhead and conversion cost before extrapolating benchmark
+storage/latency to the new representation.
+
+Tenant-specific acceleration is expressed through bounded secondary objects:
+indexes for selective equality predicates, aggregate states or projections for
+known dashboard shapes, metadata catalogs for field discovery, and normalized
+query-result caching. Raw events remain the semantic fallback. Acceleration is
+manual or dashboard-requested initially; workload observation may recommend it,
+but automatic activation waits for proven per-tenant storage, cardinality,
+backfill-CPU, and maintenance budgets.
+
+The system does not array-join every attribute into an inverted index. The
+initial proof of concept expanded 62.4 million events into 3.73 billion string
+index rows while leaving broad metadata scans unsafe, demonstrating why derived
+storage must be bounded and justified by measured workload benefit.
+
+== Query semantics and result truthfulness
+
+Exact versus approximate math is independent from complete versus partial data
+coverage. Every result reports the execution mode, selected storage path,
+freshness watermark, expected and scanned shards or partitions, source sampling
+adjustment, bytes and rows scanned, and whether the answer is partial.
+Billing, compliance, security enforcement, and other complete-result workloads
+must reject incomplete execution or use a separate policy.
+
+Mergeable local aggregates include count, sum, min/max, sum-plus-count average,
+compatible histograms, t-digest or DDSketch quantiles, HyperLogLog distinct
+counts, and bounded heavy hitters. Coordinators receive aggregate states rather
+than matching raw rows except for explicitly bounded event samples.
+
+== Architecture overview
+
+This architecture is a proposed MVP, not an accepted final design. It separates
+three concerns so that the interactive ClickHouse copy can be rebuilt and
+tenant policy can evolve without placing a metadata lookup on every event:
+
+[source,text]
+----
+Standard OTel SDKs / agents
+          |
+          v
+Collector gateways <-------------- authenticated tenant policy
+          |---- overflow -> object storage -> catch-up collectors
+          |                                        |
+          +--------------------+-------------------+
+                               v
+               ClickHouse local ReplicatedMergeTree tables
+                        behind a Distributed table
+                               |
+                               v
+                    query planner and Scuba-style UI
+
+event observations -> field/cardinality sketches -> metadata and policy registry
+query history ---------------------------------> acceleration recommendations
+----
+
+Normal and catch-up exports target the same logical data model. The concrete
+exporter mapping and acknowledgement behavior are tests in the
+link:acceptance-and-replay.adoc[Collector-first acceptance plan].
+
+== Primary raw path
+
+The normalized hot table optimizes tenant, dataset, time, and common
+service-scoped reads. Its dynamic attributes are the exact normalized fallback
+for every supported event query. Exact source reconstruction joins or fetches
+the separately retained canonical payload only when requested; normal filters
+and aggregations do not pay payload I/O.
+
+== Trace path
+
+Add a narrow projection or derived trace table ordered by tenant and trace ID.
+It should contain enough fields to render a waterfall and identify correlated
+logs without duplicating every dynamic attribute. Benchmark projection storage
+and trace-fetch latency before choosing projection versus table.
+
+== Dashboard aggregate states
+
+Materialized dashboard tables may store mergeable states such as:
+
+[source,sql]
+----
+countState()
+sumState(duration_ns)
+minState(duration_ns)
+maxState(duration_ns)
+quantilesTDigestState(0.5, 0.9, 0.95, 0.99)(duration_ns)
+----
+
+Initial rollups cover only saved dashboards and measured repeated workflows.
+Experiment 008 shows that this can reduce 5-93 second raw aggregate fixtures to
+6-33 ms with only about 4.4 MiB of aggregate states on the measured day. Do not
+construct a cube over every dynamic attribute. Unsupported groupings use the
+normalized raw table.
+
+Acceleration creation is asynchronous and disposable:
+
+1. A dashboard explicitly requests required aggregate states.
+2. Query history may recommend an equality index or aggregate for an expensive,
+   repeated tenant-field shape and estimate its build and storage cost.
+3. Activation is manual initially; later automatic activation is permitted only
+   within tenant field-count, cardinality, storage, and backfill-CPU budgets.
+4. The planner uses an acceleration only when the eligibility and coverage
+   conditions below hold; otherwise the entire query uses raw execution.
+5. Unused accelerations expire without changing or expiring accepted events.
+
+== PoC acceleration correctness
+
+=== Eligibility and time boundaries
+
+All event-time ranges are half-open `[start, end)`. Aggregate routing requires
+both endpoints to align with stored bucket boundaries, including the bucket
+origin and timezone. For example, a five-minute rollup cannot answer 14:02–14:07
+by including complete 14:00 and 14:05 buckets. The PoC falls back to raw for the
+whole query rather than rounding its bounds or combining raw edges with rollups.
+Time-bucket restrictions apply to bucketed aggregates, not a timestamp-preserving
+equality index, which must still enforce the exact requested range.
+
+Eligibility also requires matching workspace/dataset, field namespaces and types,
+filters, grouping dimensions, aggregate algorithm/version, and sampling treatment.
+A rollup without a requested filter dimension is ineligible even if its time
+coverage is current. An approximate aggregate cannot satisfy an exact request.
+Check null/presence semantics and contributing counts, not just function names.
+Expose the selected path and fallback reason in query diagnostics.
+
+Raw fallback retains scan, memory, and deadline limits. If raw execution exceeds
+policy, return a clear limit error; do not return a fast but semantically different
+aggregate. Combining raw and accelerated ranges is a later optimization.
+
+=== Coverage and live maintenance
+
+Coverage describes a declared set of stored source records, not a promise that
+every producer has delivered every event for an event-time interval. Maximum
+event timestamp and healthy shard responses are insufficient coverage evidence.
+The Collector-first path has no assumed global log offset: specify a verifiable
+source generation or ingestion boundary and per-destination progress before
+claiming a derived path matches the raw source. Do not invent a watermark from
+the latest timestamp or from an empty overflow queue.
+
+Maintain acceleration states `building`, `ready`, `stale/failed`, and `retired`.
+Only `ready` generations are eligible. Define how late events, normal writes,
+overflow catch-up, retries, and deletions update derived data or invalidate
+eligibility before raw/derived divergence can be served as equivalent. A bucket
+does not become immutable merely because its event time is old. If the selected
+mechanism cannot prove safe live maintenance, keep that acceleration unavailable
+for affected queries and serve raw; do not silently keep using its old results.
+
+First validate a bounded stable fixture, then add concurrent ingestion. Backfill
+must identify an exact source set and a non-overlapping handoff to subsequent
+updates. Choose and test the handoff mechanism for the selected Collector/exporter
+path; timestamp-only cutoffs cannot distinguish late arrivals. Where no reliable
+online boundary exists, the PoC may use a controlled pause/drain for the initial
+build and must report that limitation rather than claiming online backfill.
+
+Build into an isolated generation, validate it, and publish its eligibility only
+after all required destinations succeed. A failed build must not expose partial
+states. Pin the selected generation for an in-flight query so activation or
+retirement cannot combine generations mid-response. Retry safety must include
+aggregate states; repairing duplicate base rows does not undo double-counted sums.
+
+Unknown upstream delivery coverage remains unknown even if raw and accelerated
+results agree. The PoC rejects execution with a missing required shard rather
+than returning an unlabeled partial success. Normal queries may describe results
+as covering currently materialized data with explicit freshness/recovery caveats;
+a caller requiring proven source completeness must receive an error when that
+proof is unavailable. Raw fallback cannot repair data that has not arrived.
+
+=== Validation independent of aggregate implementation
+
+Use deterministic asymmetric fixtures with expected values computed independently
+of the SQL paths. Test just before/at/after bucket boundaries, adjacent ranges,
+non-aligned ranges, unsupported filters, mixed observed types, and unequal shard
+populations. Test late and duplicate arrivals during backfill, overflow catch-up,
+builder failure, activation, and retirement. Compare against the same declared
+source set rather than two queries racing against changing ingestion.
+
+Counts and integer sums require exact checks. Histograms require bin-level checks;
+percentiles require a documented algorithm-specific tolerance against a known
+distribution, not just count/sum anchors or identical state serialization. Verify
+rate normalization and time-by-duration heatmaps separately from bucket counts
+and a single duration histogram. Existing benchmark correctness checks remain
+useful anchors, not proof of these additional semantics.
+
+== Exact and approximate modes
+
+Use independent request controls rather than a single `auto`/`exact`/`raw` enum:
+
+* `accuracy=exact|allow_approximate`: default to exact computation over the
+  declared input set. Approximate algorithms require explicit permission;
+  permission does not force approximation of counts or other exact operations.
+* `path=auto|raw`: default to automatic eligible-path selection. Raw forces
+  source-event execution but does not override accuracy, completeness, or budgets.
+* `completeness=materialized|require_proven`: default to querying available
+  materialized data with explicit ingestion/recovery caveats. Both modes require
+  all execution shards; `require_proven` additionally requires evidence of source
+  coverage for a declared cutoff and errors when that evidence is unavailable.
+
+These are logical API controls; wire encoding is decided during implementation.
+An exact count/sum rollup may serve `accuracy=exact,path=auto` when eligibility
+holds. `path=raw,accuracy=allow_approximate` may use an approximate raw percentile.
+No mode implicitly authorizes partial-shard answers, exceeds cost limits, or
+silently downgrades an exact request. Unsupported combinations return a clear
+error. Bounded-latency partial-shard execution is deferred beyond the PoC.
+
+Responses report requested controls, actual storage path, actual accuracy and
+algorithm/version per aggregate, coverage evidence or its absence, freshness and
+recovery status, participating/expected shards, and scanned rows/bytes. Unknown
+source completeness must remain unknown; even an exact aggregate with all shards
+available is not evidence that upstream or overflow data has fully arrived.
+
+== Upstream sampling and observed-event results
+
+The PoC computes aggregates over retained observations without population
+extrapolation. Preserve supplied sampling probability/weight and its provenance;
+absent metadata means unknown, not probability one. A sampled trace flag alone
+does not establish an inclusion probability. Keep unknown, explicitly unsampled,
+and declared sampled inputs distinguishable in diagnostics and metadata.
+
+Validate declared probabilities as finite values in `(0, 1]` and weights as
+finite positive values; flag invalid or conflicting metadata rather than using
+it for arithmetic. Do not infer that an arbitrary producer field is trusted
+sampling metadata. Version the mapping from supported producer conventions.
+
+Report `sampling_adjustment=none` and the known/unknown sampling status. An exact
+count is exact for the declared retained input, not an estimate of total traffic.
+This distinction also applies to event-derived rates and percentiles; native
+metric interpretation remains governed by its separate signal model.
+
+Population estimation is a later, explicit operation. Before adding it, specify
+the sampling design, supported estimator, required metadata, error interpretation,
+and acceleration compatibility. A generic inverse-probability multiplier does
+not justify arbitrary weighted distinct counts, top-K, quantiles, or tail-sampled
+trace estimates. Requests for unsupported sampling correction must fail rather
+than silently return unadjusted results labeled as corrected.
+
+== Storage tiers
+
+The PoC uses normalized events on ClickHouse's fast serving tier and retains
+canonical payload for reconstruction. Object-store overflow covers failed-path
+traffic only; full independent archival is not assumed. Experiment 009 validates
+the physical payload split and exact lookup, but not backup/restore guarantees.
+Querying archived normalized
+events through ClickHouse object-backed parts versus a distinct archive executor
+remains an experiment; either path must preserve one logical query contract and
+report its source, freshness, and completeness.
+
+== Query and exploration plane
+
+The planner requires tenant, dataset, and bounded time range, then chooses raw,
+trace, metadata, attribute-index, aggregate-state, or archive execution. It
+pushes mergeable partial aggregation to ClickHouse shards and returns raw rows
+only for a bounded event sample or explicit reconstruction request. Deadlines,
+cancellation, concurrency limits, maximum scans/groups/result rows, and workload
+priority protect dashboards and tenants from one another.
+
+The MVP user workflow is Scuba-style rather than SQL-first: compare periods,
+add or remove filters, group by a field, view top values/cardinality before an
+expensive grouping, inspect time series/heatmaps/percentiles, and drill into
+representative exact events. Saved queries and dashboard panels use the same
+query contract and expose approximation, freshness, coverage, and upstream
+sampling indicators.

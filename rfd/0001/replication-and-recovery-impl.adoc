@@ -1,0 +1,20 @@
+= Replication And Recovery implementation
+
+Checklist ownership: link:replication-and-recovery.adoc[Replication And Recovery].
+
+== PoC-required: small-topology recovery
+
+Depends on the durable vertical slice and raw-query correctness. Topology and
+failure assumptions must be written before execution; this test does not require
+a 100 TB corpus or establish cross-zone production resilience.
+
+* [ ] Run the deterministic fixture on two shards/two replicas with a three-member Keeper quorum; record failure-domain placement, insert route/quorum, async and stale-read settings, then stop a replica and verify availability, freshness, and convergence without claiming untested host/zone durability.
+* [ ] Rebuild a serving replica and restart the coordinator while querying the fixture; verify no silently incomplete successful responses and recovery within a prospectively declared time budget.
+* [ ] Inject Keeper member/quorum loss, a slow leaf, and complete shard loss; verify explicit write/query failures or overflow behavior, leaf cancellation, and recovery with no silent partial success. Compare single-copy and two-copy acknowledgement behavior only for supported insert routes.
+
+== Later validation: 100 TB architectural validation
+
+* [ ] Measure replica rebuild and failure-recovery behavior.
+
+Production qualification through staged candidates and soaks remains owned by
+link:experiments-impl.adoc[the experiment plan].
