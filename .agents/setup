@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+#
+# Orb setup for lighthouse.
+#
+# Installs the pinned upstream stable Nix release from its versioned artifact
+# (single-user, so no system daemon has to stay alive across orb pause/resume),
+# realizes the repository's flake development shell, and persists the complete
+# environment into ~/.bash_profile, because Amp and supervised services start in
+# non-interactive login shells that never run `nix develop` themselves.
+#
+# Non-interactive and idempotent: a warm run only re-checks its guards and reuses
+# the Nix store, profile, and login-shell hook from the snapshot.
+
+set -euo pipefail
+
+# Pinned upstream stable Nix, verified against https://nixos.org/download. Bump
+# the version, version line, and checksum together; the checksum is the
+# published one for the versioned artifact:
+# https://releases.nixos.org/nix/nix-2.35.2/nix-2.35.2-x86_64-linux.tar.xz.sha256
+nix_version="2.35.2"
+nix_version_line="nix (Nix) ${nix_version}"
+nix_system="x86_64-linux"
+nix_tarball_sha256="0c3960a9792331a22081c3c7a5d8465db9b17c50b3acdf18587fa4c6f2cb1158"
+nix_tarball_url="https://releases.nixos.org/nix/nix-${nix_version}/nix-${nix_version}-${nix_system}.tar.xz"
+nix_work_dir=""
+
+nix_profile="${HOME}/.nix-profile"
+nix_bin="${nix_profile}/bin/nix"
+nix_conf="${HOME}/.config/nix/nix.conf"
+bash_profile="${HOME}/.bash_profile"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+flake_lock="${repo_root}/flake.lock"
+hook_begin="# lighthouse Nix development shell"
+hook_end="# end lighthouse Nix development shell"
+
+setup_started_at=${SECONDS}
+step_started_at=${SECONDS}
+step() {
+  local label="$1"
+  shift
+  step_started_at=${SECONDS}
+  printf '[setup] %s\n' "${label}"
+  "$@"
+  printf '[setup] %s (%ss)\n' "${label}" "$((SECONDS - step_started_at))"
+}
+
+installed_nix_version() {
+  [[ -x "${nix_bin}" ]] || return 0
+  "${nix_bin}" --version 2>/dev/null | head -n 1 || true
+}
+
+cleanup_nix_work_dir() {
+  if [[ -n "${nix_work_dir}" ]]; then
+    rm -rf "${nix_work_dir}"
+    nix_work_dir=""
+  fi
+}
+
+install_nix() {
+  if [[ "$(uname -m)" != "x86_64" ]]; then
+    printf '[setup] ERROR: only %s is pinned; host is %s\n' "${nix_system}" "$(uname -m)" >&2
+    return 1
+  fi
+
+  local installed_version
+  installed_version="$(installed_nix_version)"
+  if [[ "${installed_version}" == "${nix_version_line}" ]]; then
+    printf '[setup] %s is already installed\n' "${nix_version_line}"
+    return 0
+  fi
+
+  # Download the versioned artifact and verify its published checksum. The
+  # moving `latest stable` installer URL could otherwise change what a pinned
+  # setup script installs.
+  nix_work_dir="$(mktemp -d)"
+  # Remove the download and extraction on failure as well as on success.
+  trap cleanup_nix_work_dir EXIT
+
+  local tarball="${nix_work_dir}/nix-${nix_version}-${nix_system}.tar.xz"
+  printf '[setup] downloading %s\n' "${nix_tarball_url}"
+  curl --proto '=https' --tlsv1.2 -sSfL "${nix_tarball_url}" -o "${tarball}"
+
+  local actual_sha256
+  actual_sha256="$(sha256sum "${tarball}" | cut -d' ' -f1)"
+  if [[ "${actual_sha256}" != "${nix_tarball_sha256}" ]]; then
+    printf '[setup] ERROR: checksum mismatch for %s (expected %s, got %s)\n' \
+      "${nix_tarball_url}" "${nix_tarball_sha256}" "${actual_sha256}" >&2
+    return 1
+  fi
+
+  local unpack_dir="${nix_work_dir}/unpack"
+  mkdir -p "${unpack_dir}"
+  tar -xJf "${tarball}" -C "${unpack_dir}"
+
+  local installer="${unpack_dir}/nix-${nix_version}-${nix_system}/install"
+  if [[ ! -f "${installer}" ]]; then
+    printf '[setup] ERROR: installer is missing from %s\n' "${tarball}" >&2
+    return 1
+  fi
+
+  # --no-daemon: single-user install, no daemon to restart after a resume.
+  # --yes: the installer must never prompt during setup.
+  INVOKED_FROM_INSTALL_IN=1 sh "${installer}" --no-daemon --yes
+
+  installed_version="$(installed_nix_version)"
+  if [[ "${installed_version}" != "${nix_version_line}" ]]; then
+    printf '[setup] ERROR: expected %s after install, got: %s\n' \
+      "${nix_version_line}" "${installed_version:-<no version>}" >&2
+    return 1
+  fi
+
+  cleanup_nix_work_dir
+  trap - EXIT
+  printf '[setup] installed %s\n' "${installed_version}"
+}
+
+configure_nix() {
+  mkdir -p "$(dirname "${nix_conf}")"
+  # Flakes and the nix CLI are still experimental features; login shells and
+  # services cannot pass --extra-experimental-features per command.
+  if ! grep -Fqx 'experimental-features = nix-command flakes' "${nix_conf}" 2>/dev/null; then
+    printf 'experimental-features = nix-command flakes\n' >> "${nix_conf}"
+  fi
+}
+
+flake_lock_hash() {
+  if [[ -f "${flake_lock}" ]]; then
+    sha256sum "${flake_lock}"
+  fi
+}
+
+realize_dev_shell() {
+  # `nix develop --command true` realizes every store path the development shell
+  # references; `print-dev-env` alone only computes the environment.
+  # --no-update-lock-file keeps setup from writing flake.lock: a stale lock is a
+  # repository problem to fix and commit, not something to paper over here.
+  local lock_before
+  lock_before="$(flake_lock_hash)"
+  if ! "${nix_bin}" develop --no-update-lock-file "${repo_root}" --command true; then
+    printf '[setup] ERROR: cannot realize the development shell without updating flake.lock; run nix flake update and commit it\n' >&2
+    return 1
+  fi
+  if [[ "$(flake_lock_hash)" != "${lock_before}" ]]; then
+    printf '[setup] ERROR: flake.lock changed while realizing the development shell\n' >&2
+    return 1
+  fi
+}
+
+render_hook_block() {
+  # Delimited so a later run can refresh the block in place instead of appending
+  # a duplicate when the snapshot is stale or the repository moved. The begin
+  # marker matches the single marker older snapshots wrote, so those blocks are
+  # recognized and replaced rather than duplicated.
+  # print-dev-env keeps activation inside the login shell instead of spawning a
+  # nested `nix develop` supervisor process. The IN_NIX_SHELL and marker guards
+  # stop login shells started inside the development shell from re-activating.
+  cat <<EOF
+${hook_begin}
+if [[ -z "\${IN_NIX_SHELL:-}" && -z "\${LIGHTHOUSE_NIX_DEV_ENV:-}" && ( "\${PWD}" == "${repo_root}" || "\${PWD}" == "${repo_root}"/* ) ]]; then
+  if [[ -e "${nix_profile}/etc/profile.d/nix.sh" ]]; then
+    . "${nix_profile}/etc/profile.d/nix.sh"
+  fi
+  if __lighthouse_dev_env="\$("${nix_bin}" print-dev-env --no-update-lock-file "${repo_root}" 2>/dev/null)"; then
+    eval "\${__lighthouse_dev_env}"
+    export LIGHTHOUSE_NIX_DEV_ENV=1
+  else
+    printf 'lighthouse: could not load the Nix development shell\n' >&2
+  fi
+  unset __lighthouse_dev_env
+fi
+${hook_end}
+EOF
+}
+
+persist_login_shell() {
+  local block
+  block="$(render_hook_block)"
+
+  local begin_line
+  begin_line="$(grep -nF "${hook_begin}" "${bash_profile}" 2>/dev/null | head -n 1 | cut -d: -f1 || true)"
+  if [[ -z "${begin_line}" ]]; then
+    # First run in this snapshot: append without touching anything else.
+    printf '\n%s\n' "${block}" >> "${bash_profile}"
+    printf '[setup] appended the login-shell hook\n'
+    return 0
+  fi
+
+  local end_line
+  end_line="$(grep -nF "${hook_end}" "${bash_profile}" | head -n 1 | cut -d: -f1 || true)"
+  if [[ -n "${end_line}" ]] && [[ "${end_line}" -lt "${begin_line}" ]]; then
+    end_line=""
+  fi
+  if [[ -z "${end_line}" ]]; then
+    # Blocks written before the end marker existed start with this `if` and end
+    # at their own top-level `fi`. Anything else is not ours, so report it
+    # instead of deleting content that might not belong to the hook.
+    # shellcheck disable=SC2016  # the literal prefix identifies blocks we wrote
+    if [[ "$(sed -n "$((begin_line + 1))p" "${bash_profile}")" == 'if [[ -z "${IN_NIX_SHELL:-}"'* ]]; then
+      end_line="$(awk -v start="${begin_line}" 'NR > start && $0 == "fi" { print NR; exit }' "${bash_profile}")"
+    fi
+  fi
+  if [[ -z "${end_line}" ]]; then
+    printf '[setup] ERROR: cannot find the end of the login-shell hook block in %s; remove that block and re-run setup\n' "${bash_profile}" >&2
+    return 1
+  fi
+
+  local current
+  current="$(sed -n "${begin_line},${end_line}p" "${bash_profile}")"
+  if [[ "${current}" == "${block}" ]]; then
+    printf '[setup] login-shell hook is current\n'
+    return 0
+  fi
+
+  # Replace only our block, preserving the mode and every unrelated line.
+  local tmp
+  tmp="$(mktemp "${bash_profile}.XXXXXX")"
+  {
+    head -n "$((begin_line - 1))" "${bash_profile}"
+    printf '%s\n' "${block}"
+    tail -n "+$((end_line + 1))" "${bash_profile}"
+  } > "${tmp}"
+  chmod --reference="${bash_profile}" "${tmp}"
+  mv "${tmp}" "${bash_profile}"
+  printf '[setup] refreshed the login-shell hook (lines %s-%s)\n' "${begin_line}" "${end_line}"
+}
+
+verify_login_shell() {
+  # A minimal environment and a fresh login shell prove the persisted hook, not
+  # this script's own environment. Assert the activation marker and that every
+  # development tool resolves from /nix/store, so host tools with the same names
+  # (curl, make, ...) cannot satisfy the check on their own.
+  local lock_before
+  lock_before="$(flake_lock_hash)"
+  local report
+  # shellcheck disable=SC2016  # the inner script must expand in the login shell
+  if ! report="$(cd "${repo_root}" && env -i HOME="${HOME}" USER="${USER}" TERM=dumb /bin/bash -lc '
+    printf "marker:LIGHTHOUSE_NIX_DEV_ENV=%s IN_NIX_SHELL=%s\n" "${LIGHTHOUSE_NIX_DEV_ENV:-unset}" "${IN_NIX_SHELL:-unset}"
+    printf "nix-bin:%s\n" "$(command -v nix 2>/dev/null || echo missing)"
+    printf "path-head:%s\n" "${PATH%%:*}"
+    for tool in cargo rustc cargo-clippy clippy-driver rustfmt rust-analyzer clickhouse goose buf protoc git-cliff asciidoctor docker-compose docker-buildx fio jq tofu packer sar iostat mpstat; do
+      resolved="$(command -v "${tool}" 2>/dev/null || true)"
+      case "${resolved}" in
+        /nix/store/*) printf "nix-tool:%s=%s\n" "${tool}" "${resolved}" ;;
+        "") printf "missing-tool:%s\n" "${tool}" ;;
+        *) printf "host-tool:%s=%s\n" "${tool}" "${resolved}" ;;
+      esac
+    done
+    for tool in git python3 sudo; do
+      printf "host-path:%s=%s\n" "${tool}" "$(command -v "${tool}" 2>/dev/null || echo missing)"
+    done
+  ')"; then
+    printf '[setup] ERROR: fresh login shell could not run the activation check\n' >&2
+    return 1
+  fi
+  printf '%s\n' "${report}" | sed 's/^/[setup] /'
+  printf '[setup] %s development tools resolved from /nix/store\n' \
+    "$(printf '%s\n' "${report}" | grep -c '^nix-tool:')"
+
+  local failed=0
+  if [[ "${report}" != *"marker:LIGHTHOUSE_NIX_DEV_ENV=1 "* ]] || [[ "${report}" == *"IN_NIX_SHELL=unset"* ]]; then
+    printf '[setup] ERROR: login shell did not activate the development shell\n' >&2
+    failed=1
+  fi
+  if [[ "${report}" != *"nix-bin:${nix_bin}"* ]]; then
+    printf '[setup] ERROR: login shell cannot resolve %s\n' "${nix_bin}" >&2
+    failed=1
+  fi
+  if [[ "${report}" == *"missing-tool:"* ]]; then
+    printf '[setup] ERROR: development shell tools are missing from the login shell\n' >&2
+    failed=1
+  fi
+  if [[ "${report}" == *"host-tool:"* ]]; then
+    printf '[setup] ERROR: development shell tools resolved outside /nix/store\n' >&2
+    failed=1
+  fi
+  if [[ "${report}" == *"host-path:"*"=missing"* ]]; then
+    printf '[setup] ERROR: host tools the repository scripts use are unreachable\n' >&2
+    failed=1
+  fi
+  if [[ "$(flake_lock_hash)" != "${lock_before}" ]]; then
+    printf '[setup] ERROR: flake.lock changed while activating the login shell\n' >&2
+    failed=1
+  fi
+  [[ "${failed}" == 0 ]]
+}
+
+step "install upstream Nix ${nix_version}" install_nix
+step "configure Nix" configure_nix
+step "realize flake development shell" realize_dev_shell
+step "persist development shell for login shells" persist_login_shell
+step "verify development shell in a fresh login shell" verify_login_shell
+
+printf '[setup] ready in %ss\n' "$((SECONDS - setup_started_at))"
