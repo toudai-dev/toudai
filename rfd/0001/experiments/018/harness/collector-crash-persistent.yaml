@@ -1,0 +1,41 @@
+# Experiment 018 phase 4d: file-backed queue across a crash and downstream outage.
+#
+# Same stalled downstream address (127.0.0.1:19100), but the queue is persisted.
+# After a kill and restart, a proxy at that address forwards to ClickHouse and
+# the admitted batches drain: at-least-once delivery, with duplicates possible
+# for anything that was delivered but not yet removed from the queue.
+extensions:
+  file_storage:
+    directory: ${env:LH018_ROOT}/run/queue-storage
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19100
+    database: lh018
+    logs_table_name: otel_logs_faults
+    create_schema: false
+    timeout: 30s
+    retry_on_failure:
+      enabled: false
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 100
+      storage: file_storage
+
+service:
+  extensions: [file_storage]
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [clickhouse]

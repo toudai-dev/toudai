@@ -1,0 +1,152 @@
+# Experiment 018 phase 2: static credential -> workspace routing and batching.
+#
+# bearertokenauth validates the two synthetic ingestion keys and attaches no
+# identity (see extension source: Authenticate returns ctx unchanged). The
+# routing connector therefore matches the credential header itself against the
+# configured value, and each routed pipeline injects the trusted workspace
+# attribute before the exporters (and before their sending queues).
+#
+# The replay receiver models a catch-up collector credential: it authorizes
+# replay but does not re-derive ownership, so the workspace attribute must
+# already be inside the replayed payload.
+extensions:
+  bearertokenauth/gateway:
+    tokens: [lh018-ws-a-key, lh018-ws-b-key]
+  bearertokenauth/replay:
+    tokens: [lh018-catchup-key]
+
+receivers:
+  otlp/gateway:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+        include_metadata: true
+        auth:
+          authenticator: bearertokenauth/gateway
+  otlp/replay:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4319
+        include_metadata: true
+        auth:
+          authenticator: bearertokenauth/replay
+
+processors:
+  resource/ws-a:
+    attributes:
+      - key: lighthouse.workspace_id
+        action: upsert
+        value: 11111111-1111-4111-8111-111111111111
+  resource/ws-b:
+    attributes:
+      - key: lighthouse.workspace_id
+        action: upsert
+        value: 22222222-2222-4222-8222-222222222222
+
+connectors:
+  routing/logs:
+    default_pipelines: [logs/quarantine]
+    table:
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [logs/ws-a]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [logs/ws-a]
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh018-ws-b-key"
+        pipelines: [logs/ws-b]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh018-ws-b-key"
+        pipelines: [logs/ws-b]
+  routing/traces:
+    default_pipelines: [traces/quarantine]
+    table:
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [traces/ws-a]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [traces/ws-a]
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh018-ws-b-key"
+        pipelines: [traces/ws-b]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh018-ws-b-key"
+        pipelines: [traces/ws-b]
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19000
+    database: lh018
+    create_schema: false
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+  file/quarantine-logs:
+    path: ${env:LH018_RESULTS}/quarantine-logs.jsonl
+    format: json
+  file/quarantine-traces:
+    path: ${env:LH018_RESULTS}/quarantine-traces.jsonl
+    format: json
+  # Batching observation sink: min_size 4 forces the six-record request to be
+  # re-batched, so the sink proves per-record identity survives re-batching.
+  otlp_http/sink:
+    endpoint: http://127.0.0.1:4320
+    encoding: proto
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      batch:
+        min_size: 4
+        flush_timeout: 2s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 100ms
+      max_interval: 1s
+      max_elapsed_time: 5s
+
+service:
+  extensions: [bearertokenauth/gateway, bearertokenauth/replay]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    logs/gateway:
+      receivers: [otlp/gateway]
+      exporters: [routing/logs]
+    logs/ws-a:
+      receivers: [routing/logs]
+      processors: [resource/ws-a]
+      exporters: [clickhouse, otlp_http/sink]
+    logs/ws-b:
+      receivers: [routing/logs]
+      processors: [resource/ws-b]
+      exporters: [clickhouse]
+    logs/quarantine:
+      receivers: [routing/logs]
+      exporters: [file/quarantine-logs]
+    logs/replay:
+      receivers: [otlp/replay]
+      exporters: [clickhouse]
+    traces/gateway:
+      receivers: [otlp/gateway]
+      exporters: [routing/traces]
+    traces/ws-a:
+      receivers: [routing/traces]
+      processors: [resource/ws-a]
+      exporters: [clickhouse]
+    traces/ws-b:
+      receivers: [routing/traces]
+      processors: [resource/ws-b]
+      exporters: [clickhouse]
+    traces/quarantine:
+      receivers: [routing/traces]
+      exporters: [file/quarantine-traces]

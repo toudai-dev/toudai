@@ -1,0 +1,74 @@
+# Experiment 018 phase 2 negative control.
+#
+# This config intentionally models the *wrong* design: it authenticates the
+# request but then derives the workspace from a producer-supplied header. The
+# fixture proves a holder of workspace A's key can write into workspace B, which
+# is why the RFD requires credential-derived scope instead.
+#
+# It also probes `auth.*` context data: bearertokenauth attaches none, so the
+# `auth.token` lookup must come back empty (default_value marker).
+extensions:
+  bearertokenauth/gateway:
+    tokens: [lh018-ws-a-key, lh018-ws-b-key]
+
+receivers:
+  otlp/gateway:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+        include_metadata: true
+        auth:
+          authenticator: bearertokenauth/gateway
+
+processors:
+  resource/from-producer-header:
+    attributes:
+      - key: lighthouse.workspace_id
+        action: upsert
+        from_context: "metadata.X-Lighthouse-Workspace"
+  resource/from-auth-context:
+    attributes:
+      - key: lighthouse.auth_identity
+        action: upsert
+        from_context: "auth.token"
+        default_value: "auth-context-empty"
+
+connectors:
+  routing/logs:
+    default_pipelines: [logs/quarantine]
+    table:
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [logs/forged]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [logs/forged]
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19000
+    database: lh018
+    create_schema: false
+    timeout: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 1000
+  file/quarantine-logs:
+    path: ${env:LH018_RESULTS}/quarantine-forge-logs.jsonl
+    format: json
+
+service:
+  extensions: [bearertokenauth/gateway]
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs/gateway:
+      receivers: [otlp/gateway]
+      exporters: [routing/logs]
+    logs/forged:
+      receivers: [routing/logs]
+      processors: [resource/from-producer-header, resource/from-auth-context]
+      exporters: [clickhouse]
+    logs/quarantine:
+      receivers: [routing/logs]
+      exporters: [file/quarantine-logs]

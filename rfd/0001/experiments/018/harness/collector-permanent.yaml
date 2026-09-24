@@ -1,0 +1,44 @@
+# Experiment 018 phase 4a: permanent insert error.
+#
+# The target table exists but lacks the ScopeAttributes column the exporter
+# names in its INSERT, so every insert fails with a schema error. The queue is
+# enabled, so the producer should still receive OTLP success.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19000
+    database: lh018
+    logs_table_name: otel_logs_broken
+    create_schema: false
+    timeout: 2s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 500ms
+      max_elapsed_time: 3s
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 1000
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [clickhouse]

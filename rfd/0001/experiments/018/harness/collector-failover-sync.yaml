@@ -1,0 +1,119 @@
+# Experiment 018 phase 3b: synchronous failover acknowledgement boundary.
+#
+# Identical to collector-failover.yaml except the failover connector's own
+# sending queue is disabled, so an OTLP success means the payload reached a
+# destination (ClickHouse insert or S3 object) instead of connector admission.
+extensions:
+  bearertokenauth/gateway:
+    tokens: [lh018-ws-a-key]
+  bearertokenauth/replay:
+    tokens: [lh018-catchup-key]
+
+receivers:
+  otlp/gateway:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+        include_metadata: true
+        auth:
+          authenticator: bearertokenauth/gateway
+  otlp/replay:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4319
+        include_metadata: true
+        auth:
+          authenticator: bearertokenauth/replay
+
+processors:
+  resource/ws-a:
+    attributes:
+      - key: lighthouse.workspace_id
+        action: upsert
+        value: 11111111-1111-4111-8111-111111111111
+
+connectors:
+  routing/logs:
+    default_pipelines: [logs/quarantine]
+    table:
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [logs/a]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [logs/a]
+  failover/logs-a:
+    sending_queue:
+      enabled: false
+    priority_levels:
+      - [logs/a-primary]
+      - [logs/a-overflow]
+    retry_interval: 5s
+
+exporters:
+  clickhouse/primary:
+    endpoint: tcp://127.0.0.1:19000
+    database: lh018
+    create_schema: false
+    timeout: 2s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 2s
+    sending_queue:
+      enabled: false
+  awss3/overflow:
+    marshaler: otlp_proto
+    s3uploader:
+      region: us-east-1
+      s3_bucket: lh018-overflow
+      s3_prefix: overflow
+      endpoint: http://127.0.0.1:9000
+      s3_force_path_style: true
+      disable_ssl: true
+      s3_partition_timezone: UTC
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 10s
+  file/quarantine-logs:
+    path: ${env:LH018_RESULTS}/quarantine-failover-logs.jsonl
+    format: json
+
+service:
+  extensions: [bearertokenauth/gateway, bearertokenauth/replay]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    logs/gateway:
+      receivers: [otlp/gateway]
+      exporters: [routing/logs]
+    logs/a:
+      receivers: [routing/logs]
+      processors: [resource/ws-a]
+      exporters: [failover/logs-a]
+    logs/a-primary:
+      receivers: [failover/logs-a]
+      exporters: [clickhouse/primary]
+    logs/a-overflow:
+      receivers: [failover/logs-a]
+      exporters: [awss3/overflow]
+    logs/quarantine:
+      receivers: [routing/logs]
+      exporters: [file/quarantine-logs]
+    logs/replay:
+      receivers: [otlp/replay]
+      exporters: [clickhouse/primary]

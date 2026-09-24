@@ -1,0 +1,32 @@
+# Experiment 018 phase 4c: in-memory queue crash.
+#
+# The downstream stalls, so admitted batches stay in the in-memory queue when
+# the process is killed. The producer already received OTLP success for them.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19100
+    database: lh018
+    logs_table_name: otel_logs_faults
+    create_schema: false
+    timeout: 30s
+    retry_on_failure:
+      enabled: false
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 100
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [clickhouse]

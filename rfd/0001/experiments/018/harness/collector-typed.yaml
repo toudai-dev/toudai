@@ -1,0 +1,61 @@
+# Experiment 018 phase 1: stock OTLP -> stock ClickHouse exporter mapping.
+#
+# The exporter creates the otel_logs/otel_traces/otel_metrics_* tables with its
+# own DDL. The file exporter is a parallel, non-batching copy of what the OTLP
+# receiver accepted, used to separate receiver-side from exporter-side changes.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+        include_metadata: true
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19000
+    database: lh018
+    create_schema: true
+    # Exporter default: async_insert=1 without wait_for_async_insert, so the
+    # server default (wait_for_async_insert=1) decides when the insert returns.
+    async_insert: true
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+
+  file/received-logs:
+    path: ${env:LH018_RESULTS}/typed-received-logs.jsonl
+    format: json
+
+  file/received-traces:
+    path: ${env:LH018_RESULTS}/typed-received-traces.jsonl
+    format: json
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [clickhouse, file/received-logs]
+    traces:
+      receivers: [otlp]
+      exporters: [clickhouse, file/received-traces]
+    metrics:
+      receivers: [otlp]
+      exporters: [clickhouse]
