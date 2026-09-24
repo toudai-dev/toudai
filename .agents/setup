@@ -122,18 +122,26 @@ configure_nix() {
   fi
 }
 
+flake_lock_hash() {
+  if [[ -f "${flake_lock}" ]]; then
+    sha256sum "${flake_lock}"
+  fi
+}
+
 realize_dev_shell() {
   # `nix develop --command true` realizes every store path the development shell
-  # references; `print-dev-env` alone only computes the environment. Nix may
-  # update a stale flake.lock here, so warn rather than leave a silent
-  # repository modification behind.
-  local lock_before=""
-  if [[ -f "${flake_lock}" ]]; then
-    lock_before="$(sha256sum "${flake_lock}")"
+  # references; `print-dev-env` alone only computes the environment.
+  # --no-update-lock-file keeps setup from writing flake.lock: a stale lock is a
+  # repository problem to fix and commit, not something to paper over here.
+  local lock_before
+  lock_before="$(flake_lock_hash)"
+  if ! "${nix_bin}" develop --no-update-lock-file "${repo_root}" --command true; then
+    printf '[setup] ERROR: cannot realize the development shell without updating flake.lock; run `nix flake update` and commit it\n' >&2
+    return 1
   fi
-  "${nix_bin}" develop "${repo_root}" --command true
-  if [[ -n "${lock_before}" ]] && [[ "$(sha256sum "${flake_lock}")" != "${lock_before}" ]]; then
-    printf '[setup] WARNING: flake.lock was out of date and changed; commit it\n' >&2
+  if [[ "$(flake_lock_hash)" != "${lock_before}" ]]; then
+    printf '[setup] ERROR: flake.lock changed while realizing the development shell\n' >&2
+    return 1
   fi
 }
 
@@ -152,7 +160,7 @@ if [[ -z "\${IN_NIX_SHELL:-}" && -z "\${LIGHTHOUSE_NIX_DEV_ENV:-}" && ( "\${PWD}
   if [[ -e "${nix_profile}/etc/profile.d/nix.sh" ]]; then
     . "${nix_profile}/etc/profile.d/nix.sh"
   fi
-  if __lighthouse_dev_env="\$("${nix_bin}" print-dev-env "${repo_root}" 2>/dev/null)"; then
+  if __lighthouse_dev_env="\$("${nix_bin}" print-dev-env --no-update-lock-file "${repo_root}" 2>/dev/null)"; then
     eval "\${__lighthouse_dev_env}"
     export LIGHTHOUSE_NIX_DEV_ENV=1
   else
