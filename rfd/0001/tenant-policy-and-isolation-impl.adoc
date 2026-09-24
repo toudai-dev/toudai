@@ -18,6 +18,13 @@ tests follow the working raw and accelerated paths.
 * [ ] Test workspace authorization across ingestion, queries, metadata, and exact payload retrieval using sibling workspaces in one account and a workspace in another account with colliding dataset/event/trace names and IDs; reject cross-workspace access on every path, including batching, overflow, and catch-up.
 * [ ] Specify and test new-request rejection after key revocation and workspace deletion separately from already admitted backlog handling; verify catch-up retains original ownership without requiring the producer credential.
 
+== PoC-required: canonical privacy and deletion
+
+* [ ] Define canonical post-policy payload semantics and transformation versioning; inject secret markers into attributes/body and verify absence from retained payloads, queues under our control, overflow, derived data, and diagnostic logs.
+* [ ] Choose retention clock, duration, late/future-event policy, and logical/physical expiry deadlines; test just inside/at/outside expiry and prove retries, catch-up, and restore do not renew record lifetime.
+* [ ] Implement whole-workspace/dataset deletion fences and completion barriers; test stale policy caches, in-flight queries/writes, colliding recreated names, and backlog replay without resurrecting deleted scope.
+* [ ] Inventory purge progress and backup expiry; restore a pre-deletion backup into isolation, apply current deletion state, and verify no deleted raw, payload, metadata, or aggregate result is exposed. Fail closed if current deletion state cannot be recovered.
+
 == PoC-required: bounded exploration and work
 
 * [ ] Implement stream-derived field presence, type, cardinality, top-K, value-size, and growth-rate observations without enumerating high-cardinality values.

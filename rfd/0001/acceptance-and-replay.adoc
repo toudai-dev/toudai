@@ -110,6 +110,12 @@ backup/restore test with an explicit recovery point. Overflow replay is a separa
 test: it cannot reconstruct normal-path events that were never spilled. Validate
 rebuilds in isolated tables before replacing a working serving layout.
 
+Catch-up, reconstruction, and backup restore must apply the current
+link:tenant-policy-and-isolation.adoc#_canonical_content_retention_and_deletion[deletion and retention rules]
+before exposing results. Successful replay is not permission to resurrect expired
+records or a deleted workspace, and policy-approved canonical content must not
+be confused with unredacted producer input.
+
 Whether every event also needs an independent canonical archive remains open.
 Compare ClickHouse canonical retention plus backups against all-event archival
 using required recovery point/time, transformation recovery, cost, and failure

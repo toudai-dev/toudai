@@ -68,7 +68,9 @@ classes so one tenant cannot consume the cluster.
 
 == Privacy and operations
 
-Sensitive fields are classified and redacted before durable acceptance.
+Sensitive fields are classified and redacted before downstream persistent queues,
+database export, or overflow storage. Any upstream SDK/agent storage is a separate
+producer-side policy boundary and must be documented rather than assumed scrubbed.
 Policies include reserved-field ownership, token and secret detection,
 field-level access controls, tenant isolation, encryption, audit logs, raw
 export restrictions, retention, and deletion workflows. Arbitrary request
@@ -78,6 +80,53 @@ The system publishes ingestion acceptance and lag, archive durability, schema
 conflicts, field growth, storage and derived amplification, partition skew,
 query queue and stage latency, scan cost, coverage, cancellation, and expensive
 tenant telemetry to an independent operational path.
+
+== Canonical content, retention, and deletion
+
+"Exact payload" means semantic reconstruction of the policy-approved canonical
+event received by Lighthouse after declared transformations, not the original
+unredacted request or original protobuf wire encoding. Preserve its types and
+record the mapping/policy version. Redacted values must not survive in a second
+raw-body copy, overflow object, diagnostic log, or derived field. Tests use known
+secret markers to inspect every persisted representation, not only query output.
+
+Full-resolution retention is bounded by workspace/dataset policy; it does not
+mean retaining data forever. Before implementation, choose the retention clock
+(event time or trusted ingestion time), duration, late/future-event handling, and
+physical purge deadline. Retried or replayed records must not acquire a fresh
+retention lifetime. If ingestion time is used, preserve the original trusted
+time through catch-up and rebuild. Read-path expiry and asynchronous physical
+cleanup are distinct guarantees, both measured in the PoC.
+
+The initial deletion scope is a whole workspace or dataset, using immutable IDs;
+recreating a display name must not resurrect the deleted identity. Arbitrary
+per-event/subject erasure and field-level access controls are later work, not
+claimed capabilities of the initial PoC. Until stronger requirements are met,
+use synthetic or explicitly approved non-sensitive fixtures.
+
+Persist a deletion fence in control-plane state before acknowledging logical
+deletion. Deny new writes and reads for the scope and prevent stale policy caches,
+in-flight work, and catch-up from making its data visible again. Specify the
+propagation/barrier behavior; a requested deletion is not complete while a gateway
+can still serve the scope. Key revocation alone rejects new authentication after
+its declared propagation bound; it does not delete historical data or prohibit
+authorized recovery of previously admitted data in a live workspace.
+
+Track logical deletion separately from physical purge across raw and payload
+tables, replicas, indexes/aggregates, metadata catalogs, overflow, and any caches
+or queued jobs introduced later. Block or invalidate affected derived generations
+until cleanup/rebuild is safe; not all aggregate states support subtraction.
+Retain deletion fences until no permitted replay/restore source can reintroduce
+the scope. Store fences separately from telemetry backups and recover current
+deletion state before reopening a restored service; if that state is unavailable,
+do not publish restored data.
+
+Backups may retain deleted bytes until their declared expiry. Record that window
+and restrict backup access; do not describe logical deletion as immediate physical
+erasure. Restore into an isolated target, apply current deletion/retention policy,
+validate, then expose it. Independent archives, if selected later, join the same
+deletion inventory. Compliance-grade erasure, legal holds, and provider-specific
+backup destruction need separate qualification before promises to customers.
 
 == Metadata catalogs
 
