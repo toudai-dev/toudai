@@ -4,6 +4,10 @@
 :discussion: https://github.com/chaba-dev/lighthouse/pull/3
 :labels: telemetry, clickhouse, architecture, benchmarks
 
+The canonical discussion remains PR #3. The sectioned design and PoC
+implementation plans are under review in
+https://github.com/chaba-dev/lighthouse/pull/11[PR #11].
+
 == Architecture summary
 
 Lighthouse provides Scuba-style recent-data exploration over logs, spans, and structured application events through one logical event model. Native metrics remain separate. The PoC uses OpenTelemetry Collectors with direct ClickHouse ingestion and object-store overflow/catch-up. Canonical retention and backup/restore support reconstruction; independent all-event archival remains an explicit decision. Bounded accelerators improve interactive queries without making raw retained fields unqueryable.
@@ -74,8 +78,8 @@ production readiness claim. Passing the PoC does not establish production SLOs.
 
 RFD 0001 remains in discussion. The MVP contract is ready to commit only when:
 
-* Experiment 011 reaches a documented terminal result and its multi-day query,
-  restart, and workload-isolation evidence is incorporated;
+* the completed Experiment 011 query baseline is incorporated, and separate
+  restart, merge-time, and workload-isolation tests close its explicit gaps;
 * the user workflow and p50/p95 latency, freshness, retention, concurrency, and
   cost targets are explicit;
 * acceptance, retry, deduplication, archive, and replay semantics are decided;

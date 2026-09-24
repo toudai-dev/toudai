@@ -105,9 +105,11 @@ these larger tests complete based on a small-fixture pass.
 
 * [ ] Measure a representative sustained ingestion rate separately from the backfill load; concurrent external bulk-pool writes make current elapsed backfill throughput unsuitable as a production SLO.
 
-* [x] Run the full ten-day raw query inventory under ClickHouse-cold and warm conditions and validate deterministic exact payload lookup.
+* [x] Run the Experiment 011 ten-day raw fixture set under ClickHouse-cold and warm conditions and validate deterministic exact payload lookup; trace lookup and broader workload coverage remain open.
 
-* [x] Build the selected tenant indexes and dashboard aggregate states over ten days, then measure storage, maintenance cost, correctness, and query speedup.
+* [x] Build the selected tenant indexes and dashboard aggregate states over ten days, then measure storage, build/backfill cost, correctness anchors, and query speedup.
+
+* [ ] Measure live accelerator maintenance cost during sustained ingestion and merges.
 
 * [ ] Run the mixed-concurrency workload.
 

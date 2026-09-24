@@ -26,8 +26,10 @@ Accounts own workspaces, and workspaces own datasets and ingestion keys; see
 link:tenant-policy-and-isolation.adoc#_accounts_workspaces_and_keys[workspace isolation].
 Existing "tenant" terminology denotes workspace scope, not the owning account.
 
-Freshness, p50/p95 latency by query class, concurrency, retention, and cost
-budgets remain open until controlled multi-day query measurements are complete.
+Completed multi-day measurements characterize the benchmark fixtures; they do
+not establish product SLOs. Prospective PoC latency and freshness targets are in
+link:experiments-impl.adoc[the experiment plan]. Offered load, concurrency,
+retention, and cost budgets must be fixed before acceptance runs.
 
 == Event and instrumentation contract
 
@@ -105,8 +107,8 @@ The product workload, rather than Scuba's exact implementation, is the north
 star: an engineer should be able to move from an alert to a time comparison,
 group by any useful field, identify an outlier, and inspect representative exact
 events without first predicting that query at ingestion time. The MVP contract
-is intentionally not final until freshness, query-latency, concurrency, and
-retention targets are agreed and the current multi-day benchmark is complete.
+is intentionally not final until the agreed workload and prospective targets
+are validated end to end; completed storage benchmarks alone do not satisfy it.
 
 The product should provide a high-level event model rather than force users to
 choose between logs and traces:
@@ -251,12 +253,14 @@ ordered bulk ClickHouse table. Backup/restore and optional independent archival
 are evaluated in the acceptance plan. This is a physical implementation
 of one logical event medium, not separate log and trace products.
 
-The final DDL remains open only where the benchmarks have not decided it. Tests
-must still determine:
+The provisional PoC sort key is `(tenant_id, dataset, timestamp, event_id)`.
+Experiments 013, 016, and 017 support this baseline for timestamp-ordered tail
+retrieval, with a storage and service-filtering tradeoff; they do not settle
+mixed-workload production DDL. Tests must still determine:
 
 * the number and boundaries of attribute namespaces;
-* the correct timestamp bucket in the sorting key;
-* whether `service_name` belongs before or after the time bucket;
+* whether the timestamp-first baseline remains appropriate under sustained
+  ingestion, merges, and the agreed service-filtered and tail-query workload;
 * the best ClickHouse representation for event and trace identifiers;
 * which GCP and OpenTelemetry fields deserve fixed or materialized columns;
 * how logical dimension and measure types are preserved alongside the selected

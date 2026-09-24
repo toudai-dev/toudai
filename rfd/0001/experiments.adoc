@@ -43,8 +43,8 @@ remain to be verified.
   Dashboard aggregate states answered rate, heatmap, and percentile fixtures in
   75 to 124 ms, improving raw execution by 448x to 13,315x. All 30 correctness
   anchor checks passed.
-* link:experiments/013-event-sort-key-comparison.adoc[Experiment 013] selected
-  `(tenant_id, dataset, timestamp, event_id)` as the base event ordering. It
+* link:experiments/013-event-sort-key-comparison.adoc[Experiment 013] recommended
+  `(tenant_id, dataset, timestamp, event_id)` as the provisional PoC ordering. It
   improved full-day tail latency to 124 ms and avoids coupling the base layout
   to one service dimension, at a measured 40.1% storage cost versus the prior
   hour/service ordering.
@@ -64,6 +64,23 @@ remain to be verified.
   and metered listed-price compute and root-volume cost totaled $111.67. This is
   independent-node scaling evidence; replicated failure-domain, sustained
   ingestion, failure, and soak tests remain outstanding.
+* link:experiments/016-date-service-sort-key.adoc[Experiment 016] found no
+  demonstrated benefit from a leading date expression under daily partitioning.
+  Both candidates were compacted to one part before timing; this does not
+  characterize live multi-part ingestion or merge behavior.
+* link:experiments/017-query-index-efficiency-audit.adoc[Experiment 017] captured
+  151 plans: 80 exact retained one-part layouts and 71 explicitly reconstructed
+  layouts. Timestamp-first tail retrieval benefited from early termination for
+  `LIMIT`, not fewer planned time-range granules. Service-first ordering retained
+  a service-filter pruning advantage. Reconstructed plans do not replace
+  unavailable original part or granule counts.
+
+The acceleration correctness checks compare exact outputs for selected filter
+and rate fixtures, but only sample-count and duration-sum anchors for heatmaps
+and percentiles. Passing all 30 or 150 checks does not validate histogram bins
+or quantile values. Independent semantic tests remain required by the query
+implementation plan. Historical build/backfill and storage measurements also
+do not establish live accelerator maintenance cost.
 
 These results support the split `Map`-based serving baseline and demonstrate
 that ten-day retained capacity fits the current host. They also reject broad raw
@@ -333,9 +350,11 @@ Each run records:
 * physical bytes for every supporting schema object.
 
 Latency, concurrency, freshness, retention, and ingestion acceptance thresholds
-must be agreed before this draft becomes the MVP contract and before the 10 TB
-query validation. Relative improvement alone is not a product acceptance
-criterion.
+must be fixed before prospective acceptance runs and before this draft becomes
+the MVP contract. Completed 10 TB runs are exploratory characterization, not
+retroactive product acceptance. The PoC targets and remaining workload inputs
+are recorded in link:experiments-impl.adoc[the experiment plan]. Relative
+improvement alone is not a product acceptance criterion.
 
 == Decision Gates
 
