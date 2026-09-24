@@ -273,7 +273,7 @@ verify_login_shell() {
     printf '[setup] ERROR: development shell tools resolved outside /nix/store\n' >&2
     failed=1
   fi
-  if [[ "${report}" == *"host-path:missing"* ]]; then
+  if [[ "${report}" == *"host-path:"*"=missing"* ]]; then
     printf '[setup] ERROR: host tools the repository scripts use are unreachable\n' >&2
     failed=1
   fi
