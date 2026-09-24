@@ -53,7 +53,6 @@
             opentofu
             packer
             sysstat
-            terraform
           ];
         };
       }
