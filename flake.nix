@@ -42,8 +42,17 @@
             asciidoctor
 
             ## Benchmark tools
+            ## `curl`, `fio`, `jq`, `opentofu`, `packer`, and `sysstat` are also
+            ## pinned in the committed Flox environment and required by the
+            ## benchmark scripts and cloud runbooks.
             awscli2
+            curl
+            fio
             google-cloud-sdk
+            jq
+            opentofu
+            packer
+            sysstat
             terraform
           ];
         };
