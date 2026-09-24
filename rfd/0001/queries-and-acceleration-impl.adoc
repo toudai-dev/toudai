@@ -10,6 +10,8 @@ fixture expectations before using them as acceleration comparison anchors.
 
 * [ ] Define the event filter, grouping, time-series, heatmap, percentile, and raw-result query contract.
 
+* [ ] Compare companion-type and tagged-value Map encodings against the typed fixture; verify lossless canonical round-trip, type-sensitive filters/groups, numeric rather than lexical ordering, presence semantics, aggregate type errors/overflow, and lossless response encoding; record storage and execution cost before selecting the PoC DDL.
+
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
 
 * [ ] Implement and expose exact, approximate, and raw execution modes.

@@ -16,4 +16,6 @@ depends on the acceptance, raw query, and minimal acceleration milestones.
 
 * [ ] Prove trace rendering includes span events and correlated logs.
 
+* [ ] Specify and table-test the typed canonical envelope through standard OTLP and Collector processing: missing/empty/string/false/zero, integer versus string versus float, integers above 2^53 and signed limits, non-finite floats, bytes, nested collections, namespace collisions, duplicate keys, case sensitivity, and missing/invalid durations; preserve supported content and expose explicit errors for unsupported operations.
+
 * [ ] Provide a minimal operator-facing client and record an operator completing time comparison, grouping, heatmap/percentile inspection, outlier identification, and exact-event drill-down against the fixture; verify results against its known events.

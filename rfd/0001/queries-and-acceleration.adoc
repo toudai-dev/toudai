@@ -9,6 +9,17 @@ become physical columns only when they are broadly useful across tenants or
 required for routing and correctness. Per-tenant arbitrary columns are not
 added to the shared table.
 
+The string-valued benchmark Map is performance evidence, not the complete
+link:product-contract.adoc#_poc_typed_value_contract[typed-value contract].
+For the PoC, evaluate a schema-stable Map value encoding with an explicit type tag
+and lossless value representation; carry the same type identity into indexes and
+group keys. Compare a companion type Map with a tagged-value Map on the same small
+fixture before choosing DDL. Neither requires per-workspace columns or a return
+to the rejected native-JSON scale experiment. Raw comparisons and aggregates must
+use the declared type rather than lexical string order or implicit parsing.
+Measure type-tag overhead and conversion cost before extrapolating benchmark
+storage/latency to the new representation.
+
 Tenant-specific acceleration is expressed through bounded secondary objects:
 indexes for selective equality predicates, aggregate states or projections for
 known dashboard shapes, metadata catalogs for field discovery, and normalized

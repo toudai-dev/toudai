@@ -273,6 +273,51 @@ event_id)` shape validated in Experiment 008; tenant-specific dashboard
 rollups likewise store configured dimensions as data. This allows different
 tenants to accelerate different fields without divergent ClickHouse DDL.
 
+== PoC typed-value contract
+
+Preserve the received OTLP value type; do not infer a type from string content.
+The reference is the
+https://opentelemetry.io/docs/specs/otel/common/[OpenTelemetry AnyValue model].
+Pin the protocol/Collector versions used by compatibility tests. Canonical data
+preserves strings, booleans, signed 64-bit integers, double-precision floats,
+bytes, arrays, maps, and explicit empty values within configured size/depth
+limits. This is semantic preservation after declared policy transformations,
+not preservation of original protobuf wire bytes or data already dropped by an SDK.
+
+For the initial query surface, support scalar strings, booleans, integers, and
+finite floats, plus explicit presence/type predicates. Preserve bytes, arrays,
+maps, and non-finite floats for canonical retrieval, but reject unsupported query
+operations on them with an explicit error. Nested traversal and collection
+aggregation are later extensions, not reasons to stringify or discard content.
+
+Field identity includes its namespace: resource attributes, instrumentation-scope
+attributes, record attributes, body, and reserved envelope fields do not overwrite
+one another. Preserve case and literal attribute keys; a dot in a key does not
+implicitly define nesting. Reject duplicate keys within the same incoming
+attribute collection rather than depending on an exporter-specific winner.
+
+Missing, explicit empty/null, empty string, false, and numeric zero are distinct.
+Presence tests use key membership, never the default value of a missing Map key.
+Scalar comparisons require matching types; the query planner does not silently
+coerce strings, integers, or floats. Type changes across events are recorded as
+multiple observed types, not converted to the first observed type. Group keys
+include type, so string `"1"`, integer `1`, and float `1.0` remain distinct.
+
+Numeric aggregations declare their input type; an incompatible non-empty value
+is an error unless an explicit type filter excludes it. Missing/empty inputs do
+not become zero; report contributing-value counts separately from event counts.
+Integer values must not pass through floating point during storage or transport:
+test integers above 2^53. Define overflow and result encoding before exposing
+integer aggregates; reject overflow rather than wrap. JSON responses must encode
+large integers losslessly with explicit type information, not rely on client
+number precision. Casts and mixed integer/float aggregation are deferred.
+
+Keep timestamp and duration units explicit and preserve received nanosecond
+precision where present. A missing duration is not a zero-duration span; malformed
+span timing must be rejected or explicitly flagged, never converted by unsigned
+underflow into a huge duration. Metric values retain their separate OTel signal
+semantics; this scalar event contract does not redefine native metrics.
+
 == Open Questions
 
 * What exact GCP metric and bucket scope produced the 32 TB monthly figure?
