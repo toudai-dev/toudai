@@ -2,7 +2,11 @@
 
 Checklist ownership: link:queries-and-acceleration.adoc[Queries And Acceleration].
 
-== Phase 2: unified query semantics
+== PoC-required: raw query semantics
+
+Depends on the versioned event contract, authenticated query scope, and the
+acceptance plan's materialized fixture. Validate raw results against independent
+fixture expectations before using them as acceleration comparison anchors.
 
 * [ ] Define the event filter, grouping, time-series, heatmap, percentile, and raw-result query contract.
 
@@ -14,7 +18,12 @@ Checklist ownership: link:queries-and-acceleration.adoc[Queries And Acceleration
 
 * [ ] Define ingestion watermarks, expected shard coverage, and complete versus bounded-latency execution independently of exact versus approximate math.
 
-== Phase 3: dashboard and metadata acceleration
+* [ ] Execute the required raw query shapes against the deterministic fixture; verify expected rows/aggregates and diagnostic accuracy, including rejected and failed requests.
+
+== PoC-required: minimal acceleration
+
+Depends on passing raw-query tests. Use only the configured paths needed by the
+operator fixture; complete live-maintenance correctness before scale testing.
 
 * [x] Measure schema-stable tenant attribute indexes and configured aggregate states against the full-day Map baseline.
 
@@ -22,8 +31,15 @@ Checklist ownership: link:queries-and-acceleration.adoc[Queries And Acceleration
 
 * [ ] Route eligible dashboard queries to aggregate states with raw fallback.
 
+* [ ] Validate raw/accelerated equivalence for the fixture during live ingestion, retries, and backfill; document tolerances for approximate results and verify raw fallback for unsupported shapes.
+
+* [ ] Verify derived storage remains within the agreed amplification budget.
+
+== Later validation and optimization
+
+The PoC uses explicitly configured accelerations. Caching and recommendation
+automation are not prerequisites for demonstrating the operator workflow.
+
 * [ ] Add normalized query-result caching and measure hit behavior.
 
 * [ ] Implement dashboard-requested acceleration and workload recommendations; keep activation manual until tenant budgets and maintenance cost are proven.
-
-* [ ] Verify derived storage remains within the agreed amplification budget.

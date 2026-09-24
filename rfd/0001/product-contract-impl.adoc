@@ -5,8 +5,15 @@ Checklist ownership: link:product-contract.adoc[Product Contract].
 Product readiness is also governed by the cross-cutting
 link:README.adoc#_cross_cutting_exit_criteria[exit criteria].
 
-== Phase 2: unified query semantics
+== PoC-required: emitter and operator workflow
+
+The fixture definition precedes ingestion implementation. The operator test
+depends on the acceptance, raw query, and minimal acceleration milestones.
+
+* [ ] Build one deterministic fixture emitter using standard OTel SDK/OTLP for two tenants with logs, spans, application events, and a native-metric compatibility sample; include invalid records and independently computed expected contents/checksums, and verify reproducibility without proprietary batch receipts.
 
 * [ ] Prove logs, spans, and application events can be queried together.
 
 * [ ] Prove trace rendering includes span events and correlated logs.
+
+* [ ] Provide a minimal operator-facing client and record an operator completing time comparison, grouping, heatmap/percentile inspection, outlier identification, and exact-event drill-down against the fixture; verify results against its known events.

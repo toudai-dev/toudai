@@ -2,6 +2,25 @@
 
 Checklist ownership: link:experiments.adoc[Experiments].
 
+== Milestone scope
+
+The phases below preserve historical benchmark progress. They are not the PoC
+execution order. The section implementation plans own application correctness
+and small-fixture failure tests; this plan owns reproducibility, measured
+thresholds, and scale/qualification evidence.
+
+Before PoC acceptance runs, complete the threshold task below for the named PoC
+workload, including freshness, recovery time, and a run-cost ceiling. Record the
+fixture, commands, expected results, and observed results under `experiments/`.
+Existing completed experiments remain characterization, not retroactive passes
+against those thresholds.
+
+The remaining full-inventory, retained-volume, layout-comparison, and cold-tier
+tasks are later validation. Independent-host production capacity, provider
+comparisons, cross-zone failure domains, and long soaks are production
+qualification. Neither category blocks the small end-to-end PoC; do not mark
+these larger tests complete based on a small-fixture pass.
+
 == Phase 0: benchmark contract and reproducibility
 
 * [x] Inventory the Parquet corpus by files, rows, bytes, and daily coverage.

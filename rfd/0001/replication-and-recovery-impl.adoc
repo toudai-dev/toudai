@@ -2,9 +2,18 @@
 
 Checklist ownership: link:replication-and-recovery.adoc[Replication And Recovery].
 
-== Phase 5: 100 TB architectural validation
+== PoC-required: small-topology recovery
+
+Depends on the durable vertical slice and raw-query correctness. Topology and
+failure assumptions must be written before execution; this test does not require
+a 100 TB corpus or establish cross-zone production resilience.
+
+* [ ] Run the deterministic fixture on a small replicated multi-shard topology; stop a replica, restore it, and verify the declared availability/completeness behavior and data convergence.
+* [ ] Rebuild a serving replica and restart the coordinator while querying the fixture; verify no silently incomplete successful responses and recovery within a prospectively declared time budget.
+
+== Later validation: 100 TB architectural validation
 
 * [ ] Measure replica rebuild and failure-recovery behavior.
 
-The staged replicated candidate and soak work remains owned by
+Production qualification through staged candidates and soaks remains owned by
 link:experiments-impl.adoc[the experiment plan].
