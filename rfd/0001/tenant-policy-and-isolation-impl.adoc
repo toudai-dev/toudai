@@ -2,16 +2,28 @@
 
 Checklist ownership: link:tenant-policy-and-isolation.adoc[Tenant Policy And Isolation].
 
-== Phase 2: unified query semantics
+== PoC-required: authorization and policy
 
-* [ ] Implement a stateless ingestion gateway with authentication, validation, redaction, quotas, and cached versioned tenant policy.
+Depends on the event/tenant contract and product fixture. Authentication and
+authorization precede both acceptance and query execution; workload-isolation
+tests follow the working raw and accelerated paths.
+
+* [ ] Define account/workspace/dataset records and workspace-scoped ingestion keys, including multiple keys per workspace, rotation, revocation/cache-expiry behavior, and separate write/read/admin permissions.
+* [ ] Implement key-derived trusted workspace scope before Collector batching; verify dataset routing stays within it, unknown datasets fail, and producer scope attributes cannot override ownership or leak credentials.
+
+* [ ] Integrate authentication, validation, redaction, quotas, and cached versioned tenant policy with Collector gateways before normal and overflow export; reuse available components and justify any custom extension.
 
 * [ ] Implement the dataset and field-policy registry.
 
-* [ ] Implement stream-derived field presence, type, cardinality, top-K, value-size, and growth-rate observations without enumerating high-cardinality values.
+* [ ] Test workspace authorization across ingestion, queries, metadata, and exact payload retrieval using sibling workspaces in one account and a workspace in another account with colliding dataset/event/trace names and IDs; reject cross-workspace access on every path, including batching, overflow, and catch-up.
+* [ ] Specify and test new-request rejection after key revocation and workspace deletion separately from already admitted backlog handling; verify catch-up retains original ownership without requiring the producer credential.
 
-== Phase 3: dashboard and metadata acceleration
+== PoC-required: bounded exploration and work
+
+* [ ] Implement stream-derived field presence, type, cardinality, top-K, value-size, and growth-rate observations without enumerating high-cardinality values.
 
 * [ ] Implement bounded field-name and field-value catalogs.
 
 * [ ] Add query cost estimation and guardrails for raw exact and high-cardinality operations.
+
+* [ ] Run a small mixed-tenant fixture with dashboard queries, expensive raw scans, and ingestion; verify prospective queue/execution/freshness limits, observable rejections, and cancellation of leaf work after deadlines.

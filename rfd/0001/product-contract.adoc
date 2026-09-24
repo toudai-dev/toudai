@@ -21,17 +21,21 @@ plane.
 The MVP supports filtering, grouping, time series, rates, histograms, heatmaps,
 percentiles, top-K, comparisons, and bounded raw-event retrieval. Joins and
 arbitrary general-purpose database workloads are outside the interactive path.
-Every query requires a tenant, dataset, and bounded time range.
+Every query requires an authorized workspace, dataset, and bounded time range.
+Accounts own workspaces, and workspaces own datasets and ingestion keys; see
+link:tenant-policy-and-isolation.adoc#_accounts_workspaces_and_keys[workspace isolation].
+Existing "tenant" terminology denotes workspace scope, not the owning account.
 
 Freshness, p50/p95 latency by query class, concurrency, retention, and cost
 budgets remain open until controlled multi-day query measurements are complete.
 
 == Event and instrumentation contract
 
-Producers emit a versioned envelope containing tenant and dataset identity,
-stable event and immutable batch identities, source and observed timestamps,
-event kind, service and deployment context, trace correlation, structured
-attributes, exact payload, and explicit upstream sampling metadata.
+Standard OTel producers emit OTLP. The Collector path maps logs, spans, and
+application events into a versioned internal envelope containing authenticated
+tenant/dataset scope, event identity, timestamps, kind, service/deployment context,
+trace correlation, typed attributes, canonical payload, and available sampling
+metadata. Proprietary batch IDs and receipts are not required of OTel clients.
 
 Instrumentation libraries must be asynchronous, batched, compressed, and
 backpressure-aware. They expose accepted, rejected, retried, sampled, and
@@ -40,8 +44,9 @@ probability or weight so aggregates can compensate and disclose that they did
 so.
 
 Ingestion validates field count, field-name growth, event and string sizes,
-declared types, reserved fields, and sensitive-data policy before acknowledging
-the durable batch. Additive fields are permitted; incompatible type changes are
+declared types, reserved fields, and sensitive-data policy before database or
+overflow export. OTLP acknowledgements and partial failures follow the tested
+Collector configuration, not a custom atomic-batch protocol. Additive fields are permitted; incompatible type changes are
 recorded and rejected or isolated according to versioned tenant policy.
 
 == Implementation language
@@ -51,7 +56,9 @@ low-cost choice because the repository contained only a three-line Go
 placeholder and no Go dependencies, generated code, or tests. Rust provides
 the asynchronous I/O, explicit resource control, and Arrow/Parquet ecosystem
 needed by the ingestion and replay paths without making a custom storage engine
-part of the MVP. ClickHouse remains the serving engine. Revisit the language
+part of the MVP. Reusing the OTel Collector does not require rewriting its
+components in Rust; custom extensions need a demonstrated compatibility gap.
+ClickHouse remains the serving engine. Revisit the language
 only if implementation uncovers a concrete interoperability gap that is more
 expensive than maintaining a second runtime.
 
@@ -174,9 +181,11 @@ native metric samples unless a later interoperability feature needs it.
 
 == Full-resolution acceptance and retention
 
-Lighthouse does not silently sample accepted events. An event is accepted only
-after a durable replay boundary, and accepted events remain reconstructable at
-full resolution from immutable batches or their canonical archive. Producer
+Lighthouse does not silently sample accepted events. Preserve canonical events
+at full resolution within declared retention. The Collector PoC must distinguish
+OTLP receipt/queue admission from confirmed storage and establish the supported
+failure envelope. Recovery uses retained canonical data and tested backups;
+overflow is not a complete archive. Independent all-event archival remains open. Producer
 drops or upstream sampling must be reported; sampled events carry an explicit
 sampling probability or weight. Approximate percentile, distinct-count, top-K,
 or histogram functions may be used for interactive execution, but this changes
@@ -215,7 +224,7 @@ contains at least:
 
 [source,text]
 ----
-identity       tenant_id, dataset, event_id, immutable ingest_batch_id
+identity       tenant_id, dataset, event_id; internal write identity if required
 time           source timestamp, observed timestamp
 kind           event, log, or span
 common fields  event name, service, environment, region, host, build, severity
@@ -227,17 +236,18 @@ payload        exact canonical source event or immutable payload reference
 schema         envelope and field-policy versions
 ----
 
-The producer SDK and gateway contract is part of the data model. Producers must
-batch and compress asynchronously, never block the application indefinitely,
-report dropped events and backpressure, set source timestamps and stable event
-IDs, and avoid sending known secrets or unrestricted request bodies. OpenTelemetry
-is the default transport vocabulary, with a custom wide-event API where OTel's
-signal APIs do not express the event cleanly.
+The OTel SDK and Collector mapping is part of the data model. Reuse standard SDK
+batching and transport behavior; bound application blocking and report drops and
+backpressure. Preserve source timestamps and supplied IDs, and specify internal
+identity assignment where OTLP provides none. Avoid sending known secrets or
+unrestricted request bodies. Define a standard OTLP application-event encoding
+before considering a separate wide-event API.
 
 The MVP ClickHouse serving table uses fixed columns for the routing and commonly
-queried envelope plus `Map`-based long-tail attributes. Exact payload is kept in
-the immutable archive and may also be retained in a separately ordered bulk
-ClickHouse table for recent reconstruction. This is a physical implementation
+queried envelope plus `Map`-based long-tail attributes. Canonical payload must be
+retained for exact retrieval and reconstruction, potentially in a separately
+ordered bulk ClickHouse table. Backup/restore and optional independent archival
+are evaluated in the acceptance plan. This is a physical implementation
 of one logical event medium, not separate log and trace products.
 
 The final DDL remains open only where the benchmarks have not decided it. Tests
@@ -270,11 +280,10 @@ tenants to accelerate different fields without divergent ClickHouse DDL.
 * What are the interactive p50/p95 latency targets by query class and time
   range?
 * What dashboard and exploratory concurrency must one deployment support?
-* What maximum producer-to-query and producer-to-archive lag defines healthy
-  ingestion?
-* Is the acceptance contract at-least-once with query-time duplicates,
-  idempotent insertion by stable event ID, or bounded deduplication by immutable
-  batch ID?
+* What producer-to-query and overflow catch-up lag defines healthy ingestion?
+* Which acknowledgement, retry, and duplicate guarantees can the
+  link:acceptance-and-replay.adoc[Collector-first pipeline] support, including
+  rebatching, ambiguous writes, and object-notification redelivery?
 * Is exact aggregation required synchronously above a bounded scan cost, or may
   it run as an asynchronous query job?
 * Which common envelope fields justify physical columns across tenants, and
@@ -286,8 +295,8 @@ tenants to accelerate different fields without divergent ClickHouse DDL.
 * Which fields must be searchable as text versus exact structured values?
 * How long must exact canonical payload remain online, and when may it move from
   recent bulk lookup to archival retrieval?
-* What durable log, immutable batch format, acknowledgement boundary, and replay
-  contract make ClickHouse serving state safely reconstructable?
+* Do canonical retention and tested ClickHouse backups meet recovery objectives,
+  or must every event also enter an independent archive?
 * Should archived canonical events be queried through ClickHouse object-backed
   parts or through a separate archive execution path?
 * Which registry technology should own dataset, field, privacy, quota, and

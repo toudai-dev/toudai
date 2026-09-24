@@ -6,10 +6,11 @@
 
 == Architecture summary
 
-Lighthouse provides Scuba-style recent-data exploration over logs, spans, and structured application events through one logical event model. Native metrics remain separate. Accepted events remain reconstructable at full resolution; ClickHouse is query-serving state backed by a durable replay and archive boundary. Bounded accelerators improve interactive queries without making raw retained fields unqueryable.
+Lighthouse provides Scuba-style recent-data exploration over logs, spans, and structured application events through one logical event model. Native metrics remain separate. The PoC uses OpenTelemetry Collectors with direct ClickHouse ingestion and object-store overflow/catch-up. Canonical retention and backup/restore support reconstruction; independent all-event archival remains an explicit decision. Bounded accelerators improve interactive queries without making raw retained fields unqueryable.
 
 == Design principles
 
+* Organize datasets under workspaces within accounts; ingestion keys and telemetry isolation are workspace-scoped.
 * Preserve accepted source events and disclose approximation, completeness, and freshness independently.
 * Require tenant, dataset, and bounded time range for interactive queries.
 * Keep derived storage bounded and retain raw fallback.
@@ -27,13 +28,47 @@ Lighthouse provides Scuba-style recent-data exploration over logs, spans, and st
 
 == Dependency order
 
-. Establish reproducible experiments and product thresholds.
-. Define the product event contract, durable acceptance, archive, and replay semantics.
-. Implement tenant policy and metadata observations.
-. Implement truthful query semantics and bounded acceleration.
-. Validate replication, recovery, workload isolation, cold tiers, and larger retained volumes.
+. Define the PoC workload, pass/fail thresholds, event contract, and acceptance semantics.
+. Build a deterministic emitter and enforce tenant authorization and ingestion policy.
+. Demonstrate OTLP ingestion, raw querying, overflow/catch-up, and canonical-data reconstruction.
+. Demonstrate the operator workflow, then bounded acceleration with raw fallback.
+. Exercise mixed tenants, cancellation, and small-topology replicated recovery.
+. Only then expand retention, topology, cold-tier execution, and production qualification.
 
 Experiment results may revise design sections, but every checklist item has exactly one implementation-section owner.
+
+== PoC completion gate
+
+The PoC must demonstrate one reproducible vertical slice:
+
+....
+OTLP -> Collector authentication/validation -> ClickHouse -> query/drill down
+                         |                        |
+                         +-> overflow -> catch-up +-> reconstruct/restore
+....
+
+Use a small deterministic corpus before repeating large retained-volume tests.
+Each required milestone must record its fixture, command, expected result,
+failure cases, and observed result in an experiment under `experiments/`.
+Performance gates require prospective workload and numeric thresholds; the
+historical benchmark medians are characterization, not implicit SLOs.
+
+The implementation companions distinguish PoC-required milestones from later
+validation and production qualification. Completed historical experiments remain
+evidence, not evidence that the application milestone is implemented. The
+link:acceptance-and-replay.adoc[Collector-first acceptance plan] requires measured
+OTLP acknowledgement, loss, duplicate, and recovery behavior. Neither queue
+admission nor protocol compatibility alone establishes durable acceptance.
+
+PoC completion requires the emitter and operator tests in the product plan,
+Collector/overflow/reconstruction tests in the acceptance plan, raw and accelerated
+semantic tests in the query plan, authorization and bounded-work tests in the
+tenant plan, and small-topology failure tests in the replication plan. Independent
+health telemetry must expose failures even when ClickHouse is unavailable.
+
+Provider comparisons, 100 TB loading, cross-zone qualification, and 24-to-72-hour
+soaks do not block this PoC. They remain necessary where applicable before a
+production readiness claim. Passing the PoC does not establish production SLOs.
 
 == Cross-cutting exit criteria
 

@@ -44,25 +44,27 @@ tenant policy can evolve without placing a metadata lookup on every event:
 
 [source,text]
 ----
-OTel / wide-event SDKs
+Standard OTel SDKs / agents
           |
           v
-stateless ingestion gateways <----- cached, versioned tenant policy
-          |
-          v
-durable Kafka/Redpanda acceptance boundary
-          |---------------------> immutable canonical batch archive
-          |
-          v
-normalization consumers -------> ClickHouse local ReplicatedMergeTree tables
-                                  behind a Distributed table
-                                             |
-                                             v
-                                  query planner and Scuba-style UI
+Collector gateways <-------------- authenticated tenant policy
+          |---- overflow -> object storage -> catch-up collectors
+          |                                        |
+          +--------------------+-------------------+
+                               v
+               ClickHouse local ReplicatedMergeTree tables
+                        behind a Distributed table
+                               |
+                               v
+                    query planner and Scuba-style UI
 
-stream copy ---> field/cardinality sketches ---> metadata and policy registry
+event observations -> field/cardinality sketches -> metadata and policy registry
 query history ---------------------------------> acceleration recommendations
 ----
+
+Normal and catch-up exports target the same logical data model. The concrete
+exporter mapping and acknowledgement behavior are tests in the
+link:acceptance-and-replay.adoc[Collector-first acceptance plan].
 
 == Primary raw path
 
@@ -128,10 +130,11 @@ clearly labeled bounded-latency partial result.
 
 == Storage tiers
 
-The MVP uses normalized events on ClickHouse's fast serving tier and immutable
-canonical batches on economical bulk or object storage. Experiment 009 validates
-the immediate physical split and exact lookup, but its bulk ClickHouse payload
-table is not itself the final durability design. Querying archived normalized
+The PoC uses normalized events on ClickHouse's fast serving tier and retains
+canonical payload for reconstruction. Object-store overflow covers failed-path
+traffic only; full independent archival is not assumed. Experiment 009 validates
+the physical payload split and exact lookup, but not backup/restore guarantees.
+Querying archived normalized
 events through ClickHouse object-backed parts versus a distinct archive executor
 remains an experiment; either path must preserve one logical query contract and
 report its source, freshness, and completeness.

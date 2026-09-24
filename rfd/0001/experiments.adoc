@@ -129,8 +129,10 @@ Relevant reference:
 
 * https://www.vldb.org/pvldb/vol15/p3522-mo.pdf
 
-This evidence adds four architecture directions that require explicit
-validation rather than being assumed from the single-node experiments:
+This evidence originally motivated four architecture directions requiring
+validation rather than assumptions from single-node experiments. The
+link:acceptance-and-replay.adoc[Collector-first PoC] now treats the first two as
+optional independent-archive directions, not mandatory ingestion dependencies:
 
 * accepted events should enter a durable replay path before ClickHouse serving
   state, so serving tables can be reconstructed;

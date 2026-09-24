@@ -1,51 +1,123 @@
 = Acceptance and replay
 
-This section defines durable acceptance, replay, and serving-state reconstruction.
+== Collector-first PoC
 
-== Serving and durability architecture
+OpenTelemetry compatibility is a requirement, not a later adapter. Standard OTel
+SDKs and agents send OTLP to Collector gateways. Reuse Collector receivers,
+processors, batching, exporters, retries, and connectors before implementing
+custom ingestion components. Kafka and an archive-before-acknowledgement service
+are not baseline dependencies.
 
-The MVP has three logical planes:
+The candidate path is direct ClickHouse ingestion with object-storage overflow
+on downstream failure or sustained backpressure, followed by separate catch-up
+collectors. This follows the architecture described in
+https://clickhouse.com/blog/reliable-opentelemetry-ingestion-at-scale[ClickHouse's reliable OpenTelemetry ingestion report].
+That report is operational evidence for a candidate, not proof of our schema,
+tenant isolation, acknowledgement semantics, or loss/duplicate guarantees.
 
-* The ingestion plane authenticates, validates, redacts, applies quotas,
-  durably accepts immutable compressed batches, and feeds idempotent consumers.
-* The query plane stores recent normalized events in ClickHouse, computes local
-  partial aggregates, and merges them behind a coordinator with deadlines,
-  cancellation, scan/group/memory budgets, and workload isolation.
-* The control plane owns datasets, schemas, retention, privacy classes, quotas,
-  field observations, acceleration policy, and query audit records.
+....
+OTel SDKs / agents -> Collector gateways -> ClickHouse
+                            |
+                            +-- failure -> object storage
+                                               |
+                                        object notifications
+                                               |
+                                        catch-up collectors
+                                               |
+                                           ClickHouse
+....
 
-The durable log and immutable object archive are authoritative for replay;
-ClickHouse is reconstructable serving state. A normalized hot event table owns
-common routing, time, service, severity, trace, and typed measure columns plus
-the benchmark-selected flexible long tail. An exact payload table or archive is
-joined only for bounded drill-down, not ordinary aggregation.
+The notification queue carries object references, not all telemetry. Live and
+catch-up deployments scale independently, but share downstream capacity; measure
+and bound catch-up load so it does not starve fresh ingestion or queries.
 
-== Ingestion plane
+== Reuse and Lighthouse ownership
 
-Stateless Lighthouse gateways authenticate tenant and dataset, validate the
-versioned envelope and field types, enforce event/string/field-count limits,
-redact or reject classified data, and apply tenant byte/event quotas. Gateways
-use cached, versioned policy snapshots so control-plane unavailability does not
-turn into a per-event database dependency. Policy versions are recorded with
-accepted batches.
+Collectors own transport and pipeline plumbing. Lighthouse owns authenticated
+tenant/dataset policy, unified log/span/event mapping, retained canonical content,
+and query semantics. First test whether existing Collector processors and the
+ClickHouse exporter can express the required mapping and routing. Add a custom
+processor/exporter or narrow service only for a demonstrated gap; do not assume
+the stock exporter implements Lighthouse's unified-event schema.
 
-The durable transport is the acceptance boundary. Acknowledgement, retry, and
-duplicate semantics must be explicit; stable event IDs and immutable batch IDs
-make idempotent consumers and replay possible. ClickHouse serving consumers and
-the canonical archive consumer advance independently. Queue lag and archive
-lag are visible separately from ClickHouse query freshness.
+Pin the Collector distribution, component versions, configuration, and ClickHouse
+version in the experiment. Establish support for OTLP logs, traces, and metrics;
+logs/spans map into unified events while native metrics retain a separate model.
+Define the application-event encoding using standard OTLP rather than requiring
+a proprietary producer protocol. Compatibility testing must include resource and
+scope attributes, typed values, timestamps, and trace correlation.
 
-== Durable ingestion and rebuild
+Authentication resolves an ingestion key to one workspace under an account.
+Workspace-scoped validation/redaction precedes both ClickHouse and overflow
+export. Preserve trusted workspace identity through batching and catch-up without
+trusting producer-supplied account/workspace attributes. Policy integration is owned by
+link:tenant-policy-and-isolation.adoc[tenant policy and isolation].
 
-Treat ClickHouse as the query-serving copy rather than assuming its local parts
-are the only source of truth. The production design should acknowledge accepted
-events through a durable replay boundary, assign immutable event and batch
-identities, and persist canonical batches to an economical archive. ClickHouse
-and optional accelerators consume this stream and must be reconstructable from
-the archive plus replay position.
+== Acknowledgements and retry semantics to establish
 
-The ten-day benchmark's bulk `event_payloads` table measures the immediate
-storage and lookup tradeoff; it is not by itself a final durable log or object
-archive design. Record the acknowledgement, retry, deduplication, replay, and
-archive-format contracts in a separate decision before production ingestion is
-implemented.
+Do not equate an OTLP success response with a durable database or object-store
+write. A response may follow admission to an asynchronous Collector queue.
+For each pipeline stage, document when success is returned, where the data then
+resides, and what survives process restart, node loss, queue exhaustion, and
+simultaneous ClickHouse/object-store unavailability. Distinguish receiver receipt,
+queued data, confirmed storage, and query visibility in operational reporting.
+
+The previous custom immutable-batch receipt contract is superseded for the PoC.
+Ordinary OTLP producers need not supply Lighthouse batch IDs or preserve a batch
+across Collector rebatching. Internal event/write identities may still be needed;
+choose their assignment point and preservation behavior from measured retry and
+replay requirements. Stable IDs by themselves do not establish deduplication.
+
+Test standard OTLP partial-success and retryable/permanent-error behavior rather
+than imposing all-or-nothing request acceptance. Document rejected record counts,
+retry/drop policies, queue capacity, persistence, and maximum retry duration.
+No lifetime exactly-once or bounded batch-idempotency guarantee is assumed.
+Ambiguous insert outcomes and repeated object notifications can produce duplicate
+delivery; determine and test their effect on raw events and aggregate states.
+Do not claim exact original-event counts until that behavior is resolved.
+
+ClickHouse's reference disables the primary exporter's sending queue so errors
+reach the failover connector, while retaining synchronous retries and setting
+`async_insert=1`, `wait_for_async_insert=1`. Queues elsewhere in the pipeline can
+still acknowledge before durable export. Use these as a starting configuration,
+not as proof of end-to-end durability. Persistent local queues may improve restart
+survival but do not automatically survive node loss or guarantee timely catch-up.
+
+== Overflow and catch-up
+
+Overflow stores processed telemetry during downstream failure; it is not an
+independent archive of every successfully ingested event. Test object publication,
+notification delivery, duplicate notifications, failed inserts, and acknowledgement
+of notifications only after the configured synchronous downstream outcome.
+Specify cleanup/retention only after successful recovery, with a recovery procedure
+for objects whose notifications are missing or no longer available.
+
+While catch-up is pending, fresh events may be queryable before older ones.
+Backlog size does not prove completeness of a particular tenant/time interval.
+Expose recovery state and avoid asserting complete coverage from a maximum event
+timestamp or from all shards responding.
+
+== Retention, reconstruction, and the unresolved archive decision
+
+On the normal path, durability depends on ClickHouse storage, replication, and
+the chosen backup/restore policy. Preserve full-resolution accepted canonical
+content within declared retention so derived layouts can be rebuilt when that
+source remains available. The payload split measured in Experiment 009 is useful
+layout evidence, not proof of backup or disaster recovery.
+
+The PoC must demonstrate reconstruction from retained canonical data and a small
+backup/restore test with an explicit recovery point. Overflow replay is a separate
+test: it cannot reconstruct normal-path events that were never spilled. Validate
+rebuilds in isolated tables before replacing a working serving layout.
+
+Whether every event also needs an independent canonical archive remains open.
+Compare ClickHouse canonical retention plus backups against all-event archival
+using required recovery point/time, transformation recovery, cost, and failure
+domains. If an asynchronous all-event archive is selected, define a retention-safe
+handoff before claiming independent replayability. If it is not selected, state
+the limits of recovery after losing ClickHouse and its backups explicitly.
+
+PoC acceptance requires an honest measured failure envelope, not an unsupported
+zero-loss claim. Any observed loss, duplication, or incompatible mapping must
+be recorded and resolved or explicitly accepted as a limitation before advancing
+to production qualification.
