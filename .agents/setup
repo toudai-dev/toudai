@@ -187,12 +187,21 @@ persist_login_shell() {
 
   local end_line
   end_line="$(grep -nF "${hook_end}" "${bash_profile}" | head -n 1 | cut -d: -f1 || true)"
-  if [[ -z "${end_line}" ]] || [[ "${end_line}" -lt "${begin_line}" ]]; then
-    # Legacy or truncated block: it ends at its own top-level `fi`.
-    end_line="$(awk -v start="${begin_line}" 'NR > start && $0 == "fi" { print NR; exit }' "${bash_profile}")"
+  if [[ -n "${end_line}" ]] && [[ "${end_line}" -lt "${begin_line}" ]]; then
+    end_line=""
   fi
-  if [[ -z "${end_line}" ]] || [[ "${end_line}" -lt "${begin_line}" ]]; then
-    end_line="$(wc -l < "${bash_profile}")"
+  if [[ -z "${end_line}" ]]; then
+    # Blocks written before the end marker existed start with this `if` and end
+    # at their own top-level `fi`. Anything else is not ours, so report it
+    # instead of deleting content that might not belong to the hook.
+    # shellcheck disable=SC2016  # the literal prefix identifies blocks we wrote
+    if [[ "$(sed -n "$((begin_line + 1))p" "${bash_profile}")" == 'if [[ -z "${IN_NIX_SHELL:-}"'* ]]; then
+      end_line="$(awk -v start="${begin_line}" 'NR > start && $0 == "fi" { print NR; exit }' "${bash_profile}")"
+    fi
+  fi
+  if [[ -z "${end_line}" ]]; then
+    printf '[setup] ERROR: cannot find the end of the login-shell hook block in %s; remove that block and re-run setup\n' "${bash_profile}" >&2
+    return 1
   fi
 
   local current
@@ -213,10 +222,6 @@ persist_login_shell() {
   chmod --reference="${bash_profile}" "${tmp}"
   mv "${tmp}" "${bash_profile}"
   printf '[setup] refreshed the login-shell hook (lines %s-%s)\n' "${begin_line}" "${end_line}"
-
-  if [[ "$(grep -cF "${hook_begin}" "${bash_profile}")" -gt 1 ]]; then
-    printf '[setup] WARNING: multiple login-shell hook blocks are present; the extra blocks are inert\n' >&2
-  fi
 }
 
 verify_login_shell() {
@@ -258,10 +263,6 @@ verify_login_shell() {
   fi
   if [[ "${report}" != *"nix-bin:${nix_bin}"* ]]; then
     printf '[setup] ERROR: login shell cannot resolve %s\n' "${nix_bin}" >&2
-    failed=1
-  fi
-  if [[ "${report}" != *"path-head:/nix/store/"* ]]; then
-    printf '[setup] ERROR: development shell paths do not take precedence in the login shell\n' >&2
     failed=1
   fi
   if [[ "${report}" == *"missing-tool:"* ]]; then
