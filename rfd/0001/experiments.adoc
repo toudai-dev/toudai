@@ -76,20 +76,25 @@ remain to be verified.
   unavailable original part or granule counts.
 * link:experiments/018-collector-compatibility.adoc[Experiment 018] exercised the
   stock Collector path (otelcol-contrib v0.161.0, ClickHouse 26.8.2.7-lts) with a
-  deterministic OTLP fixture: 179/179 checks passed. Resource/scope/record
-  namespaces, timestamps, trace correlation, and metric structure survive, but
-  the stock ClickHouse schema stores every attribute as a string `Map`, so
-  integer/double/string, explicit-empty/empty-string, and bytes/array/map
-  identity are lost, duplicate keys are stored twice, and span scope attributes
-  are dropped. A static credential-to-workspace binding through the routing
-  connector survived batching, overflow, and replay and could not be overridden
-  by producer attributes, but the authenticated identity is not exposed to
-  processors, so dynamic key resolution and rotation/revocation remain custom
-  work. OTLP success is queue admission at the first enabled queue (exporter
+  deterministic OTLP fixture: 179/179 characterization assertions passed. These
+  assert pinned stock behavior, not acceptance-contract conformance.
+  Resource/scope/record namespaces, timestamps, trace correlation, and metric
+  structure survive for logs and metrics, but the stock ClickHouse schema stores
+  every attribute as a string `Map`, so integer/double/string,
+  explicit-empty/empty-string, and bytes/array/map identity are lost, duplicate
+  keys are stored twice, and span scope attributes are dropped (`otel_traces`
+  has no scope-attributes column). A static credential-to-workspace binding
+  through the routing connector survived same-workspace batching, overflow, and
+  manual replay and could not be overridden by producer attributes, but the
+  tested authenticator exposes no identity to the tested processors, so dynamic
+  key resolution and rotation/revocation remain custom work with these
+  components; other stock authenticators and cross-workspace batching were not
+  evaluated. OTLP success is queue admission at the first enabled queue (exporter
   helper, failover connector, or destination write); a permanent schema error
   produced producer-visible success followed by retry and drop, a full queue
-  produced HTTP 503 with `enqueue_failed` counters, and replayed objects
-  duplicated rows. No stock overflow-backlog or catch-up progress metric exists.
+  produced HTTP 503 with `enqueue_failed` counters, and manually replayed objects
+  duplicated rows. No overflow-backlog or catch-up progress metric appeared in
+  the tested topology's scrapes.
 
 The acceleration correctness checks compare exact outputs for selected filter
 and rate fixtures, but only sample-count and duration-sum anchors for heatmaps

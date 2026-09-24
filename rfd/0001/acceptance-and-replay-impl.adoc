@@ -11,18 +11,21 @@ batch receipt and mandatory durable-log/archive implementation path.
 +
 Experiment 018 pinned `otelcol-contrib` v0.161.0 with ClickHouse 26.8.2.7-lts and
 measured the direct mapping (logs/traces/metrics sent, separate metric tables,
-resource/scope/record separation, timestamps, trace correlation). It also
-measured the gap: the stock ClickHouse schema stores every attribute as a string
-`Map`, drops span scope attributes, and keeps duplicate keys, so the typed
-unified-event mapping is not satisfied. See
+resource/scope/record separation for logs and metrics, timestamps, trace
+correlation). It also measured the gap: the stock ClickHouse schema stores every
+attribute as a string `Map`, drops span scope attributes (`otel_traces` has no
+scope-attributes column), and keeps duplicate keys, so the typed unified-event
+mapping is not satisfied. These are characterization measurements against the
+pinned components, not checklist completion. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 
 * [ ] Define application-event encoding and internal identity assignment without requiring proprietary producer batch IDs; verify what survives SDK retries and Collector rebatching.
 +
 Experiment 018 observed that exporter queue batching merges separate requests
-into one downstream request while preserving each resource group's attributes,
-and that a producer retry after a crash inserted the same records again with no
-deduplication. Application-event encoding itself remains open.
+into one downstream request while preserving each resource group's attributes
+(the captured batch was same-workspace only; cross-workspace batching was not
+exercised), and that a producer retry after a crash inserted the same records
+again with no deduplication. Application-event encoding itself remains open.
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
 +
@@ -39,9 +42,10 @@ open. See link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +
 Experiment 018 configured the `failover` connector with a stock ClickHouse
 primary and an `awss3` overflow exporter: fresh ingestion resumed after ClickHouse
-recovered while the spilled objects remained, and replay through a catch-up OTLP
-receiver preserved the trusted workspace. Catch-up resource bounds, a separate
-catch-up Collector deployment, and SQS notification delivery remain open. See
+recovered while the spilled objects remained, and manual replay of a spilled
+object through an OTLP receiver (not notification-driven catch-up) preserved the
+trusted workspace. Catch-up resource bounds, a separate catch-up Collector
+deployment, and SQS notification delivery remain open. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 
 * [ ] Map acknowledgement boundaries for receiver, processors, queues, connector, and exporters; inject crashes before/after enqueue and storage confirmation, including node loss, and record acknowledged-but-lost data and the supported failure envelope.
@@ -83,8 +87,10 @@ Experiment 018 verified the stock counters during outages
 (`otelcol_exporter_send_failed_log_records`,
 `otelcol_exporter_enqueue_failed_log_records`, `otelcol_exporter_queue_size`,
 `otelcol_receiver_refused_log_records`, and the failover/`awss3` queue labels).
-No stock overflow-object backlog or catch-up progress metric exists; those
-signals must come from outside the stock pipeline. See
+No overflow-object backlog or catch-up progress metric appeared in this
+topology's scrapes (a statement about the tested configuration, not proof that no
+stock component can expose one); such signals must come from outside the tested
+pipeline. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 
 == PoC-required: reconstruction and recovery decision
