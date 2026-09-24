@@ -2,19 +2,27 @@
 #
 # Orb setup for lighthouse.
 #
-# Installs current upstream stable Nix (single-user, so no system daemon has to
-# stay alive across orb pause/resume) and realizes the repository's flake
-# development shell. The complete shell environment is then persisted into
-# ~/.bash_profile, because Amp and supervised services start in non-interactive
-# login shells that never run `nix develop` themselves.
+# Installs the pinned upstream stable Nix release from its versioned artifact
+# (single-user, so no system daemon has to stay alive across orb pause/resume),
+# realizes the repository's flake development shell, and persists the complete
+# environment into ~/.bash_profile, because Amp and supervised services start in
+# non-interactive login shells that never run `nix develop` themselves.
 #
 # Non-interactive and idempotent: a warm run only re-checks its guards and reuses
 # the Nix store, profile, and login-shell hook from the snapshot.
 
 set -euo pipefail
 
-# Current upstream stable Nix, verified against https://nixos.org/download.
+# Pinned upstream stable Nix, verified against https://nixos.org/download. Bump
+# the version, version line, and checksum together; the checksum is the
+# published one for the versioned artifact:
+# https://releases.nixos.org/nix/nix-2.35.2/nix-2.35.2-x86_64-linux.tar.xz.sha256
 nix_version="2.35.2"
+nix_version_line="nix (Nix) ${nix_version}"
+nix_system="x86_64-linux"
+nix_tarball_sha256="0c3960a9792331a22081c3c7a5d8465db9b17c50b3acdf18587fa4c6f2cb1158"
+nix_tarball_url="https://releases.nixos.org/nix/nix-${nix_version}/nix-${nix_version}-${nix_system}.tar.xz"
+nix_work_dir=""
 
 nix_profile="${HOME}/.nix-profile"
 nix_bin="${nix_profile}/bin/nix"
@@ -35,25 +43,74 @@ step() {
   printf '[setup] %s (%ss)\n' "${label}" "$((SECONDS - step_started_at))"
 }
 
-install_nix() {
-  # The installer always fetches the current stable release, so a pinned version
-  # mismatch means the snapshot carries an older or newer Nix and must be
-  # refreshed.
-  local installed_version=""
-  if [[ -x "${nix_bin}" ]]; then
-    installed_version="$("${nix_bin}" --version 2>/dev/null || true)"
+installed_nix_version() {
+  [[ -x "${nix_bin}" ]] || return 0
+  "${nix_bin}" --version 2>/dev/null | head -n 1 || true
+}
+
+cleanup_nix_work_dir() {
+  if [[ -n "${nix_work_dir}" ]]; then
+    rm -rf "${nix_work_dir}"
+    nix_work_dir=""
   fi
-  if [[ "${installed_version}" == *"${nix_version}"* ]]; then
-    printf '[setup] Nix %s is already installed\n' "${nix_version}"
+}
+
+install_nix() {
+  if [[ "$(uname -m)" != "x86_64" ]]; then
+    printf '[setup] ERROR: only %s is pinned; host is %s\n' "${nix_system}" "$(uname -m)" >&2
+    return 1
+  fi
+
+  local installed_version
+  installed_version="$(installed_nix_version)"
+  if [[ "${installed_version}" == "${nix_version_line}" ]]; then
+    printf '[setup] %s is already installed\n' "${nix_version_line}"
     return 0
   fi
-  local installer
-  installer="$(mktemp)"
-  curl --proto '=https' --tlsv1.2 -sSfL https://nixos.org/nix/install -o "${installer}"
+
+  # Download the versioned artifact and verify its published checksum. The
+  # moving `latest stable` installer URL could otherwise change what a pinned
+  # setup script installs.
+  nix_work_dir="$(mktemp -d)"
+  # Remove the download and extraction on failure as well as on success.
+  trap cleanup_nix_work_dir EXIT
+
+  local tarball="${nix_work_dir}/nix-${nix_version}-${nix_system}.tar.xz"
+  printf '[setup] downloading %s\n' "${nix_tarball_url}"
+  curl --proto '=https' --tlsv1.2 -sSfL "${nix_tarball_url}" -o "${tarball}"
+
+  local actual_sha256
+  actual_sha256="$(sha256sum "${tarball}" | cut -d' ' -f1)"
+  if [[ "${actual_sha256}" != "${nix_tarball_sha256}" ]]; then
+    printf '[setup] ERROR: checksum mismatch for %s (expected %s, got %s)\n' \
+      "${nix_tarball_url}" "${nix_tarball_sha256}" "${actual_sha256}" >&2
+    return 1
+  fi
+
+  local unpack_dir="${nix_work_dir}/unpack"
+  mkdir -p "${unpack_dir}"
+  tar -xJf "${tarball}" -C "${unpack_dir}"
+
+  local installer="${unpack_dir}/nix-${nix_version}-${nix_system}/install"
+  if [[ ! -f "${installer}" ]]; then
+    printf '[setup] ERROR: installer is missing from %s\n' "${tarball}" >&2
+    return 1
+  fi
+
   # --no-daemon: single-user install, no daemon to restart after a resume.
   # --yes: the installer must never prompt during setup.
-  sh "${installer}" --no-daemon --yes
-  rm -f "${installer}"
+  INVOKED_FROM_INSTALL_IN=1 sh "${installer}" --no-daemon --yes
+
+  installed_version="$(installed_nix_version)"
+  if [[ "${installed_version}" != "${nix_version_line}" ]]; then
+    printf '[setup] ERROR: expected %s after install, got: %s\n' \
+      "${nix_version_line}" "${installed_version:-<no version>}" >&2
+    return 1
+  fi
+
+  cleanup_nix_work_dir
+  trap - EXIT
+  printf '[setup] installed %s\n' "${installed_version}"
 }
 
 configure_nix() {
