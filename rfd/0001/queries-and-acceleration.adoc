@@ -118,9 +118,86 @@ Acceleration creation is asynchronous and disposable:
    repeated tenant-field shape and estimate its build and storage cost.
 3. Activation is manual initially; later automatic activation is permitted only
    within tenant field-count, cardinality, storage, and backfill-CPU budgets.
-4. The planner uses an acceleration only inside its complete coverage watermark
-   and falls back to raw execution elsewhere.
+4. The planner uses an acceleration only when the eligibility and coverage
+   conditions below hold; otherwise the entire query uses raw execution.
 5. Unused accelerations expire without changing or expiring accepted events.
+
+== PoC acceleration correctness
+
+=== Eligibility and time boundaries
+
+All event-time ranges are half-open `[start, end)`. Aggregate routing requires
+both endpoints to align with stored bucket boundaries, including the bucket
+origin and timezone. For example, a five-minute rollup cannot answer 14:02–14:07
+by including complete 14:00 and 14:05 buckets. The PoC falls back to raw for the
+whole query rather than rounding its bounds or combining raw edges with rollups.
+Time-bucket restrictions apply to bucketed aggregates, not a timestamp-preserving
+equality index, which must still enforce the exact requested range.
+
+Eligibility also requires matching workspace/dataset, field namespaces and types,
+filters, grouping dimensions, aggregate algorithm/version, and sampling treatment.
+A rollup without a requested filter dimension is ineligible even if its time
+coverage is current. An approximate aggregate cannot satisfy an exact request.
+Check null/presence semantics and contributing counts, not just function names.
+Expose the selected path and fallback reason in query diagnostics.
+
+Raw fallback retains scan, memory, and deadline limits. If raw execution exceeds
+policy, return a clear limit error; do not return a fast but semantically different
+aggregate. Combining raw and accelerated ranges is a later optimization.
+
+=== Coverage and live maintenance
+
+Coverage describes a declared set of stored source records, not a promise that
+every producer has delivered every event for an event-time interval. Maximum
+event timestamp and healthy shard responses are insufficient coverage evidence.
+The Collector-first path has no assumed global log offset: specify a verifiable
+source generation or ingestion boundary and per-destination progress before
+claiming a derived path matches the raw source. Do not invent a watermark from
+the latest timestamp or from an empty overflow queue.
+
+Maintain acceleration states `building`, `ready`, `stale/failed`, and `retired`.
+Only `ready` generations are eligible. Define how late events, normal writes,
+overflow catch-up, retries, and deletions update derived data or invalidate
+eligibility before raw/derived divergence can be served as equivalent. A bucket
+does not become immutable merely because its event time is old. If the selected
+mechanism cannot prove safe live maintenance, keep that acceleration unavailable
+for affected queries and serve raw; do not silently keep using its old results.
+
+First validate a bounded stable fixture, then add concurrent ingestion. Backfill
+must identify an exact source set and a non-overlapping handoff to subsequent
+updates. Choose and test the handoff mechanism for the selected Collector/exporter
+path; timestamp-only cutoffs cannot distinguish late arrivals. Where no reliable
+online boundary exists, the PoC may use a controlled pause/drain for the initial
+build and must report that limitation rather than claiming online backfill.
+
+Build into an isolated generation, validate it, and publish its eligibility only
+after all required destinations succeed. A failed build must not expose partial
+states. Pin the selected generation for an in-flight query so activation or
+retirement cannot combine generations mid-response. Retry safety must include
+aggregate states; repairing duplicate base rows does not undo double-counted sums.
+
+Unknown upstream delivery coverage remains unknown even if raw and accelerated
+results agree. The PoC rejects execution with a missing required shard rather
+than returning an unlabeled partial success. Normal queries may describe results
+as covering currently materialized data with explicit freshness/recovery caveats;
+a caller requiring proven source completeness must receive an error when that
+proof is unavailable. Raw fallback cannot repair data that has not arrived.
+
+=== Validation independent of aggregate implementation
+
+Use deterministic asymmetric fixtures with expected values computed independently
+of the SQL paths. Test just before/at/after bucket boundaries, adjacent ranges,
+non-aligned ranges, unsupported filters, mixed observed types, and unequal shard
+populations. Test late and duplicate arrivals during backfill, overflow catch-up,
+builder failure, activation, and retirement. Compare against the same declared
+source set rather than two queries racing against changing ingestion.
+
+Counts and integer sums require exact checks. Histograms require bin-level checks;
+percentiles require a documented algorithm-specific tolerance against a known
+distribution, not just count/sum anchors or identical state serialization. Verify
+rate normalization and time-by-duration heatmaps separately from bucket counts
+and a single duration histogram. Existing benchmark correctness checks remain
+useful anchors, not proof of these additional semantics.
 
 == Exact and approximate modes
 
