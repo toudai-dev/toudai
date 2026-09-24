@@ -1,0 +1,173 @@
+otel_logs	Timestamp	DateTime64(9)
+otel_logs	TraceId	String
+otel_logs	SpanId	String
+otel_logs	TraceFlags	UInt8
+otel_logs	SeverityText	LowCardinality(String)
+otel_logs	SeverityNumber	UInt8
+otel_logs	ServiceName	LowCardinality(String)
+otel_logs	Body	String
+otel_logs	ResourceSchemaUrl	LowCardinality(String)
+otel_logs	ResourceAttributes	Map(LowCardinality(String), String)
+otel_logs	ScopeSchemaUrl	LowCardinality(String)
+otel_logs	ScopeName	String
+otel_logs	ScopeVersion	LowCardinality(String)
+otel_logs	ScopeAttributes	Map(LowCardinality(String), String)
+otel_logs	LogAttributes	Map(LowCardinality(String), String)
+otel_logs	EventName	String
+otel_logs	__otel_materialized_k8s.cluster.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.container.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.deployment.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.namespace.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.node.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.pod.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.pod.uid	LowCardinality(String)
+otel_logs	__otel_materialized_deployment.environment.name	LowCardinality(String)
+otel_metrics_exponential_histogram	ResourceAttributes	Map(LowCardinality(String), String)
+otel_metrics_exponential_histogram	ResourceSchemaUrl	String
+otel_metrics_exponential_histogram	ScopeName	String
+otel_metrics_exponential_histogram	ScopeVersion	String
+otel_metrics_exponential_histogram	ScopeAttributes	Map(LowCardinality(String), String)
+otel_metrics_exponential_histogram	ScopeDroppedAttrCount	UInt32
+otel_metrics_exponential_histogram	ScopeSchemaUrl	String
+otel_metrics_exponential_histogram	ServiceName	LowCardinality(String)
+otel_metrics_exponential_histogram	MetricName	LowCardinality(String)
+otel_metrics_exponential_histogram	MetricDescription	String
+otel_metrics_exponential_histogram	MetricUnit	String
+otel_metrics_exponential_histogram	Attributes	Map(LowCardinality(String), String)
+otel_metrics_exponential_histogram	StartTimeUnix	DateTime
+otel_metrics_exponential_histogram	TimeUnix	DateTime
+otel_metrics_exponential_histogram	Count	UInt64
+otel_metrics_exponential_histogram	Sum	Float64
+otel_metrics_exponential_histogram	Scale	Int32
+otel_metrics_exponential_histogram	ZeroCount	UInt64
+otel_metrics_exponential_histogram	PositiveOffset	Int32
+otel_metrics_exponential_histogram	PositiveBucketCounts	Array(UInt64)
+otel_metrics_exponential_histogram	NegativeOffset	Int32
+otel_metrics_exponential_histogram	NegativeBucketCounts	Array(UInt64)
+otel_metrics_exponential_histogram	Exemplars.FilteredAttributes	Array(Map(LowCardinality(String), String))
+otel_metrics_exponential_histogram	Exemplars.TimeUnix	Array(DateTime)
+otel_metrics_exponential_histogram	Exemplars.Value	Array(Float64)
+otel_metrics_exponential_histogram	Exemplars.SpanId	Array(String)
+otel_metrics_exponential_histogram	Exemplars.TraceId	Array(String)
+otel_metrics_exponential_histogram	Flags	UInt32
+otel_metrics_exponential_histogram	Min	Float64
+otel_metrics_exponential_histogram	Max	Float64
+otel_metrics_exponential_histogram	AggregationTemporality	Int32
+otel_metrics_gauge	ResourceAttributes	Map(LowCardinality(String), String)
+otel_metrics_gauge	ResourceSchemaUrl	String
+otel_metrics_gauge	ScopeName	String
+otel_metrics_gauge	ScopeVersion	String
+otel_metrics_gauge	ScopeAttributes	Map(LowCardinality(String), String)
+otel_metrics_gauge	ScopeDroppedAttrCount	UInt32
+otel_metrics_gauge	ScopeSchemaUrl	String
+otel_metrics_gauge	ServiceName	LowCardinality(String)
+otel_metrics_gauge	MetricName	LowCardinality(String)
+otel_metrics_gauge	MetricDescription	String
+otel_metrics_gauge	MetricUnit	String
+otel_metrics_gauge	Attributes	Map(LowCardinality(String), String)
+otel_metrics_gauge	StartTimeUnix	DateTime
+otel_metrics_gauge	TimeUnix	DateTime
+otel_metrics_gauge	Value	Float64
+otel_metrics_gauge	Flags	UInt32
+otel_metrics_gauge	Exemplars.FilteredAttributes	Array(Map(LowCardinality(String), String))
+otel_metrics_gauge	Exemplars.TimeUnix	Array(DateTime)
+otel_metrics_gauge	Exemplars.Value	Array(Float64)
+otel_metrics_gauge	Exemplars.SpanId	Array(String)
+otel_metrics_gauge	Exemplars.TraceId	Array(String)
+otel_metrics_histogram	ResourceAttributes	Map(LowCardinality(String), String)
+otel_metrics_histogram	ResourceSchemaUrl	String
+otel_metrics_histogram	ScopeName	String
+otel_metrics_histogram	ScopeVersion	String
+otel_metrics_histogram	ScopeAttributes	Map(LowCardinality(String), String)
+otel_metrics_histogram	ScopeDroppedAttrCount	UInt32
+otel_metrics_histogram	ScopeSchemaUrl	String
+otel_metrics_histogram	ServiceName	LowCardinality(String)
+otel_metrics_histogram	MetricName	LowCardinality(String)
+otel_metrics_histogram	MetricDescription	String
+otel_metrics_histogram	MetricUnit	String
+otel_metrics_histogram	Attributes	Map(LowCardinality(String), String)
+otel_metrics_histogram	StartTimeUnix	DateTime
+otel_metrics_histogram	TimeUnix	DateTime
+otel_metrics_histogram	Count	UInt64
+otel_metrics_histogram	Sum	Float64
+otel_metrics_histogram	BucketCounts	Array(UInt64)
+otel_metrics_histogram	ExplicitBounds	Array(Float64)
+otel_metrics_histogram	Exemplars.FilteredAttributes	Array(Map(LowCardinality(String), String))
+otel_metrics_histogram	Exemplars.TimeUnix	Array(DateTime)
+otel_metrics_histogram	Exemplars.Value	Array(Float64)
+otel_metrics_histogram	Exemplars.SpanId	Array(String)
+otel_metrics_histogram	Exemplars.TraceId	Array(String)
+otel_metrics_histogram	Flags	UInt32
+otel_metrics_histogram	Min	Float64
+otel_metrics_histogram	Max	Float64
+otel_metrics_histogram	AggregationTemporality	Int32
+otel_metrics_sum	ResourceAttributes	Map(LowCardinality(String), String)
+otel_metrics_sum	ResourceSchemaUrl	String
+otel_metrics_sum	ScopeName	String
+otel_metrics_sum	ScopeVersion	String
+otel_metrics_sum	ScopeAttributes	Map(LowCardinality(String), String)
+otel_metrics_sum	ScopeDroppedAttrCount	UInt32
+otel_metrics_sum	ScopeSchemaUrl	String
+otel_metrics_sum	ServiceName	LowCardinality(String)
+otel_metrics_sum	MetricName	LowCardinality(String)
+otel_metrics_sum	MetricDescription	String
+otel_metrics_sum	MetricUnit	String
+otel_metrics_sum	Attributes	Map(LowCardinality(String), String)
+otel_metrics_sum	StartTimeUnix	DateTime
+otel_metrics_sum	TimeUnix	DateTime
+otel_metrics_sum	Value	Float64
+otel_metrics_sum	Flags	UInt32
+otel_metrics_sum	Exemplars.FilteredAttributes	Array(Map(LowCardinality(String), String))
+otel_metrics_sum	Exemplars.TimeUnix	Array(DateTime)
+otel_metrics_sum	Exemplars.Value	Array(Float64)
+otel_metrics_sum	Exemplars.SpanId	Array(String)
+otel_metrics_sum	Exemplars.TraceId	Array(String)
+otel_metrics_sum	AggregationTemporality	Int32
+otel_metrics_sum	IsMonotonic	Bool
+otel_metrics_summary	ResourceAttributes	Map(LowCardinality(String), String)
+otel_metrics_summary	ResourceSchemaUrl	String
+otel_metrics_summary	ScopeName	String
+otel_metrics_summary	ScopeVersion	String
+otel_metrics_summary	ScopeAttributes	Map(LowCardinality(String), String)
+otel_metrics_summary	ScopeDroppedAttrCount	UInt32
+otel_metrics_summary	ScopeSchemaUrl	String
+otel_metrics_summary	ServiceName	LowCardinality(String)
+otel_metrics_summary	MetricName	LowCardinality(String)
+otel_metrics_summary	MetricDescription	String
+otel_metrics_summary	MetricUnit	String
+otel_metrics_summary	Attributes	Map(LowCardinality(String), String)
+otel_metrics_summary	StartTimeUnix	DateTime
+otel_metrics_summary	TimeUnix	DateTime
+otel_metrics_summary	Count	UInt64
+otel_metrics_summary	Sum	Float64
+otel_metrics_summary	ValueAtQuantiles.Quantile	Array(Float64)
+otel_metrics_summary	ValueAtQuantiles.Value	Array(Float64)
+otel_metrics_summary	Flags	UInt32
+otel_traces	Timestamp	DateTime64(9)
+otel_traces	TraceId	String
+otel_traces	SpanId	String
+otel_traces	ParentSpanId	String
+otel_traces	TraceState	String
+otel_traces	SpanName	LowCardinality(String)
+otel_traces	SpanKind	LowCardinality(String)
+otel_traces	ServiceName	LowCardinality(String)
+otel_traces	ResourceAttributes	Map(LowCardinality(String), String)
+otel_traces	ScopeName	String
+otel_traces	ScopeVersion	String
+otel_traces	SpanAttributes	Map(LowCardinality(String), String)
+otel_traces	Duration	UInt64
+otel_traces	StatusCode	LowCardinality(String)
+otel_traces	StatusMessage	String
+otel_traces	Events.Timestamp	Array(DateTime64(9))
+otel_traces	Events.Name	Array(LowCardinality(String))
+otel_traces	Events.Attributes	Array(Map(LowCardinality(String), String))
+otel_traces	Links.TraceId	Array(String)
+otel_traces	Links.SpanId	Array(String)
+otel_traces	Links.TraceState	Array(String)
+otel_traces	Links.Attributes	Array(Map(LowCardinality(String), String))
+otel_traces_trace_id_ts	TraceId	String
+otel_traces_trace_id_ts	Start	DateTime
+otel_traces_trace_id_ts	End	DateTime
+otel_traces_trace_id_ts_mv	TraceId	String
+otel_traces_trace_id_ts_mv	Start	DateTime64(9)
+otel_traces_trace_id_ts_mv	End	DateTime64(9)

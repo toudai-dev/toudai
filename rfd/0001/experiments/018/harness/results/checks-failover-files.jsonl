@@ -1,0 +1,11 @@
+{"name": "failover.overflow_keys_after_outage", "expected": "1", "observed": "1", "ok": true, "probe": "1"}
+{"name": "failover.overflow_key_prefix", "expected": "overflow", "observed": "overflow", "ok": true, "probe": "overflow"}
+{"name": "failover.overflow_object_workspace", "expected": "11111111-1111-4111-8111-111111111111", "observed": "11111111-1111-4111-8111-111111111111", "ok": true, "probe": "11111111-1111-4111-8111-111111111111"}
+{"name": "failover.overflow_object_bodies", "expected": "fault-log-0,fault-log-1", "observed": "fault-log-0,fault-log-1", "ok": true, "probe": "fault-log-0,fault-log-1"}
+{"name": "failover.quarantine_file_empty", "expected": "no-records", "observed": "no-records", "ok": true, "probe": "no-records"}
+{"name": "failover.outage_queued_ack_status", "expected": "200", "observed": "200", "ok": true, "probe": "200"}
+{"name": "failover.outage_queued_ack_ms", "expected": null, "observed": "3.32", "ok": true, "probe": "3.32"}
+{"name": "failover.outage_sync_ack_status", "expected": "200", "observed": "200", "ok": true, "probe": "200"}
+{"name": "failover.outage_sync_ack_ms", "expected": null, "observed": "1246.31", "ok": true, "probe": "1246.31"}
+{"name": "failover.sync_ack_waits_for_destination", "expected": "True", "observed": "True", "ok": true, "probe": "True"}
+{"name": "failover.overflow_objects_after_sync_outage", "expected": "2", "observed": "2", "ok": true, "probe": "2"}

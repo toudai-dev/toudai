@@ -1,0 +1,87 @@
+{"name": "typed.log.row_count", "expected": "9", "observed": "9", "ok": true, "probe": "SELECT count() FROM lh018.otel_logs"}
+{"name": "typed.log.timestamp_ns_precision", "expected": "2026-09-01 07:00:00.123456789", "observed": "2026-09-01 07:00:00.123456789", "ok": true, "probe": "SELECT toString(Timestamp) FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.service_name", "expected": "fixture-log-service", "observed": "fixture-log-service", "ok": true, "probe": "SELECT ServiceName FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.no_service_name_is_empty", "expected": "", "observed": "", "ok": true, "probe": "SELECT ServiceName FROM lh018.otel_logs WHERE Body='no-service-name-log'"}
+{"name": "typed.log.resource_schema_url", "expected": "https://opentelemetry.io/schemas/1.39.0", "observed": "https://opentelemetry.io/schemas/1.39.0", "ok": true, "probe": "SELECT ResourceSchemaUrl FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.scope_schema_url", "expected": "https://opentelemetry.io/schemas/1.39.0", "observed": "https://opentelemetry.io/schemas/1.39.0", "ok": true, "probe": "SELECT ScopeSchemaUrl FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.scope_name", "expected": "lighthouse.fixture", "observed": "lighthouse.fixture", "ok": true, "probe": "SELECT ScopeName FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.scope_version", "expected": "0.1.0", "observed": "0.1.0", "ok": true, "probe": "SELECT ScopeVersion FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.scope_attr_string", "expected": "scope-value", "observed": "scope-value", "ok": true, "probe": "SELECT ScopeAttributes['scope.attr'] FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.scope_attr_int_stringified", "expected": "7", "observed": "7", "ok": true, "probe": "SELECT ScopeAttributes['scope.int'] FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.scope_empty_present", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT mapContains(ScopeAttributes,'scope.empty') FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.res.int_above_2_53", "expected": "9007199254740993", "observed": "9007199254740993", "ok": true, "probe": "SELECT ResourceAttributes['res.int64'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.bool", "expected": "true", "observed": "true", "ok": true, "probe": "SELECT ResourceAttributes['res.bool'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.float_int_like", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT ResourceAttributes['res.float'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.string_one", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT ResourceAttributes['res.str_one'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.bytes", "expected": "AAH+/w==", "observed": "AAH+/w==", "ok": true, "probe": "SELECT ResourceAttributes['res.bytes'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.array", "expected": "[\"a\",1,true]", "observed": "[\"a\",1,true]", "ok": true, "probe": "SELECT ResourceAttributes['res.array'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.map", "expected": "{\"nested.bool\":false,\"nested.int\":2}", "observed": "{\"nested.bool\":false,\"nested.int\":2}", "ok": true, "probe": "SELECT ResourceAttributes['res.map'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.empty_present", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT mapContains(ResourceAttributes,'res.empty') FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.res.empty_is_empty_string", "expected": "", "observed": "", "ok": true, "probe": "SELECT ResourceAttributes['res.empty'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.empty_string_is_empty_string", "expected": "", "observed": "", "ok": true, "probe": "SELECT ResourceAttributes['res.empty_string'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.case_sensitive_upper", "expected": "resource-upper", "observed": "resource-upper", "ok": true, "probe": "SELECT ResourceAttributes['Foo'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.res.case_sensitive_lower", "expected": "resource-lower", "observed": "resource-lower", "ok": true, "probe": "SELECT ResourceAttributes['foo'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.namespace.resource_collide", "expected": "resource-value", "observed": "resource-value", "ok": true, "probe": "SELECT ResourceAttributes['res.collide'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.namespace.record_collide", "expected": "record-value", "observed": "record-value", "ok": true, "probe": "SELECT LogAttributes['collide'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.int_big", "expected": "9007199254740993", "observed": "9007199254740993", "ok": true, "probe": "SELECT LogAttributes['int.big'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.int_negative", "expected": "-7", "observed": "-7", "ok": true, "probe": "SELECT LogAttributes['int.neg'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.double_int_like", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT LogAttributes['double.one'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.double_half", "expected": "1.5", "observed": "1.5", "ok": true, "probe": "SELECT LogAttributes['double.half'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.double_nan", "expected": "NaN", "observed": "NaN", "ok": true, "probe": "SELECT LogAttributes['double.nan'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.double_posinf", "expected": "Infinity", "observed": "Infinity", "ok": true, "probe": "SELECT LogAttributes['double.posinf'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.double_neginf", "expected": "-Infinity", "observed": "-Infinity", "ok": true, "probe": "SELECT LogAttributes['double.neginf'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.bool_true", "expected": "true", "observed": "true", "ok": true, "probe": "SELECT LogAttributes['bool.true'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.bool_false", "expected": "false", "observed": "false", "ok": true, "probe": "SELECT LogAttributes['bool.false'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.string_one", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT LogAttributes['str.one'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.int_double_string_indistinguishable", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT LogAttributes['int.one'] = LogAttributes['double.one'] AND LogAttributes['str.one'] = LogAttributes['double.one'] FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.attr.empty_string_present", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT mapContains(LogAttributes,'str.empty') FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.attr.empty_string_value", "expected": "", "observed": "", "ok": true, "probe": "SELECT LogAttributes['str.empty'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.zero_int", "expected": "0", "observed": "0", "ok": true, "probe": "SELECT LogAttributes['zero.int'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.neg_zero_float", "expected": "-0", "observed": "-0", "ok": true, "probe": "SELECT LogAttributes['zero.float'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.bytes", "expected": "AAH+/w==", "observed": "AAH+/w==", "ok": true, "probe": "SELECT LogAttributes['bytes.raw'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.array", "expected": "[\"a\",1,true]", "observed": "[\"a\",1,true]", "ok": true, "probe": "SELECT LogAttributes['array.mixed'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.map", "expected": "{\"nested.bool\":false,\"nested.int\":2}", "observed": "{\"nested.bool\":false,\"nested.int\":2}", "ok": true, "probe": "SELECT LogAttributes['map.nested'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.json_like_string_collides_with_map", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT LogAttributes['str.json_like'] = LogAttributes['map.nested'] FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.attr.explicit_empty_present", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT mapContains(LogAttributes,'empty.value') FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.attr.explicit_empty_value", "expected": "", "observed": "", "ok": true, "probe": "SELECT LogAttributes['empty.value'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.missing_absent", "expected": "0", "observed": "0", "ok": true, "probe": "SELECT mapContains(LogAttributes,'missing.key') FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.attr.unicode", "expected": "h\u00e9llo\u2014\ud83c\udf0d", "observed": "h\u00e9llo\u2014\ud83c\udf0d", "ok": true, "probe": "SELECT LogAttributes['unicode'] FROM lh018.otel_logs WHERE Body = 'typed-log-1'"}
+{"name": "typed.attr.long_string_length", "expected": "1024", "observed": "1024", "ok": true, "probe": "SELECT length(LogAttributes['long.string']) FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.attr.duplicate_keys_lookup_returns_first", "expected": "first", "observed": "first", "ok": true, "probe": "SELECT LogAttributes['dup'] FROM lh018.otel_logs WHERE Body='duplicate-key-log'"}
+{"name": "typed.attr.duplicate_keys_both_stored", "expected": "2", "observed": "2", "ok": true, "probe": "SELECT countEqual(mapKeys(LogAttributes),'dup') FROM lh018.otel_logs WHERE Body='duplicate-key-log'"}
+{"name": "typed.attr.duplicate_keys_map_size", "expected": "3", "observed": "3", "ok": true, "probe": "SELECT length(LogAttributes) FROM lh018.otel_logs WHERE Body='duplicate-key-log'"}
+{"name": "typed.body.bytes_base64", "expected": "AAH+/w==", "observed": "AAH+/w==", "ok": true, "probe": "SELECT Body FROM lh018.otel_logs WHERE Body='AAH+/w=='"}
+{"name": "typed.body.int", "expected": "42", "observed": "42", "ok": true, "probe": "SELECT Body FROM lh018.otel_logs WHERE Body='42'"}
+{"name": "typed.body.map_json", "expected": "{\"k\":\"v\",\"n\":1}", "observed": "{\"k\":\"v\",\"n\":1}", "ok": true, "probe": "SELECT Body FROM lh018.otel_logs WHERE Body='{\"k\":\"v\",\"n\":1}'"}
+{"name": "typed.log.observed_timestamp_fallback", "expected": "2026-09-02 07:00:00.123456789", "observed": "2026-09-02 07:00:00.123456789", "ok": true, "probe": "SELECT toString(Timestamp) FROM lh018.otel_logs WHERE Body='timestamp-fallback-log'"}
+{"name": "typed.log.trace_id", "expected": "4bf92f3577b34da6a3ce929d0e0e4736", "observed": "4bf92f3577b34da6a3ce929d0e0e4736", "ok": true, "probe": "SELECT TraceId FROM lh018.otel_logs WHERE Body='trace-correlated-log'"}
+{"name": "typed.log.span_id", "expected": "00f067aa0ba902b7", "observed": "00f067aa0ba902b7", "ok": true, "probe": "SELECT SpanId FROM lh018.otel_logs WHERE Body='trace-correlated-log'"}
+{"name": "typed.log.trace_flags", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT TraceFlags FROM lh018.otel_logs WHERE Body='trace-correlated-log'"}
+{"name": "typed.log.event_name", "expected": "fixture.event", "observed": "fixture.event", "ok": true, "probe": "SELECT EventName FROM lh018.otel_logs WHERE Body='event-name-log'"}
+{"name": "typed.log.event_name_absent_is_empty", "expected": "", "observed": "", "ok": true, "probe": "SELECT EventName FROM lh018.otel_logs WHERE Body='typed-log-1'"}
+{"name": "typed.log.severity", "expected": "WARN\t13", "observed": "WARN\t13", "ok": true, "probe": "SELECT SeverityText, SeverityNumber FROM lh018.otel_logs WHERE LogAttributes['body.bytes.test']='yes'"}
+{"name": "typed.trace.row_count", "expected": "5", "observed": "5", "ok": true, "probe": "SELECT count() FROM lh018.otel_traces"}
+{"name": "typed.trace.duration_ok", "expected": "1500", "observed": "1500", "ok": true, "probe": "SELECT Duration FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.duration_zero", "expected": "0", "observed": "0", "ok": true, "probe": "SELECT Duration FROM lh018.otel_traces WHERE SpanName='span/zero-duration'"}
+{"name": "typed.trace.duration_negative_underflow", "expected": "18446744073709550616", "observed": "18446744073709550616", "ok": true, "probe": "SELECT Duration FROM lh018.otel_traces WHERE SpanName='span/negative-duration'"}
+{"name": "typed.trace.duration_missing_timestamps", "expected": "0", "observed": "0", "ok": true, "probe": "SELECT Duration FROM lh018.otel_traces WHERE SpanName='span/no-timestamps'"}
+{"name": "typed.trace.span_int", "expected": "9007199254740993", "observed": "9007199254740993", "ok": true, "probe": "SELECT SpanAttributes['span.int'] FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.span_bool", "expected": "true", "observed": "true", "ok": true, "probe": "SELECT SpanAttributes['span.bool'] FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.span_str", "expected": "1", "observed": "1", "ok": true, "probe": "SELECT SpanAttributes['span.str'] FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.span_bytes", "expected": "AAH+/w==", "observed": "AAH+/w==", "ok": true, "probe": "SELECT SpanAttributes['span.bytes'] FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.span_map", "expected": "{\"nested\":\"v\"}", "observed": "{\"nested\":\"v\"}", "ok": true, "probe": "SELECT SpanAttributes['span.map'] FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.event", "expected": "['span/event']\t[{'ev.attr':'e'}]", "observed": "['span/event']\t[{'ev.attr':'e'}]", "ok": true, "probe": "SELECT Events.Name, Events.Attributes FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.link", "expected": "['00f067aa0ba90201']\t['l=1']\t[{'link.attr':'1'}]", "observed": "['00f067aa0ba90201']\t['l=1']\t[{'link.attr':'1'}]", "ok": true, "probe": "SELECT Links.SpanId, Links.TraceState, Links.Attributes FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.trace_state", "expected": "vendor=value", "observed": "vendor=value", "ok": true, "probe": "SELECT TraceState FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.kind", "expected": "Server", "observed": "Server", "ok": true, "probe": "SELECT SpanKind FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.status", "expected": "Ok", "observed": "Ok", "ok": true, "probe": "SELECT StatusCode FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.parent_span_id", "expected": "00f067aa0ba90200", "observed": "00f067aa0ba90200", "ok": true, "probe": "SELECT ParentSpanId FROM lh018.otel_traces WHERE SpanName='span/ok'"}
+{"name": "typed.trace.no_scope_attributes_column", "expected": "0", "observed": "0", "ok": true, "probe": "SELECT count() FROM system.columns WHERE database='lh018' AND table='otel_traces' AND name='ScopeAttributes'"}
+{"name": "typed.trace.scope_name_present", "expected": "lighthouse.fixture.spans", "observed": "lighthouse.fixture.spans", "ok": true, "probe": "SELECT ScopeName FROM lh018.otel_traces WHERE SpanName='span/scope-attrs'"}
+{"name": "typed.metrics.gauge_tables", "expected": "5", "observed": "5", "ok": true, "probe": "SELECT count() FROM system.tables WHERE database='lh018' AND name LIKE 'otel_metrics%'"}
+{"name": "typed.metrics.gauge_value", "expected": "1.5", "observed": "1.5", "ok": true, "probe": "SELECT Value FROM lh018.otel_metrics_gauge WHERE MetricName='fixture.gauge' AND Attributes['metric.attr']='g'"}
+{"name": "typed.metrics.gauge_int_above_2_53_becomes_float64", "expected": "9007199254740992", "observed": "9007199254740992", "ok": true, "probe": "SELECT Value FROM lh018.otel_metrics_gauge WHERE MetricName='fixture.gauge' AND Attributes['metric.attr']='g-int'"}
+{"name": "typed.metrics.gauge_attr", "expected": "g", "observed": "g", "ok": true, "probe": "SELECT Attributes['metric.attr'] FROM lh018.otel_metrics_gauge WHERE MetricName='fixture.gauge' AND Attributes['metric.attr']='g'"}
+{"name": "typed.metrics.gauge_scope_attr_present", "expected": "7", "observed": "7", "ok": true, "probe": "SELECT ScopeAttributes['scope.int'] FROM lh018.otel_metrics_gauge WHERE MetricName='fixture.gauge' AND Attributes['metric.attr']='g'"}
+{"name": "typed.metrics.sum", "expected": "42\ttrue\t2", "observed": "42\ttrue\t2", "ok": true, "probe": "SELECT Value, IsMonotonic, AggregationTemporality FROM lh018.otel_metrics_sum WHERE MetricName='fixture.counter'"}
+{"name": "typed.metrics.histogram", "expected": "3\t6\t[1,1,1]\t[1,2]\t0.5\t2.5", "observed": "3\t6\t[1,1,1]\t[1,2]\t0.5\t2.5", "ok": true, "probe": "SELECT Count, Sum, BucketCounts, ExplicitBounds, Min, Max FROM lh018.otel_metrics_histogram WHERE MetricName='fixture.histogram'"}

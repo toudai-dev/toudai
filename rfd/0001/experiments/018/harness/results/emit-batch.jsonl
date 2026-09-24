@@ -1,0 +1,1 @@
+{"signal": "logs", "label": "batch", "description": "six records in one request for rebatching observation", "url": "http://127.0.0.1:4318/v1/logs", "status": 200, "elapsed_ms": 3.96, "response_body": "\n", "request_bytes": 950, "started_at": "2026-09-24T16:53:57.546989+00:00", "sent_at": "2026-09-24T16:53:57.575544+00:00"}

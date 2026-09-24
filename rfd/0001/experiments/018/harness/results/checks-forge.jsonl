@@ -1,0 +1,2 @@
+{"name": "forge.producer_header_overrides_owner", "expected": "22222222-2222-4222-8222-222222222222", "observed": "22222222-2222-4222-8222-222222222222", "ok": true, "probe": "SELECT ResourceAttributes['lighthouse.workspace_id'] FROM lh018.otel_logs WHERE Body='identity-forge-log'"}
+{"name": "forge.auth_context_absent", "expected": "0", "observed": "0", "ok": true, "probe": "SELECT mapContains(LogAttributes,'lighthouse.auth_identity') FROM lh018.otel_logs WHERE Body='identity-forge-log'"}

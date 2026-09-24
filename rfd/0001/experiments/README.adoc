@@ -112,4 +112,8 @@ conditions. Add a new run or record and link the relationship.
 |Completed
 |link:017-query-index-efficiency-audit.adoc[Query and index efficiency audit]
 
+|018
+|Completed
+|link:018-collector-compatibility.adoc[Collector compatibility and acknowledgement boundaries]
+
 |===
