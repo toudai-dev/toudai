@@ -136,7 +136,7 @@ realize_dev_shell() {
   local lock_before
   lock_before="$(flake_lock_hash)"
   if ! "${nix_bin}" develop --no-update-lock-file "${repo_root}" --command true; then
-    printf '[setup] ERROR: cannot realize the development shell without updating flake.lock; run `nix flake update` and commit it\n' >&2
+    printf '[setup] ERROR: cannot realize the development shell without updating flake.lock; run nix flake update and commit it\n' >&2
     return 1
   fi
   if [[ "$(flake_lock_hash)" != "${lock_before}" ]]; then
@@ -173,28 +173,66 @@ EOF
 
 verify_login_shell() {
   # A minimal environment and a fresh login shell prove the persisted hook, not
-  # this script's own environment.
+  # this script's own environment. Assert the activation marker and that every
+  # development tool resolves from /nix/store, so host tools with the same names
+  # (curl, make, ...) cannot satisfy the check on their own.
+  local lock_before
+  lock_before="$(flake_lock_hash)"
   local report
   # shellcheck disable=SC2016  # the inner script must expand in the login shell
   if ! report="$(cd "${repo_root}" && env -i HOME="${HOME}" USER="${USER}" TERM=dumb /bin/bash -lc '
-    missing=""
-    for tool in cargo rustc cargo-clippy rustfmt rust-analyzer clickhouse goose buf protoc git-cliff asciidoctor docker-compose docker-buildx fio jq tofu packer sar; do
-      command -v "${tool}" >/dev/null 2>&1 || missing="${missing} ${tool}"
+    printf "marker:LIGHTHOUSE_NIX_DEV_ENV=%s IN_NIX_SHELL=%s\n" "${LIGHTHOUSE_NIX_DEV_ENV:-unset}" "${IN_NIX_SHELL:-unset}"
+    printf "nix-bin:%s\n" "$(command -v nix 2>/dev/null || echo missing)"
+    printf "path-head:%s\n" "${PATH%%:*}"
+    for tool in cargo rustc cargo-clippy clippy-driver rustfmt rust-analyzer clickhouse goose buf protoc git-cliff asciidoctor docker-compose docker-buildx fio jq tofu packer sar iostat mpstat; do
+      resolved="$(command -v "${tool}" 2>/dev/null || true)"
+      case "${resolved}" in
+        /nix/store/*) printf "nix-tool:%s=%s\n" "${tool}" "${resolved}" ;;
+        "") printf "missing-tool:%s\n" "${tool}" ;;
+        *) printf "host-tool:%s=%s\n" "${tool}" "${resolved}" ;;
+      esac
     done
-    [[ -n "${missing}" ]] && printf "missing:%s\n" "${missing}"
-    printf "rustc: %s\n" "$(rustc --version)"
-    printf "clickhouse: %s\n" "$(clickhouse local --version | head -n 1)"
-    printf "tofu: %s\n" "$(tofu version | head -n 1)"
-    printf "fio: %s\n" "$(fio --version)"
+    for tool in git python3 sudo; do
+      printf "host-path:%s=%s\n" "${tool}" "$(command -v "${tool}" 2>/dev/null || echo missing)"
+    done
   ')"; then
-    printf '[setup] ERROR: fresh login shell could not load the development shell\n' >&2
+    printf '[setup] ERROR: fresh login shell could not run the activation check\n' >&2
     return 1
   fi
   printf '%s\n' "${report}" | sed 's/^/[setup] /'
-  if [[ "${report}" == *"missing:"* ]]; then
-    printf '[setup] ERROR: fresh login shell is missing required tools\n' >&2
-    return 1
+  printf '[setup] %s development tools resolved from /nix/store\n' \
+    "$(printf '%s\n' "${report}" | grep -c '^nix-tool:')"
+
+  local failed=0
+  if [[ "${report}" != *"marker:LIGHTHOUSE_NIX_DEV_ENV=1 "* ]] || [[ "${report}" == *"IN_NIX_SHELL=unset"* ]]; then
+    printf '[setup] ERROR: login shell did not activate the development shell\n' >&2
+    failed=1
   fi
+  if [[ "${report}" != *"nix-bin:${nix_bin}"* ]]; then
+    printf '[setup] ERROR: login shell cannot resolve %s\n' "${nix_bin}" >&2
+    failed=1
+  fi
+  if [[ "${report}" != *"path-head:/nix/store/"* ]]; then
+    printf '[setup] ERROR: development shell paths do not take precedence in the login shell\n' >&2
+    failed=1
+  fi
+  if [[ "${report}" == *"missing-tool:"* ]]; then
+    printf '[setup] ERROR: development shell tools are missing from the login shell\n' >&2
+    failed=1
+  fi
+  if [[ "${report}" == *"host-tool:"* ]]; then
+    printf '[setup] ERROR: development shell tools resolved outside /nix/store\n' >&2
+    failed=1
+  fi
+  if [[ "${report}" == *"host-path:missing"* ]]; then
+    printf '[setup] ERROR: host tools the repository scripts use are unreachable\n' >&2
+    failed=1
+  fi
+  if [[ "$(flake_lock_hash)" != "${lock_before}" ]]; then
+    printf '[setup] ERROR: flake.lock changed while activating the login shell\n' >&2
+    failed=1
+  fi
+  [[ "${failed}" == 0 ]]
 }
 
 step "install upstream Nix ${nix_version}" install_nix
