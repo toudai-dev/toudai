@@ -74,6 +74,22 @@ remain to be verified.
   `LIMIT`, not fewer planned time-range granules. Service-first ordering retained
   a service-filter pruning advantage. Reconstructed plans do not replace
   unavailable original part or granule counts.
+* link:experiments/018-collector-compatibility.adoc[Experiment 018] exercised the
+  stock Collector path (otelcol-contrib v0.161.0, ClickHouse 26.8.2.7-lts) with a
+  deterministic OTLP fixture: 179/179 checks passed. Resource/scope/record
+  namespaces, timestamps, trace correlation, and metric structure survive, but
+  the stock ClickHouse schema stores every attribute as a string `Map`, so
+  integer/double/string, explicit-empty/empty-string, and bytes/array/map
+  identity are lost, duplicate keys are stored twice, and span scope attributes
+  are dropped. A static credential-to-workspace binding through the routing
+  connector survived batching, overflow, and replay and could not be overridden
+  by producer attributes, but the authenticated identity is not exposed to
+  processors, so dynamic key resolution and rotation/revocation remain custom
+  work. OTLP success is queue admission at the first enabled queue (exporter
+  helper, failover connector, or destination write); a permanent schema error
+  produced producer-visible success followed by retry and drop, a full queue
+  produced HTTP 503 with `enqueue_failed` counters, and replayed objects
+  duplicated rows. No stock overflow-backlog or catch-up progress metric exists.
 
 The acceleration correctness checks compare exact outputs for selected filter
 and rate fixtures, but only sample-count and duration-sum anchors for heatmaps
