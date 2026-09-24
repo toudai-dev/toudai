@@ -30,7 +30,8 @@ nix_conf="${HOME}/.config/nix/nix.conf"
 bash_profile="${HOME}/.bash_profile"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 flake_lock="${repo_root}/flake.lock"
-hook_marker="# lighthouse Nix development shell"
+hook_begin="# lighthouse Nix development shell"
+hook_end="# end lighthouse Nix development shell"
 
 setup_started_at=${SECONDS}
 step_started_at=${SECONDS}
@@ -145,17 +146,16 @@ realize_dev_shell() {
   fi
 }
 
-persist_login_shell() {
-  if grep -Fqx "${hook_marker}" "${bash_profile}" 2>/dev/null; then
-    printf '[setup] login-shell hook is already present\n'
-    return 0
-  fi
+render_hook_block() {
+  # Delimited so a later run can refresh the block in place instead of appending
+  # a duplicate when the snapshot is stale or the repository moved. The begin
+  # marker matches the single marker older snapshots wrote, so those blocks are
+  # recognized and replaced rather than duplicated.
   # print-dev-env keeps activation inside the login shell instead of spawning a
   # nested `nix develop` supervisor process. The IN_NIX_SHELL and marker guards
   # stop login shells started inside the development shell from re-activating.
-  cat >> "${bash_profile}" <<EOF
-
-${hook_marker}
+  cat <<EOF
+${hook_begin}
 if [[ -z "\${IN_NIX_SHELL:-}" && -z "\${LIGHTHOUSE_NIX_DEV_ENV:-}" && ( "\${PWD}" == "${repo_root}" || "\${PWD}" == "${repo_root}"/* ) ]]; then
   if [[ -e "${nix_profile}/etc/profile.d/nix.sh" ]]; then
     . "${nix_profile}/etc/profile.d/nix.sh"
@@ -168,7 +168,55 @@ if [[ -z "\${IN_NIX_SHELL:-}" && -z "\${LIGHTHOUSE_NIX_DEV_ENV:-}" && ( "\${PWD}
   fi
   unset __lighthouse_dev_env
 fi
+${hook_end}
 EOF
+}
+
+persist_login_shell() {
+  local block
+  block="$(render_hook_block)"
+
+  local begin_line
+  begin_line="$(grep -nF "${hook_begin}" "${bash_profile}" 2>/dev/null | head -n 1 | cut -d: -f1 || true)"
+  if [[ -z "${begin_line}" ]]; then
+    # First run in this snapshot: append without touching anything else.
+    printf '\n%s\n' "${block}" >> "${bash_profile}"
+    printf '[setup] appended the login-shell hook\n'
+    return 0
+  fi
+
+  local end_line
+  end_line="$(grep -nF "${hook_end}" "${bash_profile}" | head -n 1 | cut -d: -f1 || true)"
+  if [[ -z "${end_line}" ]] || [[ "${end_line}" -lt "${begin_line}" ]]; then
+    # Legacy or truncated block: it ends at its own top-level `fi`.
+    end_line="$(awk -v start="${begin_line}" 'NR > start && $0 == "fi" { print NR; exit }' "${bash_profile}")"
+  fi
+  if [[ -z "${end_line}" ]] || [[ "${end_line}" -lt "${begin_line}" ]]; then
+    end_line="$(wc -l < "${bash_profile}")"
+  fi
+
+  local current
+  current="$(sed -n "${begin_line},${end_line}p" "${bash_profile}")"
+  if [[ "${current}" == "${block}" ]]; then
+    printf '[setup] login-shell hook is current\n'
+    return 0
+  fi
+
+  # Replace only our block, preserving the mode and every unrelated line.
+  local tmp
+  tmp="$(mktemp "${bash_profile}.XXXXXX")"
+  {
+    head -n "$((begin_line - 1))" "${bash_profile}"
+    printf '%s\n' "${block}"
+    tail -n "+$((end_line + 1))" "${bash_profile}"
+  } > "${tmp}"
+  chmod --reference="${bash_profile}" "${tmp}"
+  mv "${tmp}" "${bash_profile}"
+  printf '[setup] refreshed the login-shell hook (lines %s-%s)\n' "${begin_line}" "${end_line}"
+
+  if [[ "$(grep -cF "${hook_begin}" "${bash_profile}")" -gt 1 ]]; then
+    printf '[setup] WARNING: multiple login-shell hook blocks are present; the extra blocks are inert\n' >&2
+  fi
 }
 
 verify_login_shell() {
