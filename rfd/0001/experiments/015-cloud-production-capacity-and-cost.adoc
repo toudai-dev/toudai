@@ -167,16 +167,23 @@ overhead obscuring the trend.
 
 === Stage C: production candidate
 
-Run the likely production topology, initially expected to be approximately:
+Following the Collector-first PoC decision, start replicated validation at 2x2.
+Use the small-fixture gates in link:../replication-and-recovery.adoc[the replication plan]
+before large-corpus production qualification. Expand to 4x2 only against a named
+capacity or degraded-operation gate that the smaller topology cannot meet:
 
 [source,text]
 ----
-4 shards x 2 replicas
+2 shards x 2 replicas (4 x 2 only if measurements justify expansion)
 2 query coordinators or equivalent query entry points
-durable stream and immutable object archive
+3-member Keeper quorum with declared failure-domain placement
+OTel Collector gateways, object-store overflow and catch-up
 local-NVMe hot serving tier
-object-backed exact payload and replay tier
+canonical payload retention and tested backup/restore
 ----
+
+Independent all-event archival remains a separate recovery decision. Overflow
+does not contain normal-path events and cannot substitute for a complete archive.
 
 Test a low-latency same-zone placement baseline, then the intended failure-domain
 layout with replicas separated across zones. Record replication lag, cross-zone

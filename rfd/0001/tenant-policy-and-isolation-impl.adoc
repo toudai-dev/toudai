@@ -27,6 +27,8 @@ tests follow the working raw and accelerated paths.
 
 == PoC-required: bounded exploration and work
 
+* [ ] Implement bounded single-authority admission and versioned policy caching; test unknown/expired policy, registry outage, revocation within the proposed 60-second staleness bound, queue exhaustion, and independent dashboard/raw budgets without claiming uncoordinated per-replica limits are global quotas.
+
 * [ ] Implement stream-derived field presence, type, cardinality, top-K, value-size, and growth-rate observations without enumerating high-cardinality values.
 
 * [ ] Implement bounded field-name and field-value catalogs.

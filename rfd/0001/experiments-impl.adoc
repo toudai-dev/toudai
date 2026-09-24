@@ -15,6 +15,26 @@ fixture, commands, expected results, and observed results under `experiments/`.
 Existing completed experiments remain characterization, not retroactive passes
 against those thresholds.
 
+The PoC workload manifest must name hardware, retained rows/bytes and time range,
+workspace skew, offered ingestion rate, burst duration, query mix, and clients.
+Proposed starting latency targets are p95 <= 2 seconds for eligible dashboards,
+p95 <= 5 seconds for bounded event/trace/payload lookup, and p95 <= 10 seconds
+producer-to-query freshness under healthy load. Raw exploration has a 30-second
+execution deadline and may return a limit error; do not classify that error as a
+successful latency sample. Target leaf cancellation within 5 seconds after the
+deadline and policy revocation propagation within 60 seconds. These are proposed
+PoC gates, not benchmark-derived guarantees or production SLOs.
+
+Choose offered rates, admission budgets, queue-wait limits, permitted error rate,
+overflow-drain/rebuild time, storage amplification, and the run-cost ceiling before
+execution. Until these are fixed, the workload is characterization, not a passing
+acceptance run. Record request/sample counts and distributions; require at least
+1,000 requests per evaluated interactive class for a provisional p95, and do not
+claim p99 qualification from that small run. Report offered/completed/rejected
+load, end-to-end queue plus execution latency, CPU/memory, merge pressure, and
+replica/overflow backlog. Under fault injection, separately report availability,
+loss/duplicates, and recovery; never omit failed requests to manufacture a pass.
+
 The remaining full-inventory, retained-volume, layout-comparison, and cold-tier
 tasks are later validation. Independent-host production capacity, provider
 comparisons, cross-zone failure domains, and long soaks are production

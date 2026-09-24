@@ -66,6 +66,35 @@ execution remains available when its estimated cost fits policy or as an
 asynchronous job. Dashboards and exploratory scans use separate workload
 classes so one tenant cannot consume the cluster.
 
+== PoC admission and policy availability
+
+Start with one logical admission authority and a static, versioned workspace
+policy configuration. Do not claim deployment-wide quotas by multiplying a
+per-process limit across Collector replicas. Before scaling admission, either
+partition the total budget explicitly or introduce coordinated enforcement.
+
+Separate hard limits (record/request bytes, queue capacity, concurrency, deadline,
+memory/result bounds) from asynchronously observed field growth/cardinality.
+Sketches and catalogs support estimates and alerts; they cannot guarantee a
+synchronous global field-count or cardinality quota. Bound catalog entry count,
+sketch count, and lifetime as well as each sketch's size. Unknown fields remain
+subject to record limits without requiring a metadata write on every event.
+
+Use a finite policy-cache lifetime; the initial proposed maximum is 60 seconds,
+to be tested as a PoC target rather than asserted as implemented. An unknown key,
+missing policy, or expired cached policy fails closed when the authority is
+unavailable. A valid cached snapshot may serve until expiry. Rotation/revocation
+tests must include the resulting staleness window. Deletion completion still
+requires the stronger barrier described below, not merely expiry of one cache.
+
+Bound queues and apply explicit rejection/backpressure when full. Separate
+dashboard and exploratory admission budgets so costly raw work cannot occupy
+all query slots. Enforce execution limits at ClickHouse leaves as well as the
+coordinator; a canceled HTTP request is not proof that leaf work stopped. Record
+rejected and timed-out requests alongside successful latency, and preserve
+observable counters during downstream outages. Choose numeric budgets in the
+experiment workload manifest before running tests, not after observing results.
+
 == Privacy and operations
 
 Sensitive fields are classified and redacted before downstream persistent queues,

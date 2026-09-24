@@ -16,23 +16,54 @@ before measurements show that fixed per-shard latency, fanout traffic, dataset
 placement requirements, or topology churn justify its versioned metadata and
 recovery complexity. Stable identities preserve that future option.
 
-Before a real multi-machine capacity test, a local native multi-instance
-ClickHouse harness will compare one, two, and four shards using actual
-`Distributed` protocol fanout and leaf-local aggregation. This simulation can
-validate sharding correctness, coordinator overhead, skew, cancellation, and
-partial-result metadata, but shared CPU, memory, storage, and loopback networking
-mean it cannot establish scale-out throughput or production recovery capacity.
+Experiment 014 completed local one/two/four-shard fanout and unavailable-shard
+tests. It did not establish slow-leaf cancellation or production recovery;
+shared resources prevented a realistic scale-out capacity measurement.
+Experiment 015 subsequently established independent-host, single-replica scaling.
+Neither experiment qualifies replicated serving under concurrent ingestion.
 
 Production sizing will then use staged cloud and dedicated-host measurements:
 an inexpensive 1 TB provider calibration, 1/2/4-shard scaling over the 10.81 TB
 corpus, a replicated failure-domain candidate, and a 24-to-72-hour ingestion and
-query soak. Cost comparisons include hot serving, replication, durable stream,
-object storage, cross-zone traffic, and source-cloud egress; cheaper compute
+query soak. Cost comparisons include hot serving, replication, Collector queues,
+overflow storage/notifications, backups, cross-zone traffic, and source-cloud egress; cheaper compute
 alone is not a production cost result.
+
+== Replicated PoC and failure scope
+
+Start with two shards and two replicas per shard, after the single-node vertical
+slice passes. Use `ReplicatedMergeTree` local tables, `Distributed` query fanout,
+and a three-member ClickHouse Keeper quorum with declared placement. A local
+multi-process topology tests process failures only; independent-host and zone
+resilience require tests on those actual failure domains. Record coordinator
+placement and replacement behavior as well as leaf and Keeper placement.
+
+Use ordinary one-replica-per-shard reads initially, no parallel replicas, and
+`skip_unavailable_shards=0`. Record stale-replica selection settings and measured
+freshness during failover. Test loss of one replica, one Keeper member, Keeper
+quorum, a coordinator, a slow leaf, and all replicas of one shard. Missing-shard
+queries fail rather than silently returning partial aggregates.
+
+Do not confuse exporter flush confirmation with two-copy durability. Pin the
+actual Collector insert route, async-insert settings, `internal_replication`
+where relevant, and insert quorum before testing acknowledgements. Compare the
+default asynchronous replication path with a two-replica acknowledgement policy
+only where the selected route supports it; the latter trades write availability
+for an additional confirmed copy. Select the production durability contract from
+the failure tests rather than infer it from the replica count.
+
+Freeze topology and workspace placement for the PoC. The growth discussion below
+is a later direction, not a supported migration procedure. Before resharding,
+define routing epochs or explicit migration/rebuild behavior for historical data,
+retries, late events, and derived storage. Adding replicas does not automatically
+accelerate a single query; moving to four shards/two replicas requires a named
+capacity, latency, disk-headroom, or degraded-operation gate that two/two cannot
+meet. Record the measured reason before provisioning the larger topology.
 
 == Distributed execution path
 
-Use a local MergeTree table per shard and expose one ClickHouse `Distributed`
+Use replicated local tables for the PoC; historical unreplicated benchmarks used
+ordinary `MergeTree`. Expose one ClickHouse `Distributed`
 table as the initial cluster-wide query path. A stable hash over tenant,
 dataset, and event identity spreads large tenants across all shards. Local
 servers scan and compute mergeable partial aggregates; the initiating server
