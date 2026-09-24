@@ -14,7 +14,9 @@ fixture expectations before using them as acceleration comparison anchors.
 
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
 
-* [ ] Implement and expose exact, approximate, and raw execution modes.
+* [ ] Implement independent accuracy, path, and completeness controls; table-test exact rollup selection, raw approximate execution with permission, unknown source coverage, missing execution shards, and budget failures without silent downgrade.
+
+* [ ] Preserve and validate known/unknown sampling metadata and provenance; test identical retained events with different declared probabilities produce unchanged observed-event aggregates and explicit adjustment=none, while invalid metadata and unsupported correction requests never produce falsely corrected results.
 
 * [ ] Return plan diagnostics including selected storage path and approximation mode.
 

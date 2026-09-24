@@ -39,9 +39,10 @@ metadata. Proprietary batch IDs and receipts are not required of OTel clients.
 
 Instrumentation libraries must be asynchronous, batched, compressed, and
 backpressure-aware. They expose accepted, rejected, retried, sampled, and
-dropped counts. They must not silently sample. Upstream-sampled events carry a
-probability or weight so aggregates can compensate and disclose that they did
-so.
+dropped counts. They must not silently sample. Preserve supplied upstream sampling
+metadata and provenance; missing probability/weight remains unknown. The PoC
+reports observed-event aggregates without automatic population extrapolation; see
+link:queries-and-acceleration.adoc#_upstream_sampling_and_observed_event_results[sampling semantics].
 
 Ingestion validates field count, field-name growth, event and string sizes,
 declared types, reserved fields, and sensitive-data policy before database or
@@ -186,8 +187,8 @@ at full resolution within declared retention. The Collector PoC must distinguish
 OTLP receipt/queue admission from confirmed storage and establish the supported
 failure envelope. Recovery uses retained canonical data and tested backups;
 overflow is not a complete archive. Independent all-event archival remains open. Producer
-drops or upstream sampling must be reported; sampled events carry an explicit
-sampling probability or weight. Approximate percentile, distinct-count, top-K,
+drops or upstream sampling must be reported where known; retain supplied sampling
+probabilities/weights without inventing them when absent. Approximate percentile, distinct-count, top-K,
 or histogram functions may be used for interactive execution, but this changes
 the aggregation algorithm rather than the retained data. Exact execution
 remains available with cost guardrails or as an asynchronous job.
@@ -231,7 +232,7 @@ common fields  event name, service, environment, region, host, build, severity
 trace context  trace ID, span ID, parent span ID, span kind, duration
 dimensions     sparse string, boolean, and integer fields
 measures       sparse integer and floating-point fields
-sampling       sampling probability or weight when sampling occurred upstream
+sampling       supplied probability/weight and provenance, or explicit unknown
 payload        exact canonical source event or immutable payload reference
 schema         envelope and field-policy versions
 ----

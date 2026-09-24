@@ -201,20 +201,55 @@ useful anchors, not proof of these additional semantics.
 
 == Exact and approximate modes
 
-* `auto`: use mergeable approximate states or raw approximate functions when
-  they satisfy the query.
-* `exact`: execute against full-resolution values with stricter cost limits.
-* `raw`: force raw-event execution for validation and forensic workflows.
+Use independent request controls rather than a single `auto`/`exact`/`raw` enum:
 
-Exact and approximate results must be clearly identified in API responses and
-query diagnostics.
+* `accuracy=exact|allow_approximate`: default to exact computation over the
+  declared input set. Approximate algorithms require explicit permission;
+  permission does not force approximation of counts or other exact operations.
+* `path=auto|raw`: default to automatic eligible-path selection. Raw forces
+  source-event execution but does not override accuracy, completeness, or budgets.
+* `completeness=materialized|require_proven`: default to querying available
+  materialized data with explicit ingestion/recovery caveats. Both modes require
+  all execution shards; `require_proven` additionally requires evidence of source
+  coverage for a declared cutoff and errors when that evidence is unavailable.
 
-Mathematical accuracy, input completeness, and freshness are independent. Every
-response reports the execution mode, data watermark, expected and participating
-shards or partitions, scanned events/bytes, and whether upstream sampling
-weights were applied. Alerts, billing, security, or compliance workflows may
-require complete execution even when an interactive exploration permits a
-clearly labeled bounded-latency partial result.
+These are logical API controls; wire encoding is decided during implementation.
+An exact count/sum rollup may serve `accuracy=exact,path=auto` when eligibility
+holds. `path=raw,accuracy=allow_approximate` may use an approximate raw percentile.
+No mode implicitly authorizes partial-shard answers, exceeds cost limits, or
+silently downgrades an exact request. Unsupported combinations return a clear
+error. Bounded-latency partial-shard execution is deferred beyond the PoC.
+
+Responses report requested controls, actual storage path, actual accuracy and
+algorithm/version per aggregate, coverage evidence or its absence, freshness and
+recovery status, participating/expected shards, and scanned rows/bytes. Unknown
+source completeness must remain unknown; even an exact aggregate with all shards
+available is not evidence that upstream or overflow data has fully arrived.
+
+== Upstream sampling and observed-event results
+
+The PoC computes aggregates over retained observations without population
+extrapolation. Preserve supplied sampling probability/weight and its provenance;
+absent metadata means unknown, not probability one. A sampled trace flag alone
+does not establish an inclusion probability. Keep unknown, explicitly unsampled,
+and declared sampled inputs distinguishable in diagnostics and metadata.
+
+Validate declared probabilities as finite values in `(0, 1]` and weights as
+finite positive values; flag invalid or conflicting metadata rather than using
+it for arithmetic. Do not infer that an arbitrary producer field is trusted
+sampling metadata. Version the mapping from supported producer conventions.
+
+Report `sampling_adjustment=none` and the known/unknown sampling status. An exact
+count is exact for the declared retained input, not an estimate of total traffic.
+This distinction also applies to event-derived rates and percentiles; native
+metric interpretation remains governed by its separate signal model.
+
+Population estimation is a later, explicit operation. Before adding it, specify
+the sampling design, supported estimator, required metadata, error interpretation,
+and acceleration compatibility. A generic inverse-probability multiplier does
+not justify arbitrary weighted distinct counts, top-K, quantiles, or tail-sampled
+trace estimates. Requests for unsupported sampling correction must fail rather
+than silently return unadjusted results labeled as corrected.
 
 == Storage tiers
 
