@@ -3,6 +3,11 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    # The local benchmark harness, the committed Flox environment, and the cloud
+    # benchmark images all pin ClickHouse 26.8.2.7-lts. This revision is the one
+    # the Flox lock resolved, so it is pinned separately for ClickHouse only
+    # instead of moving the whole development shell off nixos-unstable.
+    nixpkgs-clickhouse.url = "github:nixos/nixpkgs/8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -10,6 +15,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-clickhouse,
       flake-utils,
       ...
     }:
@@ -17,6 +23,10 @@
       system:
       let
         pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
+        clickhousePkgs = import nixpkgs-clickhouse {
           inherit system;
           config.allowUnfree = true;
         };
@@ -34,7 +44,7 @@
             # Tools
             docker-buildx
             docker-compose
-            clickhouse-lts
+            clickhousePkgs.clickhouse-lts
             goose
             buf
             protobuf
