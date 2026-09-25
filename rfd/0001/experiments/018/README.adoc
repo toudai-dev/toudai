@@ -5,7 +5,9 @@ link:../../README.adoc[RFD 0001]
 
 This directory contains the runnable harness and the committed evidence for the
 Collector compatibility experiment. It intentionally contains only synthetic
-fixture data: no production corpus, credentials, or customer telemetry.
+fixture data: no production corpus, credentials, or customer telemetry. Every
+token, key, and credential in this directory is a synthetic `lh018-*` value for
+the loopback fixture, and no real credential or customer data is included.
 
 == Layout
 

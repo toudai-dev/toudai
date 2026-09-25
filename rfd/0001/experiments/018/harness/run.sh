@@ -24,6 +24,7 @@ export LH018_CH_FORMAT_SCHEMAS="$RUN/clickhouse/format_schemas/"
 export LH018_CH_LOG="$LOGS/clickhouse-server.log"
 export LH018_CH_ERRORLOG="$LOGS/clickhouse-server.err.log"
 export LH018_CH_USERS="$HERE/clickhouse-users.xml"
+# Synthetic, loopback-only object-store credentials for this disposable fixture.
 export MINIO_ROOT_USER="lh018-minio"
 export MINIO_ROOT_PASSWORD="lh018-minio-local"
 export AWS_ACCESS_KEY_ID="$MINIO_ROOT_USER"
