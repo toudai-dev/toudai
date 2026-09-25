@@ -510,6 +510,13 @@ fixture rates, not production ingestion throughput.
   wraps (measured on both the capability probe and the fixture, whose total
   exceeds `Int64`), while `sum(Int128)` keeps the true total. Type filtering,
   overflow rejection, and contributing-value counts remain query-layer work.
+* This *qualifies* the companion-`Map` preference recorded after Experiment 019
+  rather than overturning it: for the record namespace, native typed Maps
+  measured smaller than the companion string value Map under the same contract,
+  and the minimal layout avoided the full type sidecar. The preference is not
+  contradicted for the small, type-diverse resource and scope namespaces, where
+  one string Map measured smaller, and Experiment 019's retained-scale evidence
+  for the companion Map is unchanged by this 50,000-row micro-measurement.
 * A collapsed Float64 layout and a two-map key both produce wrong answers that
   the check set rejects (nonzero exit) while the correct layout passes the same
   checks, so the assertions are discriminating rather than happy-path only.
