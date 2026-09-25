@@ -25,22 +25,22 @@ otelcol_exporter_sent_spans{exporter="clickhouse"} 3
 otelcol_exporter_sent_spans{exporter="file/received-traces"} 3
 # HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
 # TYPE otelcol_process_cpu_seconds counter
-otelcol_process_cpu_seconds 0.17
+otelcol_process_cpu_seconds 0.2
 # HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
 # TYPE otelcol_process_memory_rss gauge
-otelcol_process_memory_rss 2.0224e+08
+otelcol_process_memory_rss 2.02326016e+08
 # HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
 # TYPE otelcol_process_runtime_heap_alloc_bytes gauge
-otelcol_process_runtime_heap_alloc_bytes 2.7390688e+07
+otelcol_process_runtime_heap_alloc_bytes 2.6096816e+07
 # HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
 # TYPE otelcol_process_runtime_total_alloc_bytes counter
-otelcol_process_runtime_total_alloc_bytes 3.9787232e+07
+otelcol_process_runtime_total_alloc_bytes 3.9607792e+07
 # HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
 # TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
 otelcol_process_runtime_total_sys_memory_bytes 4.0212744e+07
 # HELP otelcol_process_uptime Uptime of the process [Alpha]
 # TYPE otelcol_process_uptime counter
-otelcol_process_uptime 12.166229879
+otelcol_process_uptime 15.915143171
 # HELP otelcol_receiver_accepted_log_records Number of log records successfully pushed into the pipeline. [Alpha]
 # TYPE otelcol_receiver_accepted_log_records counter
 otelcol_receiver_accepted_log_records{receiver="otlp",transport="http"} 53
@@ -65,4 +65,4 @@ promhttp_metric_handler_errors_total{cause="encoding"} 0
 promhttp_metric_handler_errors_total{cause="gathering"} 0
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_instance_id="5f84bed4-e56b-4c60-92d9-a9b8484765d3",service_name="otelcol-contrib",service_version="0.161.0"} 1
+target_info{service_instance_id="e0756e4f-13fb-4e8e-80b0-25cb6eddc8ba",service_name="otelcol-contrib",service_version="0.161.0"} 1

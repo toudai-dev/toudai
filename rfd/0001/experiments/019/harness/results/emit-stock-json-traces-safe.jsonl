@@ -1,1 +1,1 @@
-{"signal": "traces", "label": "typed-safe", "description": "typed-safe spans: 3 spans", "url": "http://127.0.0.1:4328/v1/traces", "status": 200, "elapsed_ms": 2.98, "response_body": "\n", "request_bytes": 2462, "sent_at": "2026-09-25T05:37:04.230456+00:00"}
+{"signal": "traces", "label": "typed-safe", "description": "typed-safe spans: 3 spans", "url": "http://127.0.0.1:4328/v1/traces", "status": 200, "elapsed_ms": 3.59, "response_body": "\n", "request_bytes": 2462, "sent_at": "2026-09-25T05:53:57.704136+00:00"}

@@ -539,6 +539,14 @@ def semantics_checks(c: Checks, dialect):
                                f"FROM {table} WHERE mapContains(record,'metric.value') GROUP BY t, v ORDER BY t, v")
         expected = "\n".join(f"{t}\t{v}\t{n}" for (t, v), n in expected_metric_groups())
         c.check(f"{prefix}.group_by_type_value", observed, expected, kind="semantic")
+        c.sql(f"{prefix}.group_by_literals", "lh019",
+              f"SELECT sumIf(n, t='int' AND v='1'), sumIf(n, t='double' AND v='NaN'), "
+              f"sumIf(n, t='string' AND v=''), sumIf(n, t='empty' AND v=''), "
+              f"sumIf(n, t='bytes' AND v='AAH+/w=='), sumIf(n, t='bool' AND v='false') "
+              f"FROM (SELECT {type_of('metric.value')} AS t, {value('metric.value')} AS v, count() AS n "
+              f"FROM {table} WHERE mapContains(record,'metric.value') GROUP BY t, v)",
+              "3\t1\t1\t1\t1\t1", kind="semantic",
+              note="literal expectations authored from the fixture inventory, independent of the Python conversion helper")
         c.sql(f"{prefix}.presence_empty", "lh019",
               f"SELECT {type_of('metric.value')} FROM {table} WHERE event_id='group-empty'", "empty", kind="semantic")
         c.sql(f"{prefix}.presence_empty_string", "lh019",
@@ -617,7 +625,91 @@ def semantics_checks(c: Checks, dialect):
               f"SELECT {type_of('metric.value')} FROM {table} WHERE event_id='group-int-1'", "", kind="characterization")
 
 
+def phase_stock_oracle(c: Checks, results: Path):
+    """Independent oracle: the pinned stock exporter's stored values.
+
+    The representation mappings are built with `model.stock_string`; comparing
+    them only with expectations produced by the same helper would be circular.
+    This phase compares both the canonical payload decode and the representation
+    serving values with the rows the real Collector run wrote into
+    `stock_map.otel_logs`.
+    """
+    try:
+        stock_text = ch("stock_map", "SELECT Body, ResourceAttributes, ScopeAttributes, LogAttributes "
+                                     "FROM otel_logs FORMAT JSONEachRow")
+    except Exception as exc:
+        c.check("oracle.stock_table_available", f"ERROR: {exc}", "present")
+        return
+    # JSONEachRow keeps the selected column names; the stock table uses capitals.
+    stock = {}
+    for line in stock_text.splitlines():
+        if line.strip():
+            row = json.loads(line)
+            stock[row["Body"]] = row
+    body_by_event = {event["event_id"]: event["body"][1] for event in fixture.EVENTS}
+    rep_text = ch("lh019", "SELECT event_id, resource, scope, record FROM rep_type_map FORMAT JSONEachRow")
+    rep = {}
+    for line in rep_text.splitlines():
+        if line.strip():
+            row = json.loads(line)
+            rep[row["event_id"]] = row
+    matched = 0
+    mismatches = []
+    for event_id, row in rep.items():
+        body = body_by_event.get(event_id)
+        source = stock.get(body)
+        if source is None:
+            mismatches.append(f"{event_id}: no stock row")
+            continue
+        matched += 1
+        for namespace, column in (("resource", "ResourceAttributes"), ("scope", "ScopeAttributes"),
+                                  ("record", "LogAttributes")):
+            if row[namespace] != source[column]:
+                mismatches.append(f"{event_id}.{namespace}")
+    c.check("oracle.rep_serving_matches_stock_exporter",
+            "ok" if not mismatches else f"mismatch: {mismatches[0]}", "ok",
+            kind="semantic",
+            note="rep_type_map values compared with the rows the pinned exporter stored")
+    c.check("oracle.rep_rows_matched", str(matched), str(len(rep)), kind="semantic")
+
+    payload_path = results / "canonical-payloads.jsonl"
+    if not payload_path.exists():
+        c.check("oracle.canonical_strings_match_stock_exporter", "missing payloads", "ok")
+        return
+    payloads = {}
+    for line in payload_path.read_text().splitlines():
+        if line.strip():
+            record = json.loads(line)
+            payloads[record["event_id"]] = json.loads(record["payload"])
+    conversion_mismatches = []
+    for event_id, doc in payloads.items():
+        source = stock.get(body_by_event.get(event_id))
+        if source is None:
+            conversion_mismatches.append(f"{event_id}: no stock row")
+            continue
+        for namespace, column in (("resource", "ResourceAttributes"), ("scope", "ScopeAttributes"),
+                                  ("record", "LogAttributes")):
+            for key, node in doc[namespace].items():
+                type_name, value = decode_canonical(node)
+                if model.stock_string(type_name, value) != source[column].get(key):
+                    conversion_mismatches.append(f"{event_id}.{namespace}.{key}")
+    c.check("oracle.canonical_strings_match_stock_exporter",
+            "ok" if not conversion_mismatches else f"mismatch: {conversion_mismatches[0]}", "ok",
+            kind="semantic",
+            note="model.stock_string output for each decoded canonical value compared with the exporter's stored string")
+
+
 def phase_semantics(c: Checks, results: Path):
+    try:
+        _phase_semantics(c, results)
+    except Exception as exc:
+        # A crash must be visible as a failed check, not as a silently missing
+        # phase: the earlier outcomes are kept.
+        c.check("semantics.error", f"ERROR: {type(exc).__name__}: {exc}", "ok")
+
+
+def _phase_semantics(c: Checks, results: Path):
+    phase_stock_oracle(c, results)
     for dialect in (companion_dialect("rep_type_map"),
                     tagged_dialect("rep_tagged_map"),
                     companion_dialect("rep_map_carried"),
