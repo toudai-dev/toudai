@@ -27,16 +27,34 @@ integer aggregation. Lossless response encoding and PoC DDL selection remain
 open (the service layer and the decision record own them). See
 link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
 +
-*Open:* the native typed Map alternative is not evaluated. A concrete layout such
-as `Map(String, Int64)` / `Map(String, Float64)` plus string and bool Maps and
-explicit presence/empty bookkeeping may serve typed values without a
-stringly-typed value Map, but native numeric columns do not by themselves satisfy
-the typed-value contract: a missing key lookup returns the type default,
-`sum(Int64)` still wraps, and a key present with another type is
-indistinguishable from a missing key without presence metadata. Whether that
-bookkeeping (and its handling of explicit empty, bytes, and nested values) costs
-less than the companion type Map is unmeasured. This section owns the comparison
-and the PoC DDL selection; a bounded follow-up evaluation owns the measurements.
+*Open:* the native typed Map alternative was not evaluated by Experiment 019, and
+PoC DDL selection remains open. A concrete layout such as `Map(String, Int64)` /
+`Map(String, Float64)` plus string and bool Maps and explicit presence/empty
+bookkeeping may serve typed values without a stringly-typed value Map, but native
+numeric columns do not by themselves satisfy the typed-value contract: a missing
+key lookup returns the type default, `sum(Int64)` still wraps, and a key present
+with another type is indistinguishable from a missing key without presence
+metadata. This section owns the comparison and the PoC DDL selection; Experiment
+020 is the bounded follow-up evaluation.
++
+Experiment 020 evaluated the native typed Map alternative on the same fixture
+and corpora. Two equal-contract layouts — per-type value Maps with a full
+per-key type sidecar, and per-type value Maps with a key-only map for the
+canonical-only types (bytes, array, map) and explicit empty — satisfy the
+fixture's typed surface, including non-finite doubles (present in the `Float64`
+Map; only their comparison and aggregation are rejected by the harness
+prototype) and span scope attributes. The minimal layout avoids the full sidecar
+without weakening presence or type identity, at the cost of scanning five Maps
+for presence and type queries (about 2.0-3.9x the read bytes of the sidecar
+layouts on the measured corpus). Native typed Maps reduced total compressed
+bytes by 4.9-11.2% versus the companion baseline including payload (21.0-25.9%
+excluding payload for the minimal layout), but splitting the small,
+type-diverse resource and scope namespaces into typed Maps cost more than one
+string Map. `sum(Int64)` still wraps; type filtering, overflow rejection, and
+contributing-value counts remain query-layer obligations. PoC DDL selection,
+planner support for the minimal layout's union/type expressions, and
+retained-scale read behavior remain open. See
+link:experiments/020-native-typed-map-comparison.adoc[Experiment 020].
 
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
 
