@@ -1,0 +1,18 @@
+{"name": "cost.rep_stock_map.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.rep_payload_only.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.rep_type_map.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.rep_tagged_map.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.rep_map_carried.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.query.stock_map.untyped_filter", "kind": "measurement", "expected": null, "observed": "16.0ms rows=50000 bytes=388042", "ok": true, "note": ""}
+{"name": "cost.query.payload_only.extract_filter", "kind": "measurement", "expected": null, "observed": "145.0ms rows=50000 bytes=55981120", "ok": true, "note": ""}
+{"name": "cost.query.type_map.typed_filter", "kind": "measurement", "expected": null, "observed": "29.0ms rows=50000 bytes=438928", "ok": true, "note": ""}
+{"name": "cost.query.type_map.group_by_type", "kind": "measurement", "expected": null, "observed": "12.0ms rows=50000 bytes=1050057", "ok": true, "note": ""}
+{"name": "cost.query.type_map.numeric_order", "kind": "measurement", "expected": null, "observed": "25.0ms rows=50000 bytes=439042", "ok": true, "note": ""}
+{"name": "cost.query.type_map.aggregate", "kind": "measurement", "expected": null, "observed": "24.0ms rows=50000 bytes=439042", "ok": true, "note": ""}
+{"name": "cost.query.tagged_map.typed_filter", "kind": "measurement", "expected": null, "observed": "24.0ms rows=50000 bytes=488890", "ok": true, "note": ""}
+{"name": "cost.query.tagged_map.group_by_type", "kind": "measurement", "expected": null, "observed": "27.0ms rows=50000 bytes=1488890", "ok": true, "note": ""}
+{"name": "cost.query.tagged_map.aggregate", "kind": "measurement", "expected": null, "observed": "37.0ms rows=50000 bytes=488890", "ok": true, "note": ""}
+{"name": "cost.query.map_carried.typed_filter", "kind": "measurement", "expected": null, "observed": "87.0ms rows=50000 bytes=683038", "ok": true, "note": ""}
+{"name": "cost.map_carried.payload_in_map_and_materialized", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": "Map-carried payload bloats the Map and the MATERIALIZED column duplicates it"}
+{"name": "cost.type_map_overhead_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.tagged_overhead_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}

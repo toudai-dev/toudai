@@ -1,0 +1,11 @@
+{"name": "managed.log_rows", "kind": "characterization", "expected": "28", "observed": "28", "ok": true, "note": ""}
+{"name": "managed.trace_rows", "kind": "characterization", "expected": "3", "observed": "3", "ok": true, "note": ""}
+{"name": "managed.extra_default_column_empty", "kind": "characterization", "expected": "", "observed": "", "ok": true, "note": ""}
+{"name": "managed.materialized_payload_projection", "kind": "characterization", "expected": "payload-marker", "observed": "payload-marker", "ok": true, "note": ""}
+{"name": "managed.materialized_type_map", "kind": "semantic", "expected": "int\tdouble", "observed": "int\tdouble", "ok": true, "note": "a Map-carried type JSON can be projected into a queryable Map by MATERIALIZED"}
+{"name": "managed.plain_payload_column_rows", "kind": "characterization", "expected": "25", "observed": "25", "ok": true, "note": ""}
+{"name": "managed.plain_payload_column_is_type_default", "kind": "characterization", "expected": "", "observed": "", "ok": true, "note": "the stock INSERT never names the payload column; ClickHouse fills the type default"}
+{"name": "managed.traces_scope_attributes_present_but_empty", "kind": "characterization", "expected": "{}", "observed": "{}", "ok": true, "note": "the stock traces INSERT never names ScopeAttributes even when the managed table has it"}
+{"name": "managed.traces_materialized_payload", "kind": "characterization", "expected": "payload-marker", "observed": "payload-marker", "ok": true, "note": ""}
+{"name": "managed.insert_names_only_stock_columns", "kind": "characterization", "expected": true, "observed": true, "ok": true, "note": "captured from system.query_log; full statement in managed-insert-statement.txt"}
+{"name": "managed.insert_statement", "kind": "measurement", "expected": null, "observed": "INSERT INTO lh019.managed_logs (Timestamp, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body, ResourceSchemaUrl, ResourceAttributes, ScopeSchemaUrl, ScopeName, ScopeVersion, ScopeAttributes, LogAttributes, EventName) FORMAT Native", "ok": true, "note": ""}

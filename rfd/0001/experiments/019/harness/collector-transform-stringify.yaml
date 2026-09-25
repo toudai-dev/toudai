@@ -1,0 +1,33 @@
+# Experiment 019 stock-processor control: the closest stock expression for a
+# type-tagged attribute set. `stringify_all` converts every value with
+# pcommon.Value.AsString(), which is the same conversion the stock exporter
+# performs; the received-copy file shows that int 1, double 1.0, and string "1"
+# become the same string, so this path cannot produce the typed contract.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4328
+
+processors:
+  transform/stringify:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - stringify_all(attributes)
+
+exporters:
+  file/received-logs:
+    path: ${env:LH019_RESULTS}/transform-stringify-received-logs.jsonl
+    format: json
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [transform/stringify]
+      exporters: [file/received-logs]

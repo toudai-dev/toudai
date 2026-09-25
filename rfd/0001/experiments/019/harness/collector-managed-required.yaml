@@ -1,0 +1,37 @@
+# Experiment 019 managed-schema negative probe: the same stock exporter with
+# create_schema: false against a managed table that adds a required column
+# (`PayloadRequired String` with no DEFAULT/MATERIALIZED). The stock INSERT
+# never names it, so ClickHouse must reject every insert. This is the concrete
+# evidence that the stock exporter cannot write a canonical payload column.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4328
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19001
+    database: lh019
+    create_schema: false
+    logs_table_name: managed_logs_payload
+    async_insert: true
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 3s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [clickhouse]

@@ -1,0 +1,28 @@
+{"name": "stock_map.log_rows", "kind": "characterization", "expected": "28", "observed": "28", "ok": true, "note": ""}
+{"name": "stock_map.trace_rows", "kind": "characterization", "expected": "3", "observed": "3", "ok": true, "note": ""}
+{"name": "stock_map.int_one", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_map.double_one", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_map.str_one", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_map.int_double_string_collide", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_map.big_int_exact", "kind": "characterization", "expected": "9007199254740993", "observed": "9007199254740993", "ok": true, "note": ""}
+{"name": "stock_map.min_int_exact", "kind": "characterization", "expected": "-9223372036854775808", "observed": "-9223372036854775808", "ok": true, "note": ""}
+{"name": "stock_map.nan_text", "kind": "characterization", "expected": "NaN", "observed": "NaN", "ok": true, "note": ""}
+{"name": "stock_map.posinf_text", "kind": "characterization", "expected": "Infinity", "observed": "Infinity", "ok": true, "note": ""}
+{"name": "stock_map.negzero_text", "kind": "characterization", "expected": "-0", "observed": "-0", "ok": true, "note": ""}
+{"name": "stock_map.bytes_base64", "kind": "characterization", "expected": "AAH+/w==", "observed": "AAH+/w==", "ok": true, "note": ""}
+{"name": "stock_map.array_json_text", "kind": "characterization", "expected": "[\"a\",1,true]", "observed": "[\"a\",1,true]", "ok": true, "note": ""}
+{"name": "stock_map.map_json_text", "kind": "characterization", "expected": "{\"nested.bool\":false,\"nested.int\":2}", "observed": "{\"nested.bool\":false,\"nested.int\":2}", "ok": true, "note": ""}
+{"name": "stock_map.json_like_string_collides_with_map", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_map.empty_and_empty_string_both_empty", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_map.empty_present", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_map.missing_absent", "kind": "characterization", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "stock_map.namespace_collide", "kind": "characterization", "expected": "resource-value\trecord-value", "observed": "resource-value\trecord-value", "ok": true, "note": ""}
+{"name": "stock_map.case_sensitive", "kind": "characterization", "expected": "record-upper\tresource-upper\tresource-lower", "observed": "record-upper\tresource-upper\tresource-lower", "ok": true, "note": ""}
+{"name": "stock_map.duplicate_lookup_first", "kind": "characterization", "expected": "first", "observed": "first", "ok": true, "note": ""}
+{"name": "stock_map.duplicate_both_stored", "kind": "characterization", "expected": "2", "observed": "2", "ok": true, "note": ""}
+{"name": "stock_map.untyped_filter_collides", "kind": "characterization", "expected": "5", "observed": "5", "ok": true, "note": "int 1, double 1.0, and string \"1\" rows all match the same string"}
+{"name": "stock_map.untyped_lexical_order", "kind": "characterization", "expected": "order-10,order-100,order-9", "observed": "order-10,order-100,order-9", "ok": true, "note": "lexical order over the stock Map strings differs from numeric order"}
+{"name": "stock_map.traces_no_scope_attributes_column", "kind": "characterization", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "stock_map.negative_duration_underflow", "kind": "characterization", "expected": "18446744073709550616", "observed": "18446744073709550616", "ok": true, "note": ""}
+{"name": "stock_map.span_scope_attr_only_in_span_attributes", "kind": "characterization", "expected": "present", "observed": "present", "ok": true, "note": "the scope-namespace value scope.span.attr is dropped; this is the record attribute"}
+{"name": "stock_map.trace_scope_attr_dropped", "kind": "characterization", "expected": "0", "observed": "0", "ok": true, "note": ""}
