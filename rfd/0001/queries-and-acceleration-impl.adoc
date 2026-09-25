@@ -11,6 +11,21 @@ fixture expectations before using them as acceleration comparison anchors.
 * [ ] Define the event filter, grouping, time-series, heatmap, percentile, and raw-result query contract.
 
 * [ ] Compare companion-type and tagged-value Map encodings against the typed fixture; verify lossless canonical round-trip, type-sensitive filters/groups, numeric rather than lexical ordering, presence semantics, aggregate type errors/overflow, and lossless response encoding; record storage and execution cost before selecting the PoC DDL.
++
+Experiment 019 compared both encodings on a deterministic typed fixture with
+expectations computed from the typed inventory (and the conversion helper checked
+against the pinned exporter's stored values). Both support the
+representation-level semantics when a mapping step supplies the types: typed
+filters and group keys, numeric ordering, presence semantics, exact `Int64`
+values, and lossless canonical round-trip. The companion type Map adds about
+1.2% of the serving Map bytes and keeps the stock serving strings, while the
+tagged-value Map adds about 4.7% and more group-by work. Unsupported-operation
+rejection, aggregate type errors, and integer-overflow rejection were enforced
+by the harness query prototype, not by ClickHouse; plain `sum(Int64)` wraps, so
+the query layer must implement type filtering, explicit errors, and guarded
+integer aggregation. Lossless response encoding and PoC DDL selection remain
+open (the service layer and the decision record own them). See
+link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
 
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
 

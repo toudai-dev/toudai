@@ -1,0 +1,68 @@
+# Experiment 019 managed-schema probe: the stock ClickHouse exporter with
+# create_schema: false against a Lighthouse-managed table that adds columns the
+# exporter does not know about. The transform processor only writes marker
+# values into known Map keys, so the MATERIALIZED projections have something to
+# read; it does not compute a canonical payload or a type map.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4328
+
+processors:
+  transform/markers:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["lighthouse.payload"], "payload-marker")
+          - set(attributes["lighthouse.types"], "{\"int.one\":\"int\",\"double.one\":\"double\"}")
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["lighthouse.payload"], "payload-marker")
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19001
+    database: lh019
+    create_schema: false
+    logs_table_name: managed_logs
+    traces_table_name: managed_traces
+    async_insert: true
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+
+  file/received-logs:
+    path: ${env:LH019_RESULTS}/managed-received-logs.jsonl
+    format: json
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8889
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [transform/markers]
+      exporters: [clickhouse, file/received-logs]
+    traces:
+      receivers: [otlp]
+      processors: [transform/markers]
+      exporters: [clickhouse]

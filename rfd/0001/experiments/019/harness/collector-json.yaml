@@ -1,0 +1,55 @@
+# Experiment 019 stock control B: the stock ClickHouse exporter with `json: true`
+# (ClickHouse JSON columns instead of Map columns). This is a bounded semantic
+# control, not a scale proposal: Experiment 006 rejected native JSON at 1 TB
+# scale, and nothing here reopens the Map serving baseline.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4328
+
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:19001
+    database: stock_json
+    create_schema: true
+    json: true
+    async_insert: true
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+
+  file/received-logs:
+    path: ${env:LH019_RESULTS}/stock-json-received-logs.jsonl
+    format: json
+
+  file/received-traces:
+    path: ${env:LH019_RESULTS}/stock-json-received-traces.jsonl
+    format: json
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8889
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [clickhouse, file/received-logs]
+    traces:
+      receivers: [otlp]
+      exporters: [clickhouse, file/received-traces]

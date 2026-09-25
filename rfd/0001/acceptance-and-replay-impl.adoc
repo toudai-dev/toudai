@@ -34,6 +34,21 @@ Experiment 018 documents the schema and typed-value gaps, the routing path
 `MATERIALIZED` promoted-column path with `create_schema: false`. Canonical
 payload preservation, dataset routing, and a Lighthouse-managed schema remain
 open. See link:experiments/018-collector-compatibility.adoc[Experiment 018].
++
+Experiment 019 ran the `create_schema: false` managed-schema probe and captured
+the exporter's actual `INSERT` from `system.query_log`: it names a fixed column
+list, so a managed payload column receives its DEFAULT or type default (silently
+empty, not rejected) and a `MATERIALIZED` projection can only promote a value a
+mapping component already placed inside a known Map column. The `json: true`
+mode was measured as a bounded control and does not preserve the typed contract
+(non-finite doubles drop the whole request, integral int/double collide, bytes
+lose their type, span scope attributes remain absent); Experiment 006's native
+JSON scale rejection is unchanged. Canonical payload preservation therefore
+needs a mapping component outside the stock schema; whether another stock
+processor configuration can supply the type information was not ruled out
+(conditional `where` statements and other processors were not tested), and
+dataset routing remains open. See
+link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
 * [ ] Integrate authenticated tenant policy before both exports; demonstrate normal-path ingestion and exact-event retrieval against independent fixture expectations.
 
 == PoC-required: failure, overflow, and duplicates

@@ -1,0 +1,79 @@
+= Experiment 019 evidence
+
+link:../019-typed-canonical-storage.adoc[Experiment report] ·
+link:../../README.adoc[RFD 0001]
+
+This directory contains the runnable harness and the committed evidence for the
+typed canonical storage comparison. It intentionally contains only synthetic
+fixture data: no production corpus, credentials, or customer telemetry. Every
+token, key, and credential in this directory is a synthetic `lh019-*` or
+workspace-UUID value for the loopback fixture.
+
+== Layout
+
+- `harness/setup.sh` downloads the pinned `otelcol-contrib` build (checksum
+  verified), creates the pinned Python fixture environment, and resolves the
+  Nix-provided ClickHouse binary. MinIO is not needed: this experiment does not
+  exercise overflow or replay.
+- `harness/run.sh` orchestrates the seven phases (`all` for a full run); it
+  starts and stops its own disposable ClickHouse and Collector processes and
+  never touches repository or benchmark data. It fails closed: each phase
+  records its process exit status in `results/phase-status.tsv`, and the run
+  exits nonzero when an expected phase is missing, empty, stale, or nonzero, or
+  when a recorded check fails. `harness/test-run-failure-modes.sh` exercises
+  those paths (fast synthetic cases plus an injected-exception full run).
+- `harness/test-run-failure-modes.sh fast` runs the synthetic aggregation cases
+  without services; `full` additionally runs `run.sh all` once with an injected
+  exception in the semantics phase (`LH019_TEST_CRASH_PHASE`, a verify.py
+  test-only hook) and once normally, asserting the exit status and phase
+  coverage of both.
+- `harness/fixture.py` builds the deterministic OTLP fixture and exposes the
+  canonical typed inventory; `harness/model.py` converts that inventory into the
+  canonical payload, the stock serving strings, companion type maps, and tagged
+  values; `harness/represent.py` is the mapping prototype that loads each
+  candidate representation; `harness/verify.py` evaluates the assertions and
+  measurements.
+- `harness/collector-*.yaml`, `harness/clickhouse-*.xml`, and
+  `harness/managed-schema.sql` are the pinned component configurations and the
+  Lighthouse-managed schema used for the `create_schema: false` probes.
+- `harness/representations.sql` defines the candidate representation tables; it
+  is applied to `lh019` for the semantic fixture and to `lh019_cost` for the
+  cost corpus.
+- `harness/results/` is the evidence from the committed run.
+
+== Evidence files
+
+- `results/checks-*.jsonl`: every check with `kind` (`semantic`,
+  `characterization`, `prototype`, or `measurement`), expected and observed
+  values, and a note. The committed run recorded 191 checks, none failing; the
+  semantics file includes the stock-exporter oracle checks
+  (`verify.py:phase_stock_oracle`) that compare both the decoded canonical
+  values and the representation serving Maps with the pinned exporter's stored
+  rows.
+- `results/phase-status.tsv` and `results/run-start.txt`: each phase's process
+  exit status and the run marker. `transform-config-load` is 1 because that
+  probe asserts a rejected config; the coverage assertion requires the eight
+  verify phases to be 0 and their checks files to be non-empty and newer than
+  the marker.
+- `results/stock-map-*.sql`, `stock-json-*.sql`, `*-columns.tsv`: the stock
+  exporter DDL and column layout in both modes.
+- `results/managed-insert-statement.txt`: the exporter's actual `INSERT`
+  statement captured from `system.query_log`, showing the fixed column list.
+- `results/stock-json.log`, `results/metrics-stock-json*.txt`: the non-finite
+  double export failure and the exporter counters around it.
+- `results/transform-types.log`, `results/transform-stringify-received-logs.jsonl`:
+  the stock-processor gap probe and the `stringify_all` result.
+- `results/canonical-payloads.jsonl`, `results/mapping-rejections.jsonl`: the
+  mapping prototype's payloads and the duplicate-key rejection.
+- `results/cost-storage.jsonl`, `results/cost-queries.jsonl`: the 50k-row
+  storage and warm execution measurements.
+- `results/emit-*.jsonl`, `results/emit-*.out`: producer-visible responses.
+- `results/*-received-*.jsonl`: receiver-side copies used to separate
+  receiver-side from exporter-side behavior.
+- `results/emit-identity-a.jsonl`, `results/quarantine-logs.jsonl`: the identity
+  ordering probe.
+
+Re-running `harness/run.sh all` from an empty state overwrites
+`harness/results/` with an equivalent set of files; the pinned expectations in
+`harness/verify.py` and the typed inventory in `harness/fixture.py` are what make
+the comparison meaningful.

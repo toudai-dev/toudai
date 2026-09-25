@@ -1,0 +1,6 @@
+{"name": "files.stock_map.producer_status", "kind": "characterization", "expected": 200, "observed": 200, "ok": true, "note": ""}
+{"name": "files.stock_json_nan.producer_status", "kind": "characterization", "expected": 200, "observed": 200, "ok": true, "note": ""}
+{"name": "files.stock_json_safe.producer_status", "kind": "characterization", "expected": 200, "observed": 200, "ok": true, "note": ""}
+{"name": "files.stock_json.nan_send_failed_records", "kind": "characterization", "expected": "28", "observed": "28", "ok": true, "note": "the whole NaN-bearing request failed, not one record"}
+{"name": "files.stock_json.nan_marshal_error", "kind": "characterization", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "files.stock_json.nan_dropped_items", "kind": "characterization", "expected": true, "observed": true, "ok": true, "note": ""}

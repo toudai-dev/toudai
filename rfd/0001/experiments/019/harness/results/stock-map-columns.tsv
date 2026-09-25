@@ -1,0 +1,52 @@
+otel_logs	Timestamp	DateTime64(9)
+otel_logs	TraceId	String
+otel_logs	SpanId	String
+otel_logs	TraceFlags	UInt8
+otel_logs	SeverityText	LowCardinality(String)
+otel_logs	SeverityNumber	UInt8
+otel_logs	ServiceName	LowCardinality(String)
+otel_logs	Body	String
+otel_logs	ResourceSchemaUrl	LowCardinality(String)
+otel_logs	ResourceAttributes	Map(LowCardinality(String), String)
+otel_logs	ScopeSchemaUrl	LowCardinality(String)
+otel_logs	ScopeName	String
+otel_logs	ScopeVersion	LowCardinality(String)
+otel_logs	ScopeAttributes	Map(LowCardinality(String), String)
+otel_logs	LogAttributes	Map(LowCardinality(String), String)
+otel_logs	EventName	String
+otel_logs	__otel_materialized_k8s.cluster.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.container.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.deployment.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.namespace.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.node.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.pod.name	LowCardinality(String)
+otel_logs	__otel_materialized_k8s.pod.uid	LowCardinality(String)
+otel_logs	__otel_materialized_deployment.environment.name	LowCardinality(String)
+otel_traces	Timestamp	DateTime64(9)
+otel_traces	TraceId	String
+otel_traces	SpanId	String
+otel_traces	ParentSpanId	String
+otel_traces	TraceState	String
+otel_traces	SpanName	LowCardinality(String)
+otel_traces	SpanKind	LowCardinality(String)
+otel_traces	ServiceName	LowCardinality(String)
+otel_traces	ResourceAttributes	Map(LowCardinality(String), String)
+otel_traces	ScopeName	String
+otel_traces	ScopeVersion	String
+otel_traces	SpanAttributes	Map(LowCardinality(String), String)
+otel_traces	Duration	UInt64
+otel_traces	StatusCode	LowCardinality(String)
+otel_traces	StatusMessage	String
+otel_traces	Events.Timestamp	Array(DateTime64(9))
+otel_traces	Events.Name	Array(LowCardinality(String))
+otel_traces	Events.Attributes	Array(Map(LowCardinality(String), String))
+otel_traces	Links.TraceId	Array(String)
+otel_traces	Links.SpanId	Array(String)
+otel_traces	Links.TraceState	Array(String)
+otel_traces	Links.Attributes	Array(Map(LowCardinality(String), String))
+otel_traces_trace_id_ts	TraceId	String
+otel_traces_trace_id_ts	Start	DateTime
+otel_traces_trace_id_ts	End	DateTime
+otel_traces_trace_id_ts_mv	TraceId	String
+otel_traces_trace_id_ts_mv	Start	DateTime64(9)
+otel_traces_trace_id_ts_mv	End	DateTime64(9)

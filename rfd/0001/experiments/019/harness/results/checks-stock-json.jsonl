@@ -1,0 +1,18 @@
+{"name": "stock_json.log_rows_safe", "kind": "characterization", "expected": "25", "observed": "25", "ok": true, "note": ""}
+{"name": "stock_json.nan_row_absent", "kind": "characterization", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "stock_json.dynamic_type_int_one", "kind": "characterization", "expected": "Int64", "observed": "Int64", "ok": true, "note": ""}
+{"name": "stock_json.dynamic_type_double_one_is_int64", "kind": "characterization", "expected": "Int64", "observed": "Int64", "ok": true, "note": "Go json.Marshal writes float64(1) as 1, so JSON mode collides int 1 and double 1.0"}
+{"name": "stock_json.dynamic_type_str_one", "kind": "characterization", "expected": "String", "observed": "String", "ok": true, "note": ""}
+{"name": "stock_json.int_double_collide", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_json.string_number_comparison_errors", "kind": "characterization", "expected": "ERROR: NO_COMMON_TYPE", "observed": "ERROR: NO_COMMON_TYPE", "ok": true, "note": "JSON mode is type-strict at the SQL level instead of coercing"}
+{"name": "stock_json.big_int_exact", "kind": "characterization", "expected": "9007199254740993", "observed": "9007199254740993", "ok": true, "note": ""}
+{"name": "stock_json.min_int_exact", "kind": "characterization", "expected": "-9223372036854775808", "observed": "-9223372036854775808", "ok": true, "note": ""}
+{"name": "stock_json.empty_is_null", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_json.empty_key_present", "kind": "characterization", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "stock_json.empty_string_distinct", "kind": "characterization", "expected": "0\t1", "observed": "0\t1", "ok": true, "note": ""}
+{"name": "stock_json.bytes_base64_string", "kind": "characterization", "expected": "AAH+/w==\tString", "observed": "AAH+/w==\tString", "ok": true, "note": ""}
+{"name": "stock_json.array_structured", "kind": "characterization", "expected": "Array(Dynamic)", "observed": "Array(Dynamic)", "ok": true, "note": ""}
+{"name": "stock_json.zero_float_sign_lost", "kind": "characterization", "expected": "0\tInt64", "observed": "0\tInt64", "ok": true, "note": ""}
+{"name": "stock_json.duplicate_last_wins", "kind": "characterization", "expected": "second", "observed": "second", "ok": true, "note": ""}
+{"name": "stock_json.traces_no_scope_attributes_column", "kind": "characterization", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "stock_json.negative_duration_underflow", "kind": "characterization", "expected": "18446744073709550616", "observed": "18446744073709550616", "ok": true, "note": ""}
