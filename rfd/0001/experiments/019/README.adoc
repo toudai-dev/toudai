@@ -17,7 +17,16 @@ workspace-UUID value for the loopback fixture.
   exercise overflow or replay.
 - `harness/run.sh` orchestrates the seven phases (`all` for a full run); it
   starts and stops its own disposable ClickHouse and Collector processes and
-  never touches repository or benchmark data.
+  never touches repository or benchmark data. It fails closed: each phase
+  records its process exit status in `results/phase-status.tsv`, and the run
+  exits nonzero when an expected phase is missing, empty, stale, or nonzero, or
+  when a recorded check fails. `harness/test-run-failure-modes.sh` exercises
+  those paths (fast synthetic cases plus an injected-exception full run).
+- `harness/test-run-failure-modes.sh fast` runs the synthetic aggregation cases
+  without services; `full` additionally runs `run.sh all` once with an injected
+  exception in the semantics phase (`LH019_TEST_CRASH_PHASE`, a verify.py
+  test-only hook) and once normally, asserting the exit status and phase
+  coverage of both.
 - `harness/fixture.py` builds the deterministic OTLP fixture and exposes the
   canonical typed inventory; `harness/model.py` converts that inventory into the
   canonical payload, the stock serving strings, companion type maps, and tagged
@@ -41,6 +50,11 @@ workspace-UUID value for the loopback fixture.
   (`verify.py:phase_stock_oracle`) that compare both the decoded canonical
   values and the representation serving Maps with the pinned exporter's stored
   rows.
+- `results/phase-status.tsv` and `results/run-start.txt`: each phase's process
+  exit status and the run marker. `transform-config-load` is 1 because that
+  probe asserts a rejected config; the coverage assertion requires the eight
+  verify phases to be 0 and their checks files to be non-empty and newer than
+  the marker.
 - `results/stock-map-*.sql`, `stock-json-*.sql`, `*-columns.tsv`: the stock
   exporter DDL and column layout in both modes.
 - `results/managed-insert-statement.txt`: the exporter's actual `INSERT`

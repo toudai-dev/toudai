@@ -7,7 +7,7 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Completed:* 2026-09-25T05:55Z
 - *Source mutation:* None; a disposable local ClickHouse/Collector topology and a synthetic fixture only
 - *Harness:* `019/harness/` (fixture, mapping prototype, assertions, orchestration); `019/README.adoc` describes the layout
-- *Result:* 191/191 recorded checks passed: 87 semantic acceptance checks, 4 query-prototype checks, 86 characterization checks, 14 cost measurements. Characterizations and prototype checks are not acceptance-contract passes.
+- *Result:* 191/191 recorded checks passed: 87 semantic acceptance checks, 4 query-prototype checks, 86 characterization checks, 14 cost measurements. Characterizations and prototype checks are not acceptance-contract passes. The committed run exited 0 with all eight phases covered and their exit statuses recorded in `results/phase-status.tsv`; the harness fails closed, so a passing summary cannot omit a phase.
 
 == Question
 
@@ -164,6 +164,15 @@ harness code: it is what a custom processor or exporter would have to do, not a
 Collector component. The `prototype.*` checks implement contract rules (reject
 unsupported operations, reject integer overflow) in the harness; they are not
 ClickHouse guarantees.
+
+The harness fails closed: every phase records its process exit status in
+`results/phase-status.tsv`, and `run.sh` exits nonzero when an expected phase is
+missing, empty, stale, or nonzero, or when any recorded check fails. The
+transform config-load probe is the only expected-negative component step and is
+asserted as a nonzero exit rather than ignored.
+`harness/test-run-failure-modes.sh` covers these paths: synthetic aggregation
+cases (complete, missing, empty, nonzero, failed-check, missing-status, stale)
+plus a full run with an injected exception in the semantics phase.
 
 A post-run evidence review added the stock-exporter oracle checks and the
 literal group-by expectations, scoped the stock-processor claim to the tested
