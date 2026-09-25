@@ -30,12 +30,16 @@ link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +
 Experiment 019 established where that envelope can be built: the pinned stock
 exporter cannot insert a canonical payload column (`create_schema: false` leaves
-it at its DEFAULT/type default), no stock processor can produce a typed canonical
-payload or a per-key type map (OTTL has no per-key conditional type name), and a
-Map-carried payload plus `MATERIALIZED` projections stores the payload twice.
-The envelope therefore needs a Lighthouse-owned mapping component placed after
-trusted-scope injection; the harness prototype's envelope round-tripped
-losslessly against the typed inventory. See
+it at its DEFAULT/type default), the tested stock expressions cannot produce a
+typed canonical payload or a per-key type map (the natural per-key expression
+does not parse, and the pinned OTTL function inventory has no conditional or
+typed marshal), and a Map-carried payload plus `MATERIALIZED` projections stores
+the payload twice. Conditional `where` statements across multiple passes, other
+processors, and components outside the pinned distribution were not evaluated.
+The envelope therefore needs a mapping component outside the stock schema
+(processor or exporter) placed after trusted-scope injection; the harness
+prototype's envelope round-tripped losslessly against the typed inventory and
+matched the exporter's stored serving values. See
 link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
 
 * [ ] Provide a minimal operator-facing client and record an operator completing time comparison, grouping, heatmap/percentile inspection, outlier identification, and exact-event drill-down against the fixture; verify results against its known events.

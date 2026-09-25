@@ -4,10 +4,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
 - *Status:* Completed
 - *Started:* 2026-09-25T05:29Z
-- *Completed:* 2026-09-25T05:38Z
+- *Completed:* 2026-09-25T05:55Z
 - *Source mutation:* None; a disposable local ClickHouse/Collector topology and a synthetic fixture only
 - *Harness:* `019/harness/` (fixture, mapping prototype, assertions, orchestration); `019/README.adoc` describes the layout
-- *Result:* 185/185 recorded checks passed: 81 semantic acceptance checks, 4 query-prototype checks, 86 characterization checks, 14 cost measurements. Characterizations and prototype checks are not acceptance-contract passes.
+- *Result:* 191/191 recorded checks passed: 87 semantic acceptance checks, 4 query-prototype checks, 86 characterization checks, 14 cost measurements. Characterizations and prototype checks are not acceptance-contract passes.
 
 == Question
 
@@ -46,14 +46,21 @@ source:
   (string versus number, structured arrays/maps, `null` versus `''`) but cannot
   represent non-finite doubles at all, and integral `int64`/`float64` values
   should collide because Go marshals `float64(1)` as `1`.
-* No stock processor can compute a companion type map or a typed canonical
-  payload: OTTL has predicates (`IsInt`, `IsDouble`, ...) and `MapEach`, but no
-  conditional operator to produce a per-key type name, and no typed JSON
-  marshal. The closest expression, `stringify_all`, performs the same lossy
-  `AsString` conversion the exporter already performs.
-* Both a companion type `Map` and a tagged-value `Map` can express the required
+* The stock expressions tested here cannot compute a companion type map or a
+  typed canonical payload: OTTL has predicates (`IsInt`, `IsDouble`, ...) and
+  `MapEach`, but the pinned function inventory has no conditional operator to
+  produce a per-key type name and no typed JSON marshal, and the natural
+  per-key expression does not parse. The closest expression, `stringify_all`,
+  performs the same lossy `AsString` conversion the exporter already performs.
+  Conditional `where` statements across multiple transform passes, other
+  processors, and components outside the pinned distribution were not
+  evaluated, so this is a claim about the tested expressions and the pinned
+  function inventory, not proof that no stock configuration can produce type
+  information.
+* Both a companion type `Map` and a tagged-value `Map` can carry the required
   typed semantics if the mapping step is correct; the tagged encoding should
-  cost more bytes and more group-by work.
+  cost more bytes and more group-by work, and the query layer must enforce the
+  contract rules over whichever representation is chosen.
 * Preserving the payload does not change what a string `Map` returns for a
   filter or group; typed results require the type information.
 
@@ -158,6 +165,40 @@ Collector component. The `prototype.*` checks implement contract rules (reject
 unsupported operations, reject integer overflow) in the harness; they are not
 ClickHouse guarantees.
 
+A post-run evidence review added the stock-exporter oracle checks and the
+literal group-by expectations, scoped the stock-processor claim to the tested
+expressions and the pinned function inventory, and separated the
+representation-level results from the harness-enforced prototype rules. The
+committed evidence is the reviewed run.
+
+=== Expectation independence
+
+Which side produces each expected value matters, so the harness keeps them
+separate:
+
+* *Oracle (typed inventory):* `fixture.EVENTS` / `fixture.SPAN_EVENTS` in
+  `019/harness/fixture.py`. `verify.py:metric_rows`, `expected_type_counts`,
+  `expected_metric_groups`, `expected_int_order`, `expected_lexical_order`, and
+  `expected_stock_string_count` compute expectations from that inventory, not
+  from ClickHouse output.
+* *Representations under test:* `019/harness/represent.py` and
+  `019/harness/model.py` (`stock_string`, `namespace_maps`, `tagged_namespace`,
+  `canonical_payload`).
+* *Independent decode:* `verify.py:decode_canonical` is a separate decoder from
+  `model.py:canonical_node`, so the lossless round-trip check does not share
+  encoder code.
+* *Independent conversion oracle:* `verify.py:phase_stock_oracle` compares both
+  the decoded canonical values (through `model.stock_string`) and the
+  representation's serving Maps with the rows the pinned Collector actually
+  wrote into `stock_map.otel_logs`. That is the discriminating check for the
+  conversion helper; without it, expectations derived from the same helper would
+  be circular.
+* *Literal expectations:* the 28 `stock_map.*` checks and the new
+  `semantics.*.group_by_literals` checks pin literal values and counts authored
+  from the inventory (for example int `1` in three rows, `NaN`, empty string,
+  explicit empty, bytes base64, and bool false), so they do not depend on the
+  Python conversion helper either.
+
 == Results
 
 [options="header",cols="3,1,1"]
@@ -169,7 +210,7 @@ ClickHouse guarantees.
 |Managed schema |11 |all passed
 |Stock processor probes |2 |all passed
 |Identity ordering |3 |all passed
-|Representation semantics |99 |all passed
+|Representation semantics |105 |all passed
 |Cost measurements |18 |all passed
 |File observations |6 |all passed
 |===
@@ -258,13 +299,17 @@ Error: invalid configuration: processors::transform/types: statement has invalid
 
 `stringify_all(attributes)` loads and produces the same conversion the exporter
 already performs: `int.one`, `double.one`, and `str.one` all arrive downstream as
-`stringValue: "1"`. The pinned OTTL function inventory has no conditional or
-typed-marshal function, and the natural per-key type expression fails to load, so
-no stock processor in the tested distribution can produce a typed canonical
-payload or a per-key type map; *both* approaches therefore need a
-Lighthouse-owned mapping component, and the choice is where that component sits.
+`stringValue: "1"`. Within the tested configuration, neither expression produces
+the type information: the natural per-key type expression fails to load, and
+`stringify_all` is lossy. Source inspection of the pinned OTTL function inventory
+finds no conditional operator and no typed marshal, so no expression of the
+tested form can build the map. This experiment did not evaluate conditional
+`where` statements across multiple transform passes, other processors, or
+components outside the pinned distribution; if no tested stock configuration
+produces the type information, both approaches need a mapping component outside
+that configuration, and the choice is where that component sits.
 
-=== Representation comparison (81 semantic acceptance checks)
+=== Representation comparison (87 semantic acceptance checks)
 
 Each representation was loaded from the same fixture rows and queried through a
 representation-specific dialect; expectations come from the typed inventory.
@@ -294,8 +339,8 @@ representation-specific dialect; expectations come from the typed inventory.
 |Non-finite doubles carried for retrieval
 |text |text |`double` + `NaN` |`d:NaN`
 
-|Bytes / arrays / maps carried, query operations rejected
-|JSON text, collides with strings |collides |typed, prototype rejects |typed, prototype rejects
+|Bytes / arrays / maps carried, query operations rejected by the prototype
+|JSON text, collides with strings |collides |typed; rejection is prototype-side |typed; rejection is prototype-side
 
 |Namespace collisions (resource/record/span scope)
 |resource and record distinct; span scope dropped by stock path
@@ -320,6 +365,11 @@ representation-specific dialect; expectations come from the typed inventory.
 |n/a |n/a |serving values equal the stock string of each decoded canonical value, with matching types |same
 |===
 
+Rows that name the prototype are harness-enforced contract rules: the
+representation makes them possible, but ClickHouse does not enforce them. The
+Interpretation separates the representation-level results from the
+query/mapping-layer obligations.
+
 Key measured details:
 
 * The companion-type serving values are byte-identical to the stock Map values
@@ -330,8 +380,8 @@ Key measured details:
   present, `record['metric.value'] = '1'` still returns 5 rows, while extracting
   the payload returns the correct 3 int rows — at extraction cost.
 * A preserved payload is not the only requirement: the type information must be
-  produced before stringification, which is exactly the gap no stock processor
-  fills.
+  produced before stringification, and the tested stock expressions do not
+  produce it.
 
 === Cost (50,000 rows, single node, `OPTIMIZE FINAL`)
 
@@ -357,9 +407,11 @@ Indicative micro-measurements, not capacity evidence. Compressed bytes on disk:
   (inside the Map and in the projection): 4.46x the stock Map versus 2.63x for a
   dedicated payload column. The projections also add their own copies of the
   type JSON.
-* Payload size dominates all variants, which is why the RFD's existing split
-  decision (Experiment 009) still applies: placement, not representation, drives
-  most of the bytes.
+* On this corpus, payload bytes dominate every variant, so placement (hot
+  column, separate table, or object storage) matters more than the serving
+  encoding for total bytes. This experiment does not select a placement, and
+  Experiment 009's separate normalized-events and exact-payload design remains
+  the current evidence; the corpus is not a retained-scale measurement.
 
 Warm execution cost (`read_bytes` from `system.query_log`):
 
@@ -367,19 +419,23 @@ Warm execution cost (`read_bytes` from `system.query_log`):
 |===
 |Query |Duration |Bytes read
 
-|Stock Map untyped filter |16 ms |388,042
-|Payload extraction filter (typed) |145 ms |55,981,120
-|Companion type Map typed filter |29 ms |438,928
+|Stock Map untyped filter |19 ms |388,042
+|Payload extraction filter (typed) |150 ms |55,981,120
+|Companion type Map typed filter |26 ms |438,928
 |Companion type Map group by type |12 ms |1,050,057
-|Tagged-value Map typed filter |24 ms |488,890
-|Tagged-value Map group by type |27 ms |1,488,890
+|Tagged-value Map typed filter |28 ms |488,890
+|Tagged-value Map group by type |29 ms |1,488,890
 |Map-carried typed filter |87 ms |683,038
 |===
 
 The payload-extraction query reads about 128x the bytes of the typed filter for
-the same answer, and the Map-carried variant is slower because the payload sits
-in the scanned Map. These are 50k-row, loopback, single-part measurements and do
-not predict retained-volume behavior.
+the same answer. The Map-carried variant's filter read more bytes and ran slower
+in this corpus, which is consistent with the payload sitting in the scanned Map,
+but the measurement did not isolate that cause: part layout, column sizes, and
+scan granularity differ across the representations. The corpus therefore
+supports byte totals and warm `read_bytes` for this fixture, not a general
+latency claim. These are 50k-row, loopback, single-part measurements and do not
+predict retained-volume behavior.
 
 === Identity ordering
 
@@ -400,18 +456,33 @@ batching.
   `DEFAULT`/type default, and no configuration can supply it. A `MATERIALIZED`
   projection can promote a Map-carried value into a queryable column, and a
   Map-carried type JSON can be parsed into a companion type `Map`.
-* No stock processor in the tested distribution can produce the typed canonical
-  payload or the type information: the pinned OTTL function inventory has no
-  per-key conditional type name and no typed marshal, and the natural expression
-  fails to load. The closest stock expression stringifies exactly the
-  distinctions the contract requires.
-* Both required serving encodings satisfy the typed-value contract on the
-  fixture when the mapping step is correct: type-sensitive filters and groups,
-  numeric ordering, presence semantics, `Int64` limits, non-finite carriage,
-  unsupported-operation detection, aggregate type errors, and lossless canonical
-  round-trip all pass. The companion type `Map` costs less and keeps stock
-  serving values; the tagged-value `Map` needs no extra column but costs more
-  bytes and more group-by work.
+* No stock processor configuration tested here produces the typed canonical
+  payload or the type information: the natural per-key expression fails to load
+  and `stringify_all` is lossy, and the pinned OTTL function inventory has no
+  per-key conditional type name and no typed marshal. Conditional `where`
+  statements across multiple passes, other processors, and components outside
+  the pinned distribution were not evaluated, so this is not proof that no stock
+  configuration can produce the type information.
+* Both required serving encodings support the representation-level semantics
+  the contract requires, verified by SQL over the stored representation against
+  expectations computed from the typed inventory: type-sensitive equality
+  filters and group keys, numeric rather than lexical ordering, missing versus
+  explicit empty versus empty string, false versus zero, exact `Int64` values
+  above 2^53 and at the signed limits, non-finite and bytes/nested carriage with
+  their types, a lossless canonical round-trip, and serving values that equal
+  both the decoded canonical values and the rows the pinned stock exporter
+  actually stored. The companion type `Map` costs less and keeps stock serving
+  values; the tagged-value `Map` needs no extra column but costs more bytes and
+  more group-by work.
+* The remaining contract guarantees are *query/mapping-layer obligations* that
+  the representation can only make possible. This experiment enforced them in
+  the harness query prototype, not in ClickHouse, so they are not established
+  for the product: explicit errors for comparisons and aggregations on bytes,
+  arrays, maps, and non-finite doubles; exclusion of non-matching types before
+  aggregation (or an error); integer aggregates accumulated without wrap and
+  rejected on overflow; and contributing-value counts separate from event
+  counts. A production query layer must implement those rules, and a production
+  mapping layer must produce the type information they depend on.
 * `json: true` is not a sufficient typed control: it preserves string versus
   number and structured collections, but drops the request on NaN, collides
   integral int/double values, loses the bytes type, collapses duplicate keys, and
@@ -422,13 +493,25 @@ batching.
   read cost).
 * A dedicated payload column written directly (the B-style mapping spike) stores
   the payload once; the stock-compatible Map-carried variant stores it twice.
+  This is a mapping and schema spike: it does not establish producer-visible
+  per-record rejection or validation timing, because an exporter sits behind
+  receiver and exporter queues where OTLP success is already queue admission
+  (Experiment 018).
 
 *Not supported by the tested components or not established here.*
 
 * That a custom exporter can keep the typed contract *and* the stock exporter's
   batching, retry, queue, and failover behavior. This experiment did not build or
-  run a custom component; it only shows the mapping/schema it could write and
-  that `exporterhelper` is the documented reuse point.
+  run a custom component; it only shows the mapping/schema it could write, and
+  that `exporterhelper` is the source-documented reuse point
+  (`clickhouseexporter/factory.go` in the pinned source), not a verified
+  integration.
+* That a custom exporter would give producers per-record rejection or a
+  particular validation timing. Validation inside an exporter sits behind
+  receiver and exporter queues, where OTLP success is already queue admission
+  (Experiment 018); partial success, per-record error reporting, and where
+  validation would have to live to change producer-visible behavior were not
+  tested.
 * That `json: true` is viable at retained scale (Experiment 006 already rejected
   native JSON at 1 TB; nothing here reopens that).
 * That multi-destination fan-out (serving plus canonical) is atomic or free of
@@ -467,6 +550,19 @@ batching.
   native ClickHouse guarantee.
 * The identity phase reuses Experiment 018's static credential routing; dynamic
   identity, key rotation, and cross-workspace batching were not exercised.
+* The stock-processor claim covers the two expressions in
+  `collector-transform-types.yaml` and `collector-transform-stringify.yaml` plus
+  the pinned OTTL function inventory. Conditional `where` statements across
+  multiple transform passes, other processors, and components outside the pinned
+  distribution were not evaluated, so the claim is not that no stock
+  configuration can produce type information.
+* Expectations for the representation checks come from the typed inventory; the
+  conversion helper itself is validated against the pinned exporter's stored
+  values in `verify.py:phase_stock_oracle` and by literal checks. The tagged-value
+  encoding is checked with literal encoding expectations
+  (`semantics.tagged.value_encoding_roundtrip`) and the shared inventory and
+  literal expectations, not against the exporter's stored values, because the
+  stock exporter has no tagged mode.
 * The payload encoding in the harness is one versioned JSON representation with
   explicit type tags; it is not proposed as the final wire format.
 * `json: true` measurements cover the fixture only, and its scale behavior is
@@ -476,6 +572,9 @@ batching.
 
 == Follow-ups
 
+* Before building a custom component, test whether conditional `where`
+  statements across multiple transform passes or another stock processor can
+  produce the companion type map; this experiment did not rule that out.
 * Choose the mapping component boundary (processor plus stock exporter, or a
   minimal exporter) and implement the typed canonical payload and companion type
   `Map` mapping; re-run this fixture and Experiment 018's acknowledgement/failover

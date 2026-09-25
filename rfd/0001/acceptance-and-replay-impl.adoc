@@ -44,7 +44,10 @@ mode was measured as a bounded control and does not preserve the typed contract
 (non-finite doubles drop the whole request, integral int/double collide, bytes
 lose their type, span scope attributes remain absent); Experiment 006's native
 JSON scale rejection is unchanged. Canonical payload preservation therefore
-needs a Lighthouse-owned mapping component; dataset routing remains open. See
+needs a mapping component outside the stock schema; whether another stock
+processor configuration can supply the type information was not ruled out
+(conditional `where` statements and other processors were not tested), and
+dataset routing remains open. See
 link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
 * [ ] Integrate authenticated tenant policy before both exports; demonstrate normal-path ingestion and exact-event retrieval against independent fixture expectations.
 

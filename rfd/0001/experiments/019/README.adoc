@@ -36,7 +36,11 @@ workspace-UUID value for the loopback fixture.
 
 - `results/checks-*.jsonl`: every check with `kind` (`semantic`,
   `characterization`, `prototype`, or `measurement`), expected and observed
-  values, and a note. The committed run recorded 185 checks, none failing.
+  values, and a note. The committed run recorded 191 checks, none failing; the
+  semantics file includes the stock-exporter oracle checks
+  (`verify.py:phase_stock_oracle`) that compare both the decoded canonical
+  values and the representation serving Maps with the pinned exporter's stored
+  rows.
 - `results/stock-map-*.sql`, `stock-json-*.sql`, `*-columns.tsv`: the stock
   exporter DDL and column layout in both modes.
 - `results/managed-insert-statement.txt`: the exporter's actual `INSERT`
