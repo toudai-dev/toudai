@@ -1,0 +1,69 @@
+= Experiment 020 evidence
+
+link:../020-native-typed-map-comparison.adoc[Experiment report] ·
+link:../../README.adoc[RFD 0001]
+
+This directory contains the runnable harness and the committed evidence for the
+native typed Map comparison. It intentionally contains only synthetic fixture
+data: no production corpus, credentials, or customer telemetry.
+
+== Layout
+
+- `harness/setup.sh` creates the pinned Python fixture environment and resolves
+  the Nix-provided ClickHouse 26.8.2.7-lts binary. No Collector build is needed:
+  this experiment compares storage layouts and queries, not the stock Collector
+  path (Experiment 019 owns that).
+- `harness/run.sh` orchestrates the five phases (`all` for a full run); it
+  starts and stops its own disposable ClickHouse processes and never touches
+  repository or benchmark data. It fails closed: each phase records its process
+  exit status in `results/phase-status.tsv`, and the run exits nonzero when an
+  expected phase is missing, empty, stale, or nonzero, or when any recorded
+  check fails.
+- `harness/test-run-failure-modes.sh fast` runs the synthetic coverage cases
+  without services; `full` additionally runs `run.sh all` once with an injected
+  exception in the semantics phase (`LH020_TEST_CRASH_PHASE`, a verify.py
+  test-only hook) and once normally, then runs the native typed check set
+  against the deliberately wrong Float64-collapsed table (expects nonzero) and
+  the correct table (expects zero).
+- `harness/fixture020.py` reuses Experiment 019's typed inventory (imported,
+  with the imported source hashes pinned in `verify.py`) and adds the two cost
+  corpora: the reused 019 corpus and a realistic attribute-diversity corpus.
+- `harness/mapping020.py` is the mapping prototype: it builds the companion
+  baseline rows, the full-sidecar native rows, the minimal-bookkeeping native
+  rows, the deliberately wrong layouts, and it enforces the duplicate-key and
+  one-map-per-key rules at the mapping boundary.
+- `harness/verify.py` evaluates the phases and measurements. It does not import
+  the mapping code: expectations come from the typed inventory or are authored
+  as literals from it.
+- `harness/native-maps.sql` defines the candidate and wrong-layout tables;
+  `harness/clickhouse-*.xml` are the pinned disposable server configuration and
+  the loopback-only user profile.
+- `harness/results/` is the evidence from the committed run.
+
+== Evidence files
+
+- `results/checks-*.jsonl`: every check with `kind` (`semantic`,
+  `characterization`, `prototype`, or `measurement`), expected and observed
+  values, and a note. `prototype.*` checks are harness query-prototype rules,
+  not ClickHouse guarantees.
+- `results/phase-status.tsv` and `results/run-start.txt`: each phase's process
+  exit status and the run marker. The coverage assertion requires all five
+  verify phases to be 0 with non-empty, non-stale checks files.
+- `results/mapping-rejections.jsonl`: duplicate-key rejections and the crafted
+  mapping-boundary cases (same-type duplicate, different-type duplicate,
+  key in two value maps, sidecar type mismatch, canonical-only key with a typed
+  value, missing sidecar entry, scalar in the minimal bookkeeping map).
+- `results/canonical-payloads.jsonl`: the versioned canonical payload written
+  for every stored fixture event.
+- `results/cost-storage.jsonl`: per-corpus, per-variant `bytes_on_disk` and
+  per-column compressed/uncompressed bytes after `OPTIMIZE ... FINAL`.
+- `results/cost-queries.jsonl`: warm `read_rows`, `read_bytes`,
+  `result_rows`, duration, CPU microseconds, and memory for each predefined
+  query per corpus and variant.
+- `results/cost-insert.jsonl`: mapping and insert wall time per corpus and
+  variant (bounded 50,000-row corpora).
+
+Re-running `harness/run.sh all` from an empty state overwrites
+`harness/results/` with an equivalent set of files; the pinned expectations in
+`harness/verify.py`, the typed inventory, and the corpora in
+`harness/fixture020.py` are what make the comparison meaningful.
