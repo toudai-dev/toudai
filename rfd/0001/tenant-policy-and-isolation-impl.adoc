@@ -10,6 +10,17 @@ tests follow the working raw and accelerated paths.
 
 * [ ] Define account/workspace/dataset records and workspace-scoped ingestion keys, including multiple keys per workspace, rotation, revocation/cache-expiry behavior, and separate write/read/admin permissions.
 * [ ] Implement key-derived trusted workspace scope before Collector batching; verify dataset routing stays within it, unknown datasets fail, and producer scope attributes cannot override ownership or leak credentials.
++
+Experiment 018 implemented a *static* credential-to-workspace binding with the
+tested stock components (`routing` connector on the `Authorization` header plus a
+`resource` processor before batching). Producer scope attributes could not
+override it, an unknown credential was rejected with HTTP 401, and no credential
+text reached any attribute map. In the pinned source `bearertokenauth` attaches no
+identity and the fixture confirmed that `auth.*` context is empty, so with these
+components key-derived resolution, dataset routing, and rotation/revocation
+behavior remain custom work; other stock authenticators were not evaluated.
+Cross-workspace isolation through a shared downstream batch was not exercised.
+See link:experiments/018-collector-compatibility.adoc[Experiment 018].
 
 * [ ] Integrate authentication, validation, redaction, quotas, and cached versioned tenant policy with Collector gateways before normal and overflow export; reuse available components and justify any custom extension.
 

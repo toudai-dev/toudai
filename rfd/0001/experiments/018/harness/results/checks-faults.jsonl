@@ -1,0 +1,1 @@
+{"name": "fault.permanent_error_rows_dropped", "expected": "0", "observed": "0", "ok": true, "probe": "SELECT count() FROM lh018.otel_logs_broken"}

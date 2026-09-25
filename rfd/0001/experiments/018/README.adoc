@@ -1,0 +1,36 @@
+= Experiment 018 evidence
+
+link:../018-collector-compatibility.adoc[Experiment report] ·
+link:../../README.adoc[RFD 0001]
+
+This directory contains the runnable harness and the committed evidence for the
+Collector compatibility experiment. It intentionally contains only synthetic
+fixture data: no production corpus, credentials, or customer telemetry. Every
+token, key, and credential in this directory is a synthetic `lh018-*` value for
+the loopback fixture, and no real credential or customer data is included.
+
+== Layout
+
+- `harness/setup.sh` downloads the pinned `otelcol-contrib` build (checksum
+  verified), creates the pinned Python fixture environment, and resolves the
+  Nix-provided ClickHouse and MinIO binaries.
+- `harness/run.sh` orchestrates the five phases (`all` for a full run); it
+  starts and stops every disposable service and never touches repository or
+  benchmark data.
+- `harness/fixture.py` builds the deterministic OTLP protobuf fixture;
+  `harness/sink.py` provides the capture, stall, and proxy test endpoints;
+  `harness/verify.py` evaluates the assertions.
+- `harness/collector-*.yaml` and `harness/clickhouse-*.xml` are the pinned
+  component configurations, including the two failover variants (connector queue
+  enabled and disabled) and the negative control.
+- `harness/results/` is the evidence from the committed run: per-phase check
+  outcomes (`checks-*.json`), producer-visible responses (`emit-*.out`,
+  `*-responses.json`), Collector metrics scrapes (`metrics-*.txt`), the stock
+  DDL (`ddl-stock-exporter.sql`, `columns.tsv`,
+  `clickhouse-async-settings.tsv`), receiver-side OTLP (`typed-received-*.json`),
+  the re-batched downstream capture (`sink-captured.jsonl`), the spilled object
+  (`overflow-object-1.binpb`) and its listing, replay records, and log excerpts.
+
+Re-running `harness/run.sh all` from an empty state overwrites
+`harness/results/` with an equivalent set of files; the pinned expectations in
+`harness/verify.py` are what make the comparison meaningful.

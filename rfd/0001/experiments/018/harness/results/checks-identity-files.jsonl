@@ -1,0 +1,23 @@
+{"name": "received.log_record_count", "expected": "9", "observed": "9", "ok": true, "probe": "9"}
+{"name": "received.res.int64_kept_as_int", "expected": "{\"intValue\": \"9007199254740993\"}", "observed": "{\"intValue\": \"9007199254740993\"}", "ok": true, "probe": "{\"intValue\": \"9007199254740993\"}"}
+{"name": "received.res.bytes_kept_as_bytes", "expected": "{\"bytesValue\": \"AAH+/w==\"}", "observed": "{\"bytesValue\": \"AAH+/w==\"}", "ok": true, "probe": "{\"bytesValue\": \"AAH+/w==\"}"}
+{"name": "received.res.empty_kept_as_empty", "expected": "{}", "observed": "{}", "ok": true, "probe": "{}"}
+{"name": "received.res.map_kept_as_kvlist", "expected": "True", "observed": "True", "ok": true, "probe": "True"}
+{"name": "received.res.array_kept_as_array", "expected": "True", "observed": "True", "ok": true, "probe": "True"}
+{"name": "received.attr.nan_kept_as_double", "expected": "{\"doubleValue\": \"NaN\"}", "observed": "{\"doubleValue\": \"NaN\"}", "ok": true, "probe": "{\"doubleValue\": \"NaN\"}"}
+{"name": "received.attr.map_kept_as_kvlist", "expected": "True", "observed": "True", "ok": true, "probe": "True"}
+{"name": "received.scope_attrs_separate", "expected": "{\"intValue\": \"7\"}", "observed": "{\"intValue\": \"7\"}", "ok": true, "probe": "{\"intValue\": \"7\"}"}
+{"name": "received.resource_attr_present", "expected": "True", "observed": "True", "ok": true, "probe": "True"}
+{"name": "received.record_attr_present", "expected": "True", "observed": "True", "ok": true, "probe": "True"}
+{"name": "received.duplicate_keys_kept_as_sent", "expected": "[]", "observed": "[]", "ok": true, "probe": "[]"}
+{"name": "received.duplicate_keys_present_twice", "expected": "[\"first\", \"second\"]", "observed": "[\"first\", \"second\"]", "ok": true, "probe": "[\"first\", \"second\"]"}
+{"name": "received.span_timing_raw_not_duration", "expected": "{\"start\": \"1788246000123456789\", \"end\": \"1788246000123458289\", \"has_duration\": false}", "observed": "{\"start\": \"1788246000123456789\", \"end\": \"1788246000123458289\", \"has_duration\": false}", "ok": true, "probe": "{\"start\": \"1788246000123456789\", \"end\": \"1788246000123458289\", \"has_duration\": false}"}
+{"name": "batch.sink_requests_after_rebatching", "expected": "1", "observed": "1", "ok": true, "probe": "1"}
+{"name": "batch.sink_resource_groups", "expected": "2", "observed": "2", "ok": true, "probe": "2"}
+{"name": "batch.sink_records_total", "expected": "7", "observed": "7", "ok": true, "probe": "7"}
+{"name": "batch.sink_every_record_has_trusted_workspace", "expected": "11111111-1111-4111-8111-111111111111", "observed": "11111111-1111-4111-8111-111111111111", "ok": true, "probe": "11111111-1111-4111-8111-111111111111"}
+{"name": "identity.quarantine_file_empty", "expected": "no-records", "observed": "no-records", "ok": true, "probe": "no-records"}
+{"name": "forge.quarantine_file_empty", "expected": "no-records", "observed": "no-records", "ok": true, "probe": "no-records"}
+{"name": "identity.unauthorized_status", "expected": "401", "observed": "401", "ok": true, "probe": "401"}
+{"name": "ack.typed_logs_response_fast", "expected": "under-1s", "observed": "under-1s", "ok": true, "probe": "under-1s"}
+{"name": "ack.typed_visibility_ms", "expected": null, "observed": "14", "ok": true, "probe": "14"}

@@ -1,0 +1,506 @@
+= Experiment 018: Collector Compatibility and Acknowledgement Boundaries
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed
+- *Started:* 2026-09-24T16:53:50Z
+- *Completed:* 2026-09-24T16:57:25Z
+- *Source mutation:* None; a disposable local ClickHouse/MinIO/Collector topology and a synthetic fixture only
+- *Harness:* `018/harness/` (fixture, sink, assertions, orchestration); `018/README.adoc` describes the layout
+- *Result:* 179/179 characterization assertions passed in the committed run (expectations pinned to observed stock behavior, not acceptance-contract passes); measured behavior and gaps below
+
+== Question
+
+Which parts of the RFD 0001 Collector-first contract do standard OpenTelemetry
+Collector components actually satisfy before Lighthouse builds application code
+around assumptions?
+
+. OTLP logs, spans, and metrics mapped by the stock ClickHouse exporter: are
+   resource, scope, and record namespaces separated, and which received values
+   change meaning when they are stored?
+. Can a trusted authenticated workspace identity be attached before batching and
+   preserved through batching, failure overflow, and replay without trusting a
+   producer-supplied attribute?
+. What are the observable acknowledgement, retry, duplicate, partial-failure,
+   and crash behaviors, and where exactly is the boundary at which OTLP success
+   is returned?
+
+This is a compatibility experiment, not an implementation of the ingestion
+service or of a custom durable log. Where the tested components cannot express the
+contract, the experiment records a reproducible limitation instead of inventing
+infrastructure.
+
+== Hypothesis
+
+Written before the fixture run, from the pinned component documentation and
+source:
+
+* The stock ClickHouse exporter stores attributes in `Map(LowCardinality(String),
+   String)` columns, so attribute values are stringified and the received OTLP
+   type is not preserved; the receiver copy of the same data should still carry
+   the original types.
+* `bearertokenauth` validates a static token but attaches no identity, so the
+   tested processors cannot derive workspace scope from the authenticated
+   credential; request headers are the only per-request input available to
+   routing and attribute processors in that configuration.
+* An OTLP success response will mean admission to some asynchronous queue rather
+   than a durable write, because the exporter helper queue and the failover
+   connector queue are both in the path.
+* Object-storage overflow and replay are expressible with the stock failover
+   connector plus the AWS S3 exporter, but replaying an object cannot be
+   idempotent without a deduplication mechanism.
+
+Two hypotheses were incomplete and were corrected by the run: the failover
+connector's own sending queue is *enabled by default* (the reference
+configuration only disables the primary exporter queue), and the ClickHouse
+`Map` column keeps duplicate keys rather than collapsing them.
+
+== Environment
+
+The experiment ran in a disposable sandbox (E2B orb): 2 vCPU, 3.8 GiB RAM,
+64 GiB overlay filesystem, kernel 6.1.158+. All services bound loopback only and
+all state lived under `/home/user/lh018`, outside the repository. No cloud
+resources, shared databases, or capacity runs were used.
+
+[options="header",cols="2,3"]
+|===
+|Component |Pinned version
+
+|Collector distribution
+|`otelcol-contrib` v0.161.0, `linux_amd64`, sha256
+`778c689efa681ff6e4722ce9f66b9b7f57c3ba009ab2e2b43dc2e0315862c731`
+
+|ClickHouse server
+|26.8.2.7-lts from the repository flake (`/nix/store/p6la1wbwplsza9946lkyrg038206z1jk-clickhouse-26.8.2.7-lts`)
+
+|Object storage
+|MinIO `RELEASE.2025-10-15T17-29-55Z` from the flake's nixpkgs revision
+`e5bdc4a41d4c072fe1e3787eaa0320a384741d44` (loopback only)
+
+|Fixture runtime
+|Python 3.11, `opentelemetry-proto==1.39.0`, `protobuf==6.33.6`,
+`requests==2.34.2`
+
+|Protocol
+|OTLP protobuf over HTTP (`/v1/logs`, `/v1/traces`, `/v1/metrics`)
+|===
+
+Components exercised (stability from the pinned component READMEs): `otlp`
+receiver (logs/traces/metrics stable), `clickhouse` exporter (beta logs/traces,
+alpha metrics), `routing` connector, `failover` connector (alpha), `awss3`
+exporter (alpha), `bearertokenauth` extension (beta), `attributes`/`resource`
+processors, `file` exporter, `file_storage` extension, `otlp_http` exporter, and
+the exporter helper `sending_queue`/`retry_on_failure` behavior.
+
+`018/harness/setup.sh` reproduces the downloads and verifies the Collector checksum;
+`018/harness/run.sh all` runs every phase.
+
+== Fixture
+
+A deterministic synthetic corpus built by `018/harness/fixture.py` with fixed event
+timestamps (`2026-09-01T07:00:00.123456789Z`). Values were chosen where string
+coercion would change meaning: integers above 2^53, integer/double/string `1`,
+non-finite doubles, bytes, arrays, maps, explicit empty values, empty strings,
+missing keys, duplicate keys, case variants, a producer string equal to a map's
+JSON text, byte and map bodies, zero and negative span durations, and metric
+values above 2^53.
+
+[options="header",cols="1,1,3"]
+|===
+|Signal |Label |Purpose
+
+|logs |`typed` |9 records: resource/scope/record separation, typed values, namespace collision, duplicate keys, timestamp fallback, trace correlation, event name, bodies
+|traces |`typed` |5 spans: typed attributes, span events, links, zero/negative/missing durations, scope attributes
+|metrics |`typed` |gauge, sum, histogram with typed attributes and a 2^53+1 integer value
+|logs |`identity-a` / `identity-b` |one record each with a forged producer `lighthouse.workspace_id`
+|logs |`batch` |6 records in one request to observe exporter re-batching
+|logs |`forge` |negative control for a producer-supplied workspace header
+|logs |`fault-1..4` |1/2/3/4 records for outage, queue, and crash injection
+|===
+
+== Method
+
+Five phases run in one process (`018/harness/run.sh all`), each starting and stopping
+its own services and asserting against independent expectations:
+
+. *typed*: stock OTLP to ClickHouse with `create_schema: true`; a parallel `file`
+   exporter preserves a receiver-side copy of the accepted OTLP JSON, so
+   receiver-side and exporter-side changes can be separated. The stock DDL,
+   columns, and ClickHouse async-insert defaults are captured.
+. *identity*: two static credentials bound to two workspaces by `routing`
+   connector conditions on the `Authorization` header, with a per-pipeline
+   `resource` processor injecting the trusted workspace attribute before any
+   queue; a parallel `otlp_http` sink with `sending_queue.batch.min_size: 4`
+   records what a downstream receives after re-batching.
+. *forge* (negative control): the same authentication but with the workspace
+   derived from a producer-supplied `X-Lighthouse-Workspace` header, plus an
+   `auth.*` context probe.
+. *failover*: `failover` connector in front of a `clickhouse` primary
+   (`sending_queue` disabled, synchronous retries) and an `awss3` overflow
+   exporter; ClickHouse is stopped, then restarted; the spilled object is
+   downloaded and replayed twice through a catch-up receiver.
+. *faults*: permanent insert error, bounded queue with a stalled downstream,
+   SIGKILL with an in-memory queue, and SIGKILL with a file-backed queue that is
+   drained after the downstream returns.
+
+The first run of each phase was exploratory (observations recorded, expectations
+pinned to the observed values); the committed run is a full `run.sh all` from an
+empty state that re-asserts every pinned value. Assertions cover both correct
+and incorrect behavior, including the negative controls.
+
+== Commands
+
+[source,bash]
+----
+# one-time: pinned downloads and Python environment
+rfd/0001/experiments/018/harness/setup.sh
+
+# full reproducible run; writes evidence to harness/results/
+rfd/0001/experiments/018/harness/run.sh all
+----
+
+`run.sh` accepts a single phase name for iteration. Individual phases delete and
+re-insert only their own fixture rows; `run.sh all` starts from an empty
+ClickHouse database, MinIO bucket, and queue directory.
+
+== Results
+
+All 179 characterization assertions passed. They assert the pinned components'
+observed behavior, including behavior that loses information, so drift is
+detected; they are not acceptance-contract passes and do not by themselves
+satisfy an RFD checklist item. Evidence files are under `018/harness/results/`:
+`checks-*.jsonl` (every check with expected and observed values), `emit-*.jsonl`
+(producer-visible status and latency), `metrics-*.txt` (Collector Prometheus
+endpoint during each phase), `ddl-stock-exporter.sql`, `columns.tsv`,
+`typed-received-logs.jsonl`/`typed-received-traces.jsonl` (receiver-side OTLP),
+`sink-captured.jsonl`, `overflow-*.txt/jsonl`, `overflow-object-1.binpb`,
+`replay-*.jsonl`, `permanent-log-excerpt.txt`, `crash-persistent-*.tsv`, and
+`clickhouse-async-settings.tsv`.
+
+[options="header",cols="3,1,1"]
+|===
+|Phase |Checks |Result
+
+|Typed mapping |87 |87 passed
+|Identity |9 + 23 file |all passed
+|Forge negative control |2 + 23 file |all passed
+|Failover and replay |4 + 11 file |all passed
+|Faults and crash |1 + 6 file |all passed
+|Observability |13 |all passed
+|===
+
+=== Typed mapping: what the stock exporter preserves and loses
+
+The receiver copy (`typed-received-logs.jsonl`) keeps every received type:
+`intValue` for 9007199254740993, `doubleValue` for NaN, `bytesValue` base64,
+`arrayValue`, `kvlistValue`, and an explicit empty `{}`. The ClickHouse mapping
+then flattens all of it into string maps:
+
+[options="header",cols="2,2,2"]
+|===
+|Received OTLP value |Stored `LogAttributes` value |Meaning change
+
+|int 9007199254740993 |`9007199254740993` |none (exact), but type is gone
+|int 1, double 1.0, string "1" |`1`, `1`, `1` |types indistinguishable
+|bool true / false |`true` / `false` |recoverable by convention only
+|double NaN / +Inf / -Inf |`NaN` / `Infinity` / `-Infinity` |ES6-style text, not a number
+|double -0.0 |`-0` |sign preserved as text
+|bytes `00 01 fe ff` |`AAH+/w==` |base64; original bytes not queryable as such
+|array `["a",1,true]` |`["a",1,true]` |JSON text; collides with a producer string
+|map `{nested.int:2,nested.bool:false}` |`{"nested.bool":false,"nested.int":2}` |JSON text; collides with a producer string
+|explicit empty value |`''` (key present) |same as an empty string, but distinct from a missing key
+|missing key |absent |presence test works
+|===
+
+Verified directly: an attribute whose producer string equals the JSON text of a
+map is stored identically to the map (`str.json_like == map.nested`), and int 1,
+double 1.0, and string "1" compare equal as stored strings.
+
+Namespace separation is structurally correct: `ResourceAttributes`,
+`ScopeAttributes`, and `LogAttributes` are separate Map columns, a `collide` key
+in both resource and record attributes keeps both values, and `Foo`/`foo` remain
+distinct. Two gaps were measured:
+
+* *Duplicate keys are stored twice.* A crafted record with `dup` twice produced
+  a Map with three keys where `countEqual(mapKeys(LogAttributes),'dup') = 2`;
+  `LogAttributes['dup']` returns the first value. The pinned path neither rejects
+  the duplicate collection nor keeps a single unambiguous value.
+* *Traces have no scope attributes column.* `otel_traces` stores `ScopeName` and
+  `ScopeVersion` only; scope attributes on a span scope group are dropped.
+  Logs and metrics tables do store `ScopeAttributes`.
+
+Other measured mapping behavior:
+
+* `Timestamp` is `DateTime64(9)` and preserves the nanosecond value; a log
+  record with `time_unix_nano = 0` is stored at its `observed_time_unix_nano`.
+* Trace correlation is preserved as hex `TraceId`/`SpanId` plus `TraceFlags`.
+* Span `Duration = EndTimestamp - StartTimestamp` as `UInt64`: a zero-duration
+  span is 0, and a span whose end precedes its start becomes
+  `18446744073709550616` (2^64 - 1000) instead of being rejected or flagged.
+* Log record `event_name` is stored in the `EventName` column (v0.161.0 schema).
+* Metrics land in five separate `otel_metrics_*` tables; a gauge data point with
+  `as_int = 9007199254740993` is stored as Float64 `9007199254740992`, and
+  integer and double metric values share the `Value Float64` column.
+* Body mapping: string as-is, bytes base64 (`AAH+/w==`), int `42`, map
+  `{"k":"v","n":1}`.
+* The stock logs DDL orders by
+  `(toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)` and traces by
+  `(ServiceName, SpanName, toDateTime(Timestamp))`, with eight fixed
+  `__otel_materialized_*` columns over `ResourceAttributes`.
+* A promoted column is possible without replacing the exporter: after
+  `ALTER TABLE ... ADD COLUMN ws_materialized LowCardinality(String)
+  MATERIALIZED ResourceAttributes['lighthouse.workspace_id']`, the column is
+  populated for later inserts with `create_schema: false`. The exporter cannot
+  insert a column it does not know, so arbitrary promoted columns require
+  MATERIALIZED expressions over the Map columns or a custom exporter.
+* The exporter inserts with `async_insert=1`; ClickHouse 26.8.2.7 defaults are
+  `async_insert=1` and `wait_for_async_insert=1`, so an insert acknowledgement
+  waits for the server-side async insert flush rather than a bare queue.
+
+=== Workspace identity: what the tested components can and cannot do
+
+A trusted, credential-derived workspace scope *can* be expressed with the tested
+stock components when the credential itself selects the pipeline:
+
+[source,yaml]
+----
+connectors:
+  routing/logs:
+    default_pipelines: [logs/quarantine]
+    table:
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh018-ws-a-key"
+        pipelines: [logs/ws-a]
+# logs/ws-a then runs:
+processors:
+  resource/ws-a:
+    attributes:
+      - key: lighthouse.workspace_id
+        action: upsert
+        value: 11111111-1111-4111-8111-111111111111
+----
+
+Measured with that configuration (`include_metadata: true` on the receiver):
+
+* Both workspace requests landed with their trusted workspace IDs; the request
+  that also carried a forged producer `lighthouse.workspace_id =
+  99999999-...` was stored with the trusted value, and no row anywhere carries
+  the forged value.
+* An unknown credential was rejected with HTTP 401 and inserted no rows.
+* The synthetic credentials do not appear in any resource or record attribute
+  map (`arrayStringConcat(mapValues(...),' ') LIKE '%lh018-ws%'` matched 0 rows).
+* Spans routed through the same connector were stamped with the same trusted
+  workspace attribute.
+* Re-batching: the 1-record and 6-record requests were merged by the exporter's
+  `sending_queue.batch` (`min_size: 4`) into *one* downstream request containing
+  two resource groups and seven records; every group kept the trusted workspace
+  attribute. Re-batching preserved per-resource attributes rather than
+  overwriting them. Both requests used workspace A's credential and the capture
+  sink was attached only to the workspace A pipeline, so this is same-workspace
+  re-batching; cross-workspace isolation through batching was not exercised.
+* Replay: an object replayed through a receiver authenticated with a separate
+  catch-up credential was stored with the workspace attribute that was already
+  inside the payload; ownership was not re-derived from the replay credential.
+
+Limitations measured or established from the pinned source:
+
+* The tested authenticator carries no identity. In the pinned v0.161.0 source,
+  `bearertokenauth.Authenticate` returns the request context unchanged (no
+  subject, token, or key identity), and the fixture confirmed it: a `resource`
+  processor using `from_context: auth.token` produced no attribute at all. With
+  the tested `routing`, `attributes`, and `resource` processors, the binding
+  above is therefore a static credential-equality condition in configuration,
+  one route per credential, with no dynamic credential-to-workspace resolution.
+  Other stock authenticators (for example OIDC or basic-auth extensions) and
+  other processors were not tested, so this does not establish that no stock
+  component can carry identity.
+* The negative control shows why a producer-supplied workspace header must not be
+  used: with `from_context: metadata.X-Lighthouse-Workspace`, a request holding
+  workspace A's key and sending `X-Lighthouse-Workspace: <workspace B>` was
+  stored in workspace B.
+* The tested pipeline cannot express per-key metadata (dataset, rotation state,
+  revocation time) or an external policy authority; no stock extension providing
+  key metadata was evaluated. Key rotation and revocation require a Collector
+  restart or configuration reload; no propagation bound was measured. This is the
+  concrete gap behind the tenant plan's "key-derived trusted workspace scope"
+  item.
+* The route table scales with the number of workspaces (one condition and one
+  pipeline per credential); the experiment did not measure a large route table.
+
+=== Failure overflow, replay, and duplicates
+
+Topology: `failover` connector with `priority_levels: [[logs/a-primary],
+[logs/a-overflow]]`, the primary `clickhouse` exporter with
+`sending_queue: {enabled: false}` and synchronous retries, the overflow
+`awss3` exporter writing `otlp_proto` objects to MinIO.
+
+* Direct path: a baseline request inserted normally.
+* ClickHouse stopped, failover connector's default queue *enabled*: the producer
+  received HTTP 200 after 3.3 ms while the primary retried and then rejected the
+  records; the payload was then written to
+  `overflow/year=2026/month=09/day=24/hour=22/minute=11/logs_<id>.binpb`.
+  OTLP success here means *connector queue admission*.
+* ClickHouse stopped, connector `sending_queue: {enabled: false}`: the producer
+  received HTTP 200 after 1246 ms, i.e. only after the primary retry budget was
+  exhausted and the S3 object was written.
+* After ClickHouse restarted, a fresh request landed in ClickHouse while both
+  spilled objects were still in the bucket; the failover connector's periodic
+  retry re-established the primary level. Fresh ingestion therefore resumes
+  without waiting for the backlog.
+* The spilled object contains the trusted `lighthouse.workspace_id` attribute and
+  the two spilled records; replaying it twice *manually* (downloading the object
+  and POSTing it to an OTLP receiver authenticated with a catch-up credential)
+  produced two more copies each time. Final raw counts: `fault-log-0` = 4,
+  `fault-log-1` = 3, `fault-log-2` = 1, `fault-log-3` = 1. Nothing deduplicates
+  replayed or retried data.
+
+=== Acknowledgement, retry, partial failure, queue exhaustion, crash
+
+[options="header",cols="2,1,3"]
+|===
+|Scenario |Producer-visible |Observed
+
+|Queue enabled, healthy destination |200 in ~3 ms |row visible 14 ms after the export request; `otelcol_exporter_queue_size` 0 after drain
+|Permanent insert error (table missing `ScopeAttributes`), queue enabled |200 in 3.0 ms |exporter retried seven times over ~2.6 s, then `Exporting failed. Dropping data` (`no more retries left`); 0 rows; `otelcol_exporter_send_failed_log_records` 2, `sent` 0
+|Bounded queue (size 2, one consumer, stalled downstream) |2 × 200, then 6 × HTTP 503 |0 rows inserted; `otelcol_exporter_enqueue_failed_log_records` 6; `otelcol_receiver_refused_log_records` 6; `queue_size` 2
+|SIGKILL with in-memory queue (3 requests admitted) |3 × 200 |0 rows; the admitted batches were lost with the process
+|SIGKILL with `file_storage` queue (3 requests admitted) |3 × 200 |3 queued requests recovered on restart, drained in 13 ms after the downstream returned, 6 rows; a later producer retry added 2 more rows (4 + 4 duplicates)
+|===
+
+Additional measured behavior:
+
+* No OTLP *partial success* was observed. The tested receiver does not validate
+  individual records: malformed or rejected input produces request-level
+  failures, and the pinned ClickHouse exporter returns generic errors, so a
+  permanent schema error is retried like a transient one and then dropped after
+  `max_elapsed_time`. The exporter helper does expose an `error.permanent`
+  attribute on its detailed telemetry, but the ClickHouse exporter does not
+  classify SQL errors as permanent.
+* Startup against an unresponsive ClickHouse endpoint delayed the OTLP receiver
+  by 30.0 s (the driver's connection timeout during schema detection) and then
+  logged `schema detection failed` and continued with the `EventName` feature
+  disabled. A restarting gateway therefore starts slowly and silently changes its
+  insert shape when the database is unreachable.
+* With retries disabled, a *dispatched* batch that fails is dropped even when the
+  queue is file-backed; only batches still in the queue survive a crash.
+
+=== Observability during outages
+
+The Collector's Prometheus endpoint exposes exporter and receiver counters
+independently of ClickHouse: `otelcol_exporter_sent_log_records`,
+`otelcol_exporter_send_failed_log_records`,
+`otelcol_exporter_enqueue_failed_log_records`, `otelcol_exporter_queue_size`,
+`otelcol_exporter_queue_capacity`, `otelcol_receiver_accepted_log_records`, and
+`otelcol_receiver_refused_log_records`, with `exporter` labels for the failover
+connector queue and the `awss3/overflow` queue. They were readable during the
+ClickHouse outage.
+
+In this topology no captured scrape contained an overflow object backlog or
+catch-up progress metric; the only related series were the local exporter queues
+(`awss3/overflow`, `failover/logs-a`). That is a statement about the tested
+configuration, not proof that no stock component can expose such telemetry. Any
+object-count or catch-up progress signal would have to come from outside this
+pipeline.
+
+== Interpretation
+
+*Supported by the measurements.*
+
+* Standard OTLP logs, traces, and metrics reach ClickHouse through the stock
+  exporter, with resource/scope/record namespaces separated for logs and metrics
+  and timestamps, trace correlation, span events/links, and metric structure
+  preserved. Spans are the exception: `otel_traces` stores scope name and
+  version but has no scope-attributes column, so span scope attributes are lost
+  (measured, not inferred).
+* A static credential-to-workspace binding can be enforced before batching with
+  the tested stock `routing` connector plus a `resource` processor, and it
+  survives same-workspace batching, overflow, and manual replay.
+  Producer-supplied scope attributes cannot override it in that design.
+* Failure overflow and manual replay are expressible with the tested stock
+  components (`failover` connector, `awss3` exporter, an OTLP receiver used as
+  the catch-up endpoint), and replayed objects carry the trusted workspace
+  identity. This is object replay, not validation of stock S3-notification-driven
+  catch-up.
+* OTLP success is an admission signal at whichever queue sits first in the path:
+  exporter helper queue, failover connector queue, or the destination write when
+  all queues are disabled. The experiment measured all three cases.
+
+*Not supported by the tested components and schema.*
+
+* Type-preserving storage. The stock ClickHouse schema stores every attribute as
+  a string in a Map; integer/double/string distinctions, explicit-empty versus
+  empty-string, and bytes/array/map identity are lost or textualized. The RFD's
+  typed-value contract cannot be met by the pinned stock exporter schema
+  (v0.161.0); a custom exporter or a custom table plus a mapping component is
+  required.
+* Duplicate-key rejection, and span scope-attribute storage (both measured
+  against the pinned exporter schema).
+* Dynamic credential resolution, key metadata, rotation/revocation propagation,
+  and per-workspace routing that scales beyond a static configuration, with the
+  tested authenticator and processors.
+* Per-record partial success and permanent-error classification.
+* Overflow backlog and catch-up progress telemetry in the tested topology.
+* Idempotent replay or any deduplication.
+
+*Unknown after this experiment.*
+
+* Behaviour at representative rates, concurrency, or retained volume. This
+  fixture is a few dozen records on loopback.
+* Whether a custom exporter can keep the typed contract without losing the
+  stock exporter's batching and retry behavior; the alternative (custom table +
+  custom processor) was not prototyped.
+* SQS-driven catch-up. MinIO cannot emit AWS SQS notifications locally, so only
+  manual object replay through an OTLP receiver was exercised, not the
+  `awss3` receiver's notification path or duplicate notifications.
+* Whether another stock authenticator (or a custom one) can attach identity that
+  the tested processors can consume, and whether cross-workspace isolation holds
+  when one downstream batch carries records from two workspaces.
+* Whether a `MATERIALIZED` workspace column on the stock table is a sufficient
+  routing/query key for the unified schema, and how it interacts with a custom
+  schema managed by Lighthouse.
+
+== Limitations
+
+* The environment is a two-vCPU sandbox, not the benchmark host; no throughput,
+  latency, or capacity claim follows from this experiment.
+* MinIO replaced AWS S3 and object notifications were simulated by replaying the
+  downloaded object; S3 event delivery, duplicate notifications, and SQS
+  visibility timeouts were not tested.
+* Only the logs signal was exercised through overflow and replay; traces and
+  metrics were verified on the direct path.
+* Only OTLP/HTTP was tested. gRPC metadata paths exist in the same components but
+  were not exercised.
+* The queue-full test used a stalled TCP listener rather than a real overloaded
+  ClickHouse; the rejection path (HTTP 503 and `enqueue_failed`) is the stock
+  exporter-helper behavior, but the numbers are not capacity evidence.
+* The permanent-error test used a schema mismatch rather than a data-dependent
+  error, and the ambiguous-insert case (ClickHouse commits but the response is
+  lost) was not injected; duplicate counts come from replay and retry, not from
+  an ambiguous insert.
+* Expectations are pinned to values observed in this environment; a component
+  upgrade is expected to change some of them, which is the point of the checks.
+* Claims about stock components are scoped to the pinned versions and the
+  configurations actually run: `bearertokenauth`, `routing`, `attributes`,
+  `resource`, `failover`, `awss3`, `clickhouse`, and the exporter helper queues.
+  Other stock authenticators, processors, and exporters were not evaluated.
+* Cross-workspace batching was not exercised: the capture sink observed only the
+  workspace A pipeline and every captured record belonged to workspace A.
+
+== Follow-ups
+
+* Decide the typed-value strategy: custom exporter/table with typed attribute
+  columns versus the stock string Map plus a canonical payload column. The
+  RFD's typed contract cannot be satisfied by the pinned stock schema (v0.161.0).
+* Decide the workspace-identity strategy: a custom authenticator that attaches
+  identity (for example `auth.*` context data) plus a mapping processor, versus a
+  small custom gateway component. The tested static route table is acceptable
+  only for a small, slowly changing credential set, and it does not by itself
+  establish that no other stock authenticator can carry identity.
+* Prototype the smallest custom component that preserves the typed contract and
+  re-run this fixture against it as Experiment 019 or later.
+* Add an ambiguous-insert and duplicate-notification test, and define the
+  deduplication key and mechanism the query/acceptance plan will require.
+* Extend the failover phase to traces and metrics, and add an SQS-compatible
+  notification path (for example ElasticMQ) to exercise the `awss3` receiver.
+* Carry the measured ack boundaries into the acceptance plan: queue admission
+  must be reported as admission, not durability, and the connector queue default
+  must be an explicit, documented choice.

@@ -1,0 +1,6 @@
+{"name": "fault.queue_full_inserted_no_rows", "expected": "0", "observed": "0", "ok": true, "probe": "0"}
+{"name": "ack.permanent_error_producer_sees_success", "expected": "200", "observed": "200", "ok": true, "probe": "200"}
+{"name": "ack.queue_full_has_rejection", "expected": "rejected", "observed": "rejected", "ok": true, "probe": "rejected"}
+{"name": "ack.queue_full_statuses", "expected": null, "observed": "200,200,503,503,503,503,503,503", "ok": true, "probe": "200,200,503,503,503,503,503,503"}
+{"name": "ack.crash_memory_producer_saw_success", "expected": "[200, 200, 200]", "observed": "[200, 200, 200]", "ok": true, "probe": "[200, 200, 200]"}
+{"name": "ack.crash_persistent_drain_ms", "expected": null, "observed": "13", "ok": true, "probe": "13"}

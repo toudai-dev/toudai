@@ -1,0 +1,1 @@
+{"signal": "logs", "label": "fault-1", "description": "1 records for fault injection", "url": "http://127.0.0.1:4318/v1/logs", "status": 503, "elapsed_ms": 3.93, "response_body": "\b\u000e\u0012\u0015sending queue is full", "request_bytes": 640, "started_at": "2026-09-24T16:55:41.436444+00:00", "sent_at": "2026-09-24T16:55:41.456618+00:00"}

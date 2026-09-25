@@ -1,0 +1,1 @@
+{"signal": "logs", "label": "fault-3", "description": "3 records for fault injection", "url": "http://127.0.0.1:4318/v1/logs", "status": 200, "elapsed_ms": 1246.31, "response_body": "\n", "request_bytes": 764, "started_at": "2026-09-24T16:54:35.016168+00:00", "sent_at": "2026-09-24T16:54:36.284312+00:00"}
