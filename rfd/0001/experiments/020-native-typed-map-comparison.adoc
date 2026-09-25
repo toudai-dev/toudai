@@ -3,11 +3,11 @@
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
 - *Status:* Completed
-- *Started:* 2026-09-25T07:10:15Z (committed run)
-- *Completed:* 2026-09-25T07:13Z
+- *Started:* 2026-09-25T07:40:04Z (committed run)
+- *Completed:* 2026-09-25T07:43Z
 - *Source mutation:* None; a disposable local ClickHouse topology and synthetic fixtures only
 - *Harness:* `020-native-typed-map-comparison/harness/` (fixture, mapping prototype, assertions, orchestration); `020-native-typed-map-comparison/README.adoc` describes the layout
-- *Result:* 225/225 recorded checks passed: 118 semantic, 39 characterization, 7 query-prototype, 61 measurement. Characterizations and prototype checks are not acceptance-contract passes. The committed run exited 0 with all five phases covered and their exit statuses recorded in `results/phase-status.tsv`; the harness fails closed, so a passing summary cannot omit a phase. `test-run-failure-modes.sh full` passed 16/16, including running the same check set against a deliberately wrong layout (nonzero exit with the discriminating check) and against the correct table (zero exit).
+- *Result:* 247/247 recorded checks passed: 129 semantic, 42 characterization, 7 query-prototype, 69 measurement. Characterizations and prototype checks are not acceptance-contract passes. The committed run exited 0 with all five phases covered and their exit statuses recorded in `results/phase-status.tsv`; the harness fails closed, so a passing summary cannot omit a phase. `test-run-failure-modes.sh full` passed 16/16, including running the same check set against a deliberately wrong layout (nonzero exit with the discriminating check) and against the correct table (zero exit).
 
 == Question
 
@@ -41,10 +41,14 @@ Written before the run:
   numeric-heavy data, but small integers stored as binary `Int64` may compress
   worse than short decimal strings; the result is corpus-dependent.
 * A full per-key type sidecar costs about the same as Experiment 019's companion
-  type `Map` (same shape and content), so a full-sidecar native layout saves only
-  the value-map delta. A minimal key-only map for canonical-only types plus
-  explicit empty should cost almost nothing on realistic data, but presence and
-  type queries then need to scan the typed value Maps, increasing read bytes.
+  type `Map` (same shape and logical content), so a full-sidecar native layout
+  saves only the value-map delta. A minimal key-only map for canonical-only
+  types plus explicit empty should cost almost nothing on realistic data.
+* Known-type queries can guard directly on the matching typed value Map
+  (`mapContains(record_int, k) AND record_int[k] = v`), so the minimal layout
+  need not scan five Maps for a filter, ordering, or sum whose type is known.
+  Only presence and grouping for a key whose type is unknown in advance require
+  the union/type expression.
 * Non-finite doubles are storable in `Float64`; presence/type inspection of them
   is supported, and only value comparison/aggregation is a query-layer rule.
 * Native numeric columns do not make `sum(Int64)` safe; it still wraps.
@@ -163,6 +167,15 @@ still saying `int`) and `rep_wrong_double_presence` (one key written into two
 typed value Maps) are loaded only for the assertion-sensitivity checks and are
 never cost candidates.
 
+A post-run review corrected the cost method and two characterizations: known-type
+queries now use direct typed-map guards (with the union/type form kept as a
+measured query-generation contrast), the measured executions disable the query
+condition cache and report `ReadCompressedBytes` instead of the quantized
+`read_bytes` column, the `Float64` `-2^63` statement is an exactness check rather
+than a rounding claim, and the `LowCardinality` statement is about the lookup
+expression rather than the declared column type. The committed evidence is the
+corrected run.
+
 === Expectation independence
 
 * *Inventory:* expectations are computed from `fixture020.EVENTS` /
@@ -208,8 +221,13 @@ Measured on ClickHouse 26.8.2.7-lts:
   `Map(String, Bool)`, `Map(String, UInt8)`, `Map(String, Int128)`,
   `Map(LowCardinality(String), ...)`, and `Map(String, Nullable(Float64))` all
   create, insert, and read.
-* A `LowCardinality(String)` value type inside a `Map` is not preserved:
-  `toTypeName(m['a'])` reports `String`.
+* A `LowCardinality(String)` value type inside a `Map` is kept in the declared
+  column type (`system.columns.type` and `DESCRIBE` both report
+  `Map(LowCardinality(String), LowCardinality(String))`), while a map lookup
+  *expression* reports `String` (`toTypeName(m['a'])`), i.e. the dictionary
+  encoding is not part of the single-key expression result type. This
+  experiment did not inspect the on-disk encoding directly, so it makes no claim
+  about whether the dictionary survives serialization.
 * A missing key lookup returns the type default: `0` for Int64/Float64, `''`
   for String, `false` for Bool. `mapContains` is the presence test.
 * A `Map` literal can hold duplicate keys (`length(mapKeys(map('a',1,'a',2)))`
@@ -218,13 +236,18 @@ Measured on ClickHouse 26.8.2.7-lts:
 * `JSONEachRow` accepts `NaN`, `Infinity`, and `-Infinity` for `Float64` map
   values; `-0.0` is stored and printed as `-0`; negative zero survives the
   round-trip and equals `0`.
+* `Float64` represents `Int64` minimum exactly:
+  `toFloat64(-9223372036854775808) = -9223372036854775808` and the round-trip
+  through `toInt64` is exact; `toString` prints `-9223372036854776000`, which is
+  decimal formatting, not numerical loss. `9007199254740993` (2^53 + 1) is a
+  genuine precision-loss control: it equals 2^53, not 2^53 + 1, in `Float64`.
 * `sum(Int64)` wraps to `-1` over `[Int64 max, Int64 max, 1]`; `sum(Int128)`
   keeps `18446744073709551615`.
 * A present `NULL` inside `Map(String, Nullable(Float64))` is distinguishable
   from a missing key by `mapContains`, which is an alternative explicit-empty
   representation this experiment did not select.
 
-=== Representation semantics (118 semantic checks)
+=== Representation semantics (129 semantic checks)
 
 Both native layouts and the companion baseline answer the typed fixture
 correctly when the query includes a presence/type guard:
@@ -342,11 +365,15 @@ must never be used as presence.
 |The same collapsed layout: `record_double = 1`
 |4 rows (int 1s and double 1.0 collide) |1 row
 
-|The same collapsed layout: `big-int`
-|`9007199254740992` (rounded) |`9007199254740993`
+|The same collapsed layout: `big-int` printed value
+|`9007199254740992` |`9007199254740993`
 
-|The same collapsed layout: `min-int`
-|`-9223372036854776000` (rounded) |`-9223372036854775808`
+|The same collapsed layout: `big-int` exact equality
+|equals 2^53, not 2^53 + 1 (0 / 1) |exact in the typed `Int64` map
+
+|The same collapsed layout: `min-int` exact equality
+|equals `toFloat64(-9223372036854775808)` (1); `toString` prints
+`-9223372036854776000` |exact in the typed `Int64` map
 
 |One key written into two typed Maps: union presence for that key
 |2 |1
@@ -380,14 +407,20 @@ the minimal `other` map:
 * The native typed layouts reduce total compressed bytes by 8.7-8.9% (`base`)
   and 4.9-11.2% (`diverse`) versus the companion baseline, including the
   canonical payload in every total.
-* Excluding the identical payload column, serving storage falls 21.0%
-  (`native typed`) and 21.5% (`native minimal`) on `base`, and 11.4% / 25.9% on
-  `diverse`.
-* The full sidecar is byte-for-byte the companion type map (`record_types` is
-  7,764 vs 7,688 bytes on `base` and 267,033 in both layouts on `diverse`), so
-  `native typed` saves only the value-map delta. The minimal layout's `other`
-  map is 3,948 bytes on `base` and 2,211 bytes on `diverse` because it holds
-  only canonical-only and explicit-empty keys.
+* Excluding the payload column, serving storage falls 21.0% (`native typed`) and
+  21.5% (`native minimal`) on `base`, and 11.4% / 25.9% on `diverse`.
+* The full sidecar holds the same logical content as the companion type map (the
+  same key/type pairs are built from the same rows), but physical compressed
+  sizes differ slightly: `record_types` is 7,688 bytes in the companion table
+  and 7,764 bytes in the full-sidecar table on `base`, and 267,033 bytes in both
+  on `diverse`. The payload column is likewise logically identical (the
+  `cost.<corpus>.same_answer.payload_identity` check compares its count and
+  checksum across layouts) but compresses to 3,017,301 / 3,020,433 / 3,018,420
+  bytes on `base`; on `diverse` all three are 2,418,418 bytes. Total-byte
+  comparisons therefore include a small physical component that is not a
+  representation property.
+* The minimal layout's `other` map is 3,948 bytes on `base` and 2,211 bytes on
+  `diverse` because it holds only canonical-only and explicit-empty keys.
 * Splitting the small resource and scope namespaces into four typed Maps costs
   *more* than one string Map (for example 17,398 vs 11,854 bytes on `diverse`
   resource), because those namespaces have few, type-diverse keys. The saving
@@ -396,43 +429,84 @@ the minimal `other` map:
   a small share of the total; payload placement is a separate decision and
   Experiment 009's normalized-hot/exact-payload split remains the design context.
 
-Warm execution cost (second run, read from `system.query_log`; `read_rows` is
-50,000 for every query because each corpus is one part):
+Warm execution cost. The measured executions run with
+`use_query_condition_cache = 0`: without it, a repeated predicate can be
+answered from cached granule conditions and one variant's read cost depends on
+which queries ran before it (a follow-up probe of the same union query read
+7,046 rows and 429,814 quantized bytes after earlier predicates were cached).
+The table reports `ProfileEvents['ReadCompressedBytes']` (compressed bytes read)
+rather than the `read_bytes` column: at this size `read_bytes` is not
+proportional to column bytes (a full scan of the 7.7 KB `record_types` column
+reports about 1,000,000, and a full scan of the 1.33 MB `record` column reports
+about 400,000), so it is not used for claims here. `read_rows` is 50,000 for
+every query because each corpus is one part.
 
 [options="header",cols="2,3,3,3"]
 |===
-|Query |Companion |Native typed |Native minimal
+|Query |Companion |Native typed |Native minimal (direct guard)
 
-|`base` int filter |31 ms / 1,438,928 B |18 ms / 1,450,038 B |35 ms / 3,050,016 B
-|`base` string filter |30 ms / 1,488,934 B |29 ms / 1,488,934 B |23 ms / 3,088,906 B
-|`base` group by type |13 ms / 1,050,057 B |13 ms / 1,050,057 B |16 ms / 2,650,016 B
-|`base` numeric order |35 ms / 1,439,042 B |23 ms / 1,450,133 B |41 ms / 3,050,056 B
-|`base` typed sum |31 ms / 1,439,042 B |45 ms / 1,450,057 B |21 ms / 3,050,024 B
-|`base` presence |4 ms / 1,000,000 B |5 ms / 1,000,000 B |9 ms / 2,600,000 B
-|`base` payload bytes retrieval |5 ms / 639,980 B |4 ms / 639,980 B |5 ms / 639,044 B
-|`diverse` int filter |21 ms / 858,191 B |19 ms / 1,003,191 B |34 ms / 2,603,169 B
-|`diverse` string filter |18 ms / 828,338 B |20 ms / 836,530 B |24 ms / 2,428,310 B
-|`diverse` group by type |15 ms / 603,219 B |23 ms / 603,219 B |18 ms / 2,203,169 B
-|`diverse` numeric order |24 ms / 742,241 B |12 ms / 1,003,197 B |42 ms / 2,603,185 B
-|`diverse` typed sum |39 ms / 707,076 B |17 ms / 1,003,191 B |25 ms / 2,603,169 B
-|`diverse` presence |7 ms / 553,153 B |5 ms / 553,153 B |21 ms / 2,153,153 B
+|`base` int filter |37 ms / 1,339,039 B |18 ms / 355,237 B |9 ms / 355,229 B
+|`base` string filter |29 ms / 1,337,964 B |10 ms / 308,380 B |9 ms / 307,432 B
+|`base` group by type |11 ms / 12,583 B |16 ms / 13,599 B |20 ms / 18,017 B
+|`base` numeric order |49 ms / 1,337,575 B |17 ms / 357,122 B |11 ms / 357,122 B
+|`base` typed sum |25 ms / 1,337,575 B |36 ms / 357,122 B |9 ms / 357,122 B
+|`base` presence (unknown type) |4 ms / 4,742 B |4 ms / 4,780 B |8 ms / 12,362 B
+|`base` payload bytes retrieval |5 ms / 268,601 B |5 ms / 268,872 B |5 ms / 268,708 B
+|`diverse` int filter |17 ms / 1,047,661 B |7 ms / 229,854 B |7 ms / 229,854 B
+|`diverse` string filter |24 ms / 1,046,680 B |9 ms / 316,872 B |10 ms / 316,872 B
+|`diverse` group by type |13 ms / 462,443 B |14 ms / 463,014 B |21 ms / 149,821 B
+|`diverse` numeric order |20 ms / 1,046,680 B |5 ms / 7,121 B |5 ms / 6,723 B
+|`diverse` typed sum |17 ms / 1,046,680 B |8 ms / 315,140 B |8 ms / 315,140 B
+|`diverse` presence (unknown type) |4 ms / 194,989 B |6 ms / 194,989 B |10 ms / 146,238 B
+|===
+
+Query-generation sensitivity for the minimal layout: the same known-type
+questions asked with the blanket union/type expression instead of the direct
+typed-map guard. The answers are identical (`..._union_vs_direct` checks):
+
+[options="header",cols="2,2,2"]
+|===
+|Corpus / known-type query |Minimal, union/type expression |Minimal, direct typed-map guard
+
+|base int filter |43 ms / 368,075 B |9 ms / 355,229 B
+|base string filter |28 ms / 320,341 B |9 ms / 307,432 B
+|base numeric order |23 ms / 368,075 B |11 ms / 357,122 B
+|base typed sum |22 ms / 368,075 B |9 ms / 357,122 B
+|diverse int filter |22 ms / 375,721 B |7 ms / 229,854 B
+|diverse string filter |24 ms / 462,547 B |10 ms / 316,872 B
+|diverse numeric order |14 ms / 151,065 B |5 ms / 6,723 B
+|diverse typed sum |22 ms / 375,721 B |8 ms / 315,140 B
 |===
 
 * The three layouts return identical results for every common query (checked as
-  `cost.<corpus>.same_answer.<query>`), so the comparison is same-answer and
-  same-contract.
-* The minimal layout reads about 2.0-3.9x the bytes of the sidecar layouts
-  (2.1-2.6x on `base`, 2.6-3.9x on `diverse`), because presence and type
-  queries scan five Maps instead of one bookkeeping Map. That is the measured
-  price of dropping the full sidecar.
-* Durations are 4-45 ms and noisy at this size; no layout is consistently
-  fastest, and the companion baseline is slower on several scans that parse
-  numeric strings (`numeric_order`, some `sum_typed` runs), while native columns
-  avoid the parse. These are warm micro-measurements on one part, not latency
-  claims.
+  `cost.<corpus>.same_answer.<query>`), and the minimal layout's union and
+  direct-guard forms also return identical results, so the comparison is
+  same-answer and same-contract.
+* *Known-type operations.* With a direct typed-map guard the minimal layout
+  reads only the matching value Map: 355,229 bytes versus 355,237 (`native
+  typed`) and 1,339,039 (`companion`) for the `base` int filter, and 229,854 /
+  229,854 / 1,047,661 on `diverse`. The companion layout has no per-type value
+  Map, so a typed filter reads its whole string value Map; on this corpus the
+  evidence favors the native typed layouts for read cost as well as storage.
+* *The earlier 2-3.9x read-amplification figure was a query-generation
+  artifact.* It came from using the blanket union/type expression for known-type
+  operations (measured here as 368,075 vs 355,229 bytes on `base` and 375,721 vs
+  229,854 on `diverse`) and from the quantized `read_bytes` metric. The minimal
+  layout does not require that expression.
+* *Unknown-type presence and grouping* are the only operations where the minimal
+  layout must scan five Maps. Compressed bytes are not uniformly worse (`base`
+  presence 12,362 vs 4,780; `diverse` presence 146,238 vs 194,989; `diverse`
+  group by type 149,821 vs 463,014 because the `multiIf` short-circuits once a
+  type is found), but CPU time is higher (`diverse` presence 10,608 vs 4,590
+  microseconds; `diverse` group by type 21,312 vs 12,874 for the companion), so
+  the sidecar remains the predictable single-map path for unknown-type queries.
+* Durations are 4-49 ms and noisy at this size; the companion baseline is usually
+  slower on the scans that read and parse its whole string value Map (int and
+  string filters, numeric order), while native columns avoid the parse. These
+  are warm micro-measurements on one part, not latency claims.
 * Retrieving a canonical-only value (bytes) reads the payload column in every
-  layout (about 0.64 MB of the base corpus) and is unaffected by the serving
-  representation.
+  layout (about 269 KB compressed of the base corpus) and is unaffected by the
+  serving representation.
 
 Mapping and insert work (bounded 50,000-row corpora, HTTP `JSONEachRow`):
 
@@ -440,37 +514,40 @@ Mapping and insert work (bounded 50,000-row corpora, HTTP `JSONEachRow`):
 |===
 |Corpus / candidate |Mapping |Insert |Rows/s
 
-|base / companion |3.39 s |2.91 s |7,937
-|base / native typed |3.12 s |2.98 s |8,197
-|base / native minimal |3.19 s |2.77 s |8,395
-|diverse / companion |1.48 s |2.28 s |13,282
-|diverse / native typed |2.01 s |2.52 s |11,036
-|diverse / native minimal |1.85 s |2.22 s |12,300
+|base / companion |3.52 s |3.55 s |7,065
+|base / native typed |3.28 s |2.87 s |8,134
+|base / native minimal |3.20 s |2.68 s |8,502
+|diverse / companion |1.42 s |2.33 s |13,315
+|diverse / native typed |2.32 s |2.42 s |10,561
+|diverse / native minimal |1.84 s |2.29 s |12,102
 |===
 
-The native layouts are not more expensive to map or insert on this corpus; the
-mapping code is larger (type dispatch, one-map-per-key validation, and the
-canonical-only map) but bounded. The measured insert rates are loopback HTTP
-fixture rates, not production ingestion throughput.
+Mapping times are within about 10% across layouts on `base`, and insert times
+vary more (2.68-3.55 s) without a consistent ranking. On `diverse` the native
+typed mapping measured 2.01-2.32 s versus 1.42-1.75 s for the companion across
+runs (1.15-1.63x), so the native mapping is not uniformly cheaper: it is larger
+code with type dispatch, one-map-per-key validation, and the canonical-only map.
+These are loopback HTTP fixture rates, not production ingestion throughput.
 
 === Tradeoffs beyond byte totals
 
 * *Absent-key handling.* Every native query needs an explicit presence or type
-  guard because a missing lookup returns the type default; the sidecar layouts
-  use one `mapContains` on the type map, the minimal layout uses a five-map
-  union. The guard is also what keeps aggregates from silently including
-  defaults: an unguarded `sum(record_int[...])` includes every non-int row as
-  zero.
+  guard because a missing lookup returns the type default. Known-type queries
+  use one guard on the matching value Map; unknown-type presence and grouping
+  use the sidecar (one `mapContains`) or the minimal layout's five-map union.
+  The guard is also what keeps aggregates from silently including defaults: an
+  unguarded `sum(record_int[...])` includes every non-int row as zero.
 * *Mixed-type grouping.* A group key that includes type is natural in the
   sidecar layouts (`record_types[k]`) and needs a five-way `multiIf` plus a
   union presence predicate in the minimal layout. The type-change fixture
   (`attr.mixed` as int and string across rows; int/double/string `1` rows)
   groups correctly in all three, but the minimal expression is more complex and
-  reads more columns.
-* *Extra map scans.* The minimal layout's read amplification (2.0-3.9x) is the
-  direct cost of avoiding the per-key type map. It may be acceptable for
-  selective queries on large data where the type map would otherwise be large,
-  but it was not tested at retained scale.
+  its measured CPU time is higher.
+* *Extra map scans.* Only unknown-type presence and grouping scan five Maps in
+  the minimal layout. Compressed bytes were not uniformly higher in the
+  measurement because the `OR`/`multiIf` expressions short-circuit, but CPU time
+  was higher and the expression is harder to generate than a single sidecar
+  lookup.
 * *Insert and schema complexity.* Native layouts need four value Map columns per
   namespace instead of one, plus bookkeeping; the schema is wider and the
   mapping step must validate that each key lands in exactly one map. The
@@ -501,22 +578,34 @@ fixture rates, not production ingestion throughput.
 * On the reused 019 corpus and the realistic variation, native typed Maps reduce
   compressed storage versus the companion baseline: 8.7-8.9% (`base`) and
   4.9-11.2% (`diverse`) of the total including payload, or 21.0-25.9%
-  (excluding payload) when the minimal layout is used. The full sidecar itself
-  costs the same as the companion type map.
-* The minimal layout's price is read amplification: presence and type queries
-  scan five Maps instead of one, measured at about 2.0-3.9x the bytes of the
-  sidecar layouts on this corpus.
+  (excluding payload) when the minimal layout is used. The full sidecar holds
+  the same logical content as the companion type map and costs about the same
+  physical bytes.
+* Known-type query reads also favor the native typed layouts on this corpus:
+  a typed equality filter with a direct typed-map guard read 355,229 bytes
+  (`native minimal`) and 355,237 bytes (`native typed`) versus 1,339,039 bytes
+  (`companion`) on `base`, and 229,854 / 229,854 / 1,047,661 on `diverse`,
+  because the companion layout must read its whole string value Map.
+* The minimal layout's cost is confined to unknown-type presence and grouping,
+  where it must union five Maps: compressed bytes were not uniformly worse in
+  the measurement, but CPU time was higher (for example `diverse` presence
+  11,649 vs 5,042 microseconds), and the expression is harder to generate. The
+  earlier 2-3.9x read-amplification figure was a query-generation artifact (a
+  blanket union/type expression for known-type operations) combined with the
+  quantized `read_bytes` metric; it is not a layout requirement.
 * Native numeric columns do not make integer aggregation safe: `sum(Int64)`
   wraps (measured on both the capability probe and the fixture, whose total
   exceeds `Int64`), while `sum(Int128)` keeps the true total. Type filtering,
   overflow rejection, and contributing-value counts remain query-layer work.
-* This *qualifies* the companion-`Map` preference recorded after Experiment 019
-  rather than overturning it: for the record namespace, native typed Maps
-  measured smaller than the companion string value Map under the same contract,
-  and the minimal layout avoided the full type sidecar. The preference is not
-  contradicted for the small, type-diverse resource and scope namespaces, where
-  one string Map measured smaller, and Experiment 019's retained-scale evidence
-  for the companion Map is unchanged by this 50,000-row micro-measurement.
+* Where the evidence favors each layout on this corpus: native typed Maps for
+  record-namespace storage and for known-type query reads; the companion
+  string `Map` for the small, type-diverse resource and scope namespaces and
+  for a simpler schema and query generation; a sidecar (or the minimal layout's
+  union) for unknown-type presence and grouping, where the sidecar is cheaper in
+  CPU. Nothing here is retained-scale evidence: the older retained-scale
+  benchmarks (Experiments 006, 010, and 011) validated string `Map` serving,
+  not companion-type or native typed metadata, and no retained-scale evidence
+  exists for either typed encoding.
 * A collapsed Float64 layout and a two-map key both produce wrong answers that
   the check set rejects (nonzero exit) while the correct layout passes the same
   checks, so the assertions are discriminating rather than happy-path only.
@@ -525,8 +614,7 @@ fixture rates, not production ingestion throughput.
 
 * That a production query planner can generate the minimal layout's union
   presence and `multiIf` type expressions efficiently, or that the measured
-  read amplification persists at retained scale. The corpus is 50,000 rows on
-  loopback.
+  read costs persist at retained scale. The corpus is 50,000 rows on loopback.
 * That the companion type `Map` and the native typed Maps are equivalent for
   *other* query shapes (distinct counts, top-K, percentiles, nested traversal,
   ordering on non-finite doubles); this experiment covers the fixture's typed
@@ -540,8 +628,9 @@ fixture rates, not production ingestion throughput.
   (Experiments 018 and 019 own that evidence).
 * Capacity, throughput, or retained-volume behavior. The cost numbers are
   50,000-row single-part micro-measurements.
-* That `LowCardinality(String)` value types are preserved inside a `Map` on this
-  version; the capability probe shows they are reported as `String`.
+* That `LowCardinality(String)` dictionary encoding is lost inside a `Map`; the
+  declared column type keeps it and only the lookup expression reports
+  `String`. The on-disk encoding was not inspected.
 * That native JSON is reconsidered: Experiment 006's rejection concerns native
   JSON at scale, and nothing here reopens it or applies to typed Maps.
 
@@ -554,8 +643,8 @@ fixture rates, not production ingestion throughput.
   array/map fields, and whether its presence is better served by the payload.
 * Whether the query layer can use the typed Maps and the payload together
   without reading the payload for normal filters.
-* Whether the minimal layout's read amplification is material at the retained
-  volumes and query mixes the RFD targets.
+* Whether the minimal layout's unknown-type union cost is material at the
+  retained volumes and query mixes the RFD targets.
 * How payload placement (hot column, separate table, object storage) interacts
   with each serving layout; Experiment 009's split remains the current evidence.
 
@@ -564,6 +653,10 @@ fixture rates, not production ingestion throughput.
 * The environment is a two-vCPU sandbox; no throughput, latency, or capacity
   claim follows. Cost numbers are 50,000-row micro-measurements after
   `OPTIMIZE ... FINAL`, not benchmarks.
+* Read costs use `ProfileEvents['ReadCompressedBytes']` with the query condition
+  cache disabled and depend on the exact expression form (a direct typed-map
+  guard versus a union/`multiIf`), which is why the report reports both forms
+  and does not treat either as a layout property.
 * The mapping prototype is harness code, not a Collector component. It proves
   the representation semantics and the shape of the required mapping, not that a
   production component implements them.
@@ -593,8 +686,8 @@ fixture rates, not production ingestion throughput.
   type, numeric ordering, aggregate type errors and overflow rejection,
   unsupported-operation errors) against this fixture before implementing the
   planner.
-* Measure the minimal layout's read amplification at retained scale before
-  choosing it over a sidecar.
+* Measure the minimal layout's known-type direct-guard path and its
+  unknown-type union cost at retained scale before choosing it over a sidecar.
 * Decide canonical payload placement with the retention, backup, and
   reconstruction plan; keep Experiment 009's split as the current evidence.
 * If the query layer must answer presence/type for canonical-only keys without
