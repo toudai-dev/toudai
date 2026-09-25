@@ -27,5 +27,15 @@ keeps duplicate keys in the `Map`, drops span scope attributes, and converts a
 negative span duration into a `UInt64` underflow. A Lighthouse canonical envelope
 must therefore be implemented outside the stock schema. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
++
+Experiment 019 established where that envelope can be built: the pinned stock
+exporter cannot insert a canonical payload column (`create_schema: false` leaves
+it at its DEFAULT/type default), no stock processor can produce a typed canonical
+payload or a per-key type map (OTTL has no per-key conditional type name), and a
+Map-carried payload plus `MATERIALIZED` projections stores the payload twice.
+The envelope therefore needs a Lighthouse-owned mapping component placed after
+trusted-scope injection; the harness prototype's envelope round-tripped
+losslessly against the typed inventory. See
+link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
 
 * [ ] Provide a minimal operator-facing client and record an operator completing time comparison, grouping, heatmap/percentile inspection, outlier identification, and exact-event drill-down against the fixture; verify results against its known events.

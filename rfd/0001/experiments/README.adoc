@@ -116,4 +116,8 @@ conditions. Add a new run or record and link the relationship.
 |Completed
 |link:018-collector-compatibility.adoc[Collector compatibility and acknowledgement boundaries]
 
+|019
+|Completed
+|link:019-typed-canonical-storage.adoc[Typed canonical storage comparison]
+
 |===
