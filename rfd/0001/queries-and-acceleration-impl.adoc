@@ -43,14 +43,17 @@ per-key type sidecar, and per-type value Maps with a key-only map for the
 canonical-only types (bytes, array, map) and explicit empty — satisfy the
 fixture's typed surface, including non-finite doubles (present in the `Float64`
 Map; only their comparison and aggregation are rejected by the harness
-prototype) and span scope attributes. The minimal layout avoids the full sidecar
-without weakening presence or type identity, at the cost of scanning five Maps
-for presence and type queries (about 2.0-3.9x the read bytes of the sidecar
-layouts on the measured corpus). Native typed Maps reduced total compressed
-bytes by 4.9-11.2% versus the companion baseline including payload (21.0-25.9%
-excluding payload for the minimal layout), but splitting the small,
-type-diverse resource and scope namespaces into typed Maps cost more than one
-string Map. `sum(Int64)` still wraps; type filtering, overflow rejection, and
+prototype) and span scope attributes. Known-type queries can guard directly on
+the matching typed value Map, so the minimal layout need not scan five Maps for
+a typed filter, ordering, or sum; only presence and grouping for a key whose
+type is unknown in advance need the union/type expression, where the sidecar is
+cheaper in CPU but the union was not uniformly worse in compressed bytes. Native
+typed Maps reduced total compressed bytes by 4.9-11.2% versus the companion
+baseline including payload (21.0-25.9% excluding payload for the minimal
+layout), and known-type filter reads were 3.8-4.6x smaller because the companion
+layout must read its whole string value Map; splitting the small, type-diverse
+resource and scope namespaces into typed Maps cost more than one string Map.
+`sum(Int64)` still wraps; type filtering, overflow rejection, and
 contributing-value counts remain query-layer obligations. PoC DDL selection,
 planner support for the minimal layout's union/type expressions, and
 retained-scale read behavior remain open. See
