@@ -1,0 +1,80 @@
+{"name": "cost.base.companion.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.base.companion.int_filter", "kind": "measurement", "expected": null, "observed": "31.0ms rows=50000 bytes=1438928 result='1'", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.int_filter", "kind": "measurement", "expected": null, "observed": "18.0ms rows=50000 bytes=1450038 result='1'", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.int_filter", "kind": "measurement", "expected": null, "observed": "35.0ms rows=50000 bytes=3050016 result='1'", "ok": true, "note": ""}
+{"name": "cost.base.same_answer.int_filter", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.base.companion.string_filter", "kind": "measurement", "expected": null, "observed": "30.0ms rows=50000 bytes=1488934 result='1'", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.string_filter", "kind": "measurement", "expected": null, "observed": "29.0ms rows=50000 bytes=1488934 result='1'", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.string_filter", "kind": "measurement", "expected": null, "observed": "23.0ms rows=50000 bytes=3088906 result='1'", "ok": true, "note": ""}
+{"name": "cost.base.same_answer.string_filter", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.base.companion.group_by_type", "kind": "measurement", "expected": null, "observed": "13.0ms rows=50000 bytes=1050057 result='int\\t50000'", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.group_by_type", "kind": "measurement", "expected": null, "observed": "13.0ms rows=50000 bytes=1050057 result='int\\t50000'", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.group_by_type", "kind": "measurement", "expected": null, "observed": "16.0ms rows=50000 bytes=2650016 result='int\\t50000'", "ok": true, "note": ""}
+{"name": "cost.base.same_answer.group_by_type", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.base.companion.numeric_order", "kind": "measurement", "expected": null, "observed": "35.0ms rows=50000 bytes=1439042 result='49999\\n49998\\n49997\\n49996\\n49995'", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.numeric_order", "kind": "measurement", "expected": null, "observed": "23.0ms rows=50000 bytes=1450133 result='49999\\n49998\\n49997\\n49996\\n49995'", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.numeric_order", "kind": "measurement", "expected": null, "observed": "41.0ms rows=50000 bytes=3050056 result='49999\\n49998\\n49997\\n49996\\n49995'", "ok": true, "note": ""}
+{"name": "cost.base.same_answer.numeric_order", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.base.companion.sum_typed", "kind": "measurement", "expected": null, "observed": "31.0ms rows=50000 bytes=1439042 result='1249975000'", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.sum_typed", "kind": "measurement", "expected": null, "observed": "45.0ms rows=50000 bytes=1450057 result='1249975000'", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.sum_typed", "kind": "measurement", "expected": null, "observed": "21.0ms rows=50000 bytes=3050024 result='1249975000'", "ok": true, "note": ""}
+{"name": "cost.base.same_answer.sum_typed", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.base.companion.presence", "kind": "measurement", "expected": null, "observed": "4.0ms rows=50000 bytes=1000000 result='50000'", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.presence", "kind": "measurement", "expected": null, "observed": "5.0ms rows=50000 bytes=1000000 result='50000'", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.presence", "kind": "measurement", "expected": null, "observed": "9.0ms rows=50000 bytes=2600000 result='50000'", "ok": true, "note": ""}
+{"name": "cost.base.same_answer.presence", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.base.companion.canonical_bytes_payload", "kind": "measurement", "expected": null, "observed": "5.0ms rows=50000 bytes=639980 result='AAH+/w=='", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.canonical_bytes_payload", "kind": "measurement", "expected": null, "observed": "4.0ms rows=50000 bytes=639980 result='AAH+/w=='", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.canonical_bytes_payload", "kind": "measurement", "expected": null, "observed": "5.0ms rows=50000 bytes=639044 result='AAH+/w=='", "ok": true, "note": ""}
+{"name": "cost.base.same_answer.canonical_bytes_payload", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.diverse.companion.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.row_count", "kind": "characterization", "expected": "50000", "observed": "50000", "ok": true, "note": ""}
+{"name": "cost.diverse.companion.int_filter", "kind": "measurement", "expected": null, "observed": "21.0ms rows=50000 bytes=858191 result='11667'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.int_filter", "kind": "measurement", "expected": null, "observed": "19.0ms rows=50000 bytes=1003191 result='11667'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.int_filter", "kind": "measurement", "expected": null, "observed": "34.0ms rows=50000 bytes=2603169 result='11667'", "ok": true, "note": ""}
+{"name": "cost.diverse.same_answer.int_filter", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.diverse.companion.string_filter", "kind": "measurement", "expected": null, "observed": "18.0ms rows=50000 bytes=828338 result='8334'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.string_filter", "kind": "measurement", "expected": null, "observed": "20.0ms rows=50000 bytes=836530 result='8334'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.string_filter", "kind": "measurement", "expected": null, "observed": "24.0ms rows=50000 bytes=2428310 result='8334'", "ok": true, "note": ""}
+{"name": "cost.diverse.same_answer.string_filter", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.diverse.companion.group_by_type", "kind": "measurement", "expected": null, "observed": "15.0ms rows=50000 bytes=603219 result='int\\t15000\\nstring\\t10000'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.group_by_type", "kind": "measurement", "expected": null, "observed": "23.0ms rows=50000 bytes=603219 result='int\\t15000\\nstring\\t10000'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.group_by_type", "kind": "measurement", "expected": null, "observed": "18.0ms rows=50000 bytes=2203169 result='int\\t15000\\nstring\\t10000'", "ok": true, "note": ""}
+{"name": "cost.diverse.same_answer.group_by_type", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.diverse.companion.numeric_order", "kind": "measurement", "expected": null, "observed": "24.0ms rows=50000 bytes=742241 result='124.5\\n124.5\\n124.5\\n124.5\\n124.5'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.numeric_order", "kind": "measurement", "expected": null, "observed": "12.0ms rows=50000 bytes=1003197 result='124.5\\n124.5\\n124.5\\n124.5\\n124.5'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.numeric_order", "kind": "measurement", "expected": null, "observed": "42.0ms rows=50000 bytes=2603185 result='124.5\\n124.5\\n124.5\\n124.5\\n124.5'", "ok": true, "note": ""}
+{"name": "cost.diverse.same_answer.numeric_order", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.diverse.companion.sum_typed", "kind": "measurement", "expected": null, "observed": "39.0ms rows=50000 bytes=707076 result='5769'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.sum_typed", "kind": "measurement", "expected": null, "observed": "17.0ms rows=50000 bytes=1003191 result='5769'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.sum_typed", "kind": "measurement", "expected": null, "observed": "25.0ms rows=50000 bytes=2603169 result='5769'", "ok": true, "note": ""}
+{"name": "cost.diverse.same_answer.sum_typed", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.diverse.companion.presence", "kind": "measurement", "expected": null, "observed": "7.0ms rows=50000 bytes=553153 result='25000'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.presence", "kind": "measurement", "expected": null, "observed": "5.0ms rows=50000 bytes=553153 result='25000'", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.presence", "kind": "measurement", "expected": null, "observed": "21.0ms rows=50000 bytes=2153153 result='25000'", "ok": true, "note": ""}
+{"name": "cost.diverse.same_answer.presence", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "companion, full-sidecar, and minimal-bookkeeping layouts must answer the same question with the same result"}
+{"name": "cost.base.companion.record_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.base.native_typed.record_int_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.base.native_typed.record_types_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.record_other_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.record_types_absent", "kind": "measurement", "expected": 0, "observed": 0, "ok": true, "note": "the minimal layout has no full per-key type sidecar"}
+{"name": "cost.diverse.companion.record_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.record_int_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.record_types_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.record_other_bytes_positive", "kind": "measurement", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.record_types_absent", "kind": "measurement", "expected": 0, "observed": 0, "ok": true, "note": "the minimal layout has no full per-key type sidecar"}
+{"name": "cost.base.companion.insert_recorded", "kind": "measurement", "expected": "ok", "observed": "ok", "ok": true, "note": "mapping and insert wall time recorded by the mapping prototype"}
+{"name": "cost.base.companion.insert_work", "kind": "measurement", "expected": null, "observed": "mapping=3.386s insert=2.914s rows/s=7936.6", "ok": true, "note": ""}
+{"name": "cost.base.native_typed.insert_recorded", "kind": "measurement", "expected": "ok", "observed": "ok", "ok": true, "note": "mapping and insert wall time recorded by the mapping prototype"}
+{"name": "cost.base.native_typed.insert_work", "kind": "measurement", "expected": null, "observed": "mapping=3.121s insert=2.979s rows/s=8196.5", "ok": true, "note": ""}
+{"name": "cost.base.native_minimal.insert_recorded", "kind": "measurement", "expected": "ok", "observed": "ok", "ok": true, "note": "mapping and insert wall time recorded by the mapping prototype"}
+{"name": "cost.base.native_minimal.insert_work", "kind": "measurement", "expected": null, "observed": "mapping=3.189s insert=2.767s rows/s=8394.9", "ok": true, "note": ""}
+{"name": "cost.diverse.companion.insert_recorded", "kind": "measurement", "expected": "ok", "observed": "ok", "ok": true, "note": "mapping and insert wall time recorded by the mapping prototype"}
+{"name": "cost.diverse.companion.insert_work", "kind": "measurement", "expected": null, "observed": "mapping=1.481s insert=2.283s rows/s=13281.5", "ok": true, "note": ""}
+{"name": "cost.diverse.native_typed.insert_recorded", "kind": "measurement", "expected": "ok", "observed": "ok", "ok": true, "note": "mapping and insert wall time recorded by the mapping prototype"}
+{"name": "cost.diverse.native_typed.insert_work", "kind": "measurement", "expected": null, "observed": "mapping=2.013s insert=2.517s rows/s=11035.5", "ok": true, "note": ""}
+{"name": "cost.diverse.native_minimal.insert_recorded", "kind": "measurement", "expected": "ok", "observed": "ok", "ok": true, "note": "mapping and insert wall time recorded by the mapping prototype"}
+{"name": "cost.diverse.native_minimal.insert_work", "kind": "measurement", "expected": null, "observed": "mapping=1.848s insert=2.217s rows/s=12299.5", "ok": true, "note": ""}

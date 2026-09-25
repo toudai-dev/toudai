@@ -1,0 +1,9 @@
+{"name": "files.imported_source_hash.fixture.py", "kind": "semantic", "expected": "375934344f9afe55ddd27de9f9b37ef2842bf5d6d92b472300c4baa9aff2be86", "observed": "375934344f9afe55ddd27de9f9b37ef2842bf5d6d92b472300c4baa9aff2be86", "ok": true, "note": "the imported Experiment 019 fixture/encoding must not change under this experiment"}
+{"name": "files.imported_source_hash.model.py", "kind": "semantic", "expected": "dcd4e2a3c70053f58a749dc414489ffd90437e317e8fbabc1f793f3f6a474a7d", "observed": "dcd4e2a3c70053f58a749dc414489ffd90437e317e8fbabc1f793f3f6a474a7d", "ok": true, "note": "the imported Experiment 019 fixture/encoding must not change under this experiment"}
+{"name": "files.imported_source_hash.represent.py", "kind": "semantic", "expected": "419aa638439f37690a4764805b4384f368703694c68898bd0d6fbb7b4bcfc2f8", "observed": "419aa638439f37690a4764805b4384f368703694c68898bd0d6fbb7b4bcfc2f8", "ok": true, "note": "the imported Experiment 019 fixture/encoding must not change under this experiment"}
+{"name": "files.checks-capabilities.jsonl.present", "kind": "semantic", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "files.mapping-rejections.jsonl.present", "kind": "semantic", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "files.canonical-payloads.jsonl.present", "kind": "semantic", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "files.cost-storage.jsonl.present", "kind": "semantic", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "files.cost-queries.jsonl.present", "kind": "semantic", "expected": true, "observed": true, "ok": true, "note": ""}
+{"name": "files.cost-insert.jsonl.present", "kind": "semantic", "expected": true, "observed": true, "ok": true, "note": ""}

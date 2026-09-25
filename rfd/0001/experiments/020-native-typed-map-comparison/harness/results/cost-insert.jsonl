@@ -1,0 +1,6 @@
+{"corpus": "base", "variant": "companion", "rows": 50000, "mapping_seconds": 3.386, "insert_seconds": 2.914, "rows_per_second": 7936.6}
+{"corpus": "base", "variant": "native_typed", "rows": 50000, "mapping_seconds": 3.121, "insert_seconds": 2.979, "rows_per_second": 8196.5}
+{"corpus": "base", "variant": "native_minimal", "rows": 50000, "mapping_seconds": 3.189, "insert_seconds": 2.767, "rows_per_second": 8394.9}
+{"corpus": "diverse", "variant": "companion", "rows": 50000, "mapping_seconds": 1.481, "insert_seconds": 2.283, "rows_per_second": 13281.5}
+{"corpus": "diverse", "variant": "native_typed", "rows": 50000, "mapping_seconds": 2.013, "insert_seconds": 2.517, "rows_per_second": 11035.5}
+{"corpus": "diverse", "variant": "native_minimal", "rows": 50000, "mapping_seconds": 1.848, "insert_seconds": 2.217, "rows_per_second": 12299.5}

@@ -120,4 +120,8 @@ conditions. Add a new run or record and link the relationship.
 |Completed
 |link:019-typed-canonical-storage.adoc[Typed canonical storage comparison]
 
+|020
+|Completed
+|link:020-native-typed-map-comparison.adoc[Native typed Map comparison]
+
 |===

@@ -1,0 +1,103 @@
+{"name": "semantics.companion.row_count", "kind": "semantic", "expected": "27", "observed": "27", "ok": true, "note": ""}
+{"name": "semantics.companion.untyped_filter_collides", "kind": "characterization", "expected": "5", "observed": "5", "ok": true, "note": "int 1, double 1.0, and string \"1\" all match the same string; Experiment 019 measured this same collision"}
+{"name": "semantics.companion.serving_values", "kind": "semantic", "expected": "1\t1\t1", "observed": "1\t1\t1", "ok": true, "note": ""}
+{"name": "semantics.companion.type_map_carried", "kind": "semantic", "expected": "int\tdouble\tstring", "observed": "int\tdouble\tstring", "ok": true, "note": ""}
+{"name": "semantics.companion.presence_semantics", "kind": "characterization", "expected": "1\t1\t0", "observed": "1\t1\t0", "ok": true, "note": "empty and empty string collide in the value Map"}
+{"name": "semantics.companion.typed_filter_with_type_map", "kind": "semantic", "expected": "3", "observed": "3", "ok": true, "note": ""}
+{"name": "semantics.companion.presence_count", "kind": "semantic", "expected": "24", "observed": "24", "ok": true, "note": ""}
+{"name": "semantics.companion.aggregate_contributing_counts", "kind": "semantic", "expected": "24\t12", "observed": "24\t12", "ok": true, "note": ""}
+{"name": "semantics.companion.sum_int64_wraps", "kind": "characterization", "expected": "-1", "observed": "-1", "ok": true, "note": "measured ClickHouse behavior: sum(Int64) wraps"}
+{"name": "semantics.companion.duplicate_rejected_row_absent", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.native_typed.row_count", "kind": "semantic", "expected": "27", "observed": "27", "ok": true, "note": ""}
+{"name": "semantics.native_typed.type_counts", "kind": "semantic", "expected": "bool\t1\nbytes\t1\ndouble\t5\nempty\t1\nint\t12\nmap\t1\nstring\t3", "observed": "bool\t1\nbytes\t1\ndouble\t5\nempty\t1\nint\t12\nmap\t1\nstring\t3", "ok": true, "note": ""}
+{"name": "semantics.native_typed.typed_filter_int", "kind": "semantic", "expected": "3", "observed": "3", "ok": true, "note": ""}
+{"name": "semantics.native_typed.typed_filter_double", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_typed.typed_filter_string", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_typed.typed_filter_bool_false", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_typed.typed_filter_excludes_other_types", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.native_typed.group_by_literals", "kind": "semantic", "expected": "3\t1\t1\t1\t1\t1\t1\t1\t1", "observed": "3\t1\t1\t1\t1\t1\t1\t1\t1", "ok": true, "note": "literal expectations authored from the typed inventory, independent of the mapping code"}
+{"name": "semantics.native_typed.presence_missing", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.native_typed.presence_empty", "kind": "semantic", "expected": "empty\t0", "observed": "empty\t0", "ok": true, "note": ""}
+{"name": "semantics.native_typed.presence_empty_string", "kind": "semantic", "expected": "string\t", "observed": "string\t", "ok": true, "note": ""}
+{"name": "semantics.native_typed.presence_nonfinite_supported", "kind": "semantic", "expected": "double\t1", "observed": "double\t1", "ok": true, "note": "presence and type inspection of a non-finite double is supported; only its value comparison/aggregation is unsupported"}
+{"name": "semantics.native_typed.canonical_only_has_no_typed_value", "kind": "semantic", "expected": "bytes\t0", "observed": "bytes\t0", "ok": true, "note": ""}
+{"name": "semantics.native_typed.nested_only_has_no_typed_value", "kind": "semantic", "expected": "map\t0", "observed": "map\t0", "ok": true, "note": ""}
+{"name": "semantics.native_typed.canonical_only_types_distinct", "kind": "semantic", "expected": "array\tmap\tempty", "observed": "array\tmap\tempty", "ok": true, "note": "array, map, and explicit empty keep distinct type identity"}
+{"name": "semantics.native_typed.missing_lookup_default_int", "kind": "semantic", "expected": "16", "observed": "16", "ok": true, "note": "a missing key lookup returns the type default; without a presence guard the filter also matches every row that has no integer value"}
+{"name": "semantics.native_typed.missing_lookup_default_string", "kind": "semantic", "expected": "25", "observed": "25", "ok": true, "note": "same default behavior for the string Map"}
+{"name": "semantics.native_typed.presence_guard_fixes_default", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_typed.int_zero_typed", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_typed.big_int_exact", "kind": "semantic", "expected": "9007199254740993", "observed": "9007199254740993", "ok": true, "note": ""}
+{"name": "semantics.native_typed.min_int_exact", "kind": "semantic", "expected": "-9223372036854775808", "observed": "-9223372036854775808", "ok": true, "note": ""}
+{"name": "semantics.native_typed.numeric_order", "kind": "semantic", "expected": "min-int\ngroup-int-zero\ngroup-int-1\nsum-c\nsum-small-a\nsum-small-b\norder-9\norder-10\norder-100\nbig-int\nsum-a\nsum-b", "observed": "min-int\ngroup-int-zero\ngroup-int-1\nsum-c\nsum-small-a\nsum-small-b\norder-9\norder-10\norder-100\nbig-int\nsum-a\nsum-b", "ok": true, "note": ""}
+{"name": "semantics.native_typed.lexical_order", "kind": "characterization", "expected": "min-int\ngroup-int-zero\ngroup-int-1\nsum-c\nsum-small-a\norder-10\norder-100\nsum-small-b\norder-9\nbig-int\nsum-a\nsum-b", "observed": "min-int\ngroup-int-zero\ngroup-int-1\nsum-c\nsum-small-a\norder-10\norder-100\nsum-small-b\norder-9\nbig-int\nsum-a\nsum-b", "ok": true, "note": "lexical order differs from numeric order; the typed path uses the numeric one"}
+{"name": "semantics.native_typed.nonfinite_values_carried", "kind": "semantic", "expected": "nan\n-inf\ninf", "observed": "nan\n-inf\ninf", "ok": true, "note": ""}
+{"name": "semantics.native_typed.negative_zero_preserved", "kind": "semantic", "expected": "-0\t1", "observed": "-0\t1", "ok": true, "note": ""}
+{"name": "semantics.native_typed.namespace_collide", "kind": "semantic", "expected": "resource-value\trecord-value", "observed": "resource-value\trecord-value", "ok": true, "note": ""}
+{"name": "semantics.native_typed.case_sensitive", "kind": "semantic", "expected": "record-upper\tresource-upper\tresource-lower", "observed": "record-upper\tresource-upper\tresource-lower", "ok": true, "note": ""}
+{"name": "semantics.native_typed.json_like_type_distinct", "kind": "semantic", "expected": "string\tmap", "observed": "string\tmap", "ok": true, "note": ""}
+{"name": "semantics.native_typed.type_change_across_rows", "kind": "semantic", "expected": "12\t5\t3", "observed": "12\t5\t3", "ok": true, "note": ""}
+{"name": "semantics.native_typed.duplicate_rejected_row_absent", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.native_typed.sum_small_exact", "kind": "semantic", "expected": "3", "observed": "3", "ok": true, "note": ""}
+{"name": "semantics.native_typed.sum_int64_wraps_in_clickhouse", "kind": "characterization", "expected": "-1", "observed": "-1", "ok": true, "note": "native Int64 columns do not make sum(Int64) safe; it still wraps"}
+{"name": "semantics.native_typed.sum_int128_wide", "kind": "characterization", "expected": "18446744073709551615", "observed": "18446744073709551615", "ok": true, "note": "Int128 accumulation keeps the true total so the prototype can range-check it"}
+{"name": "semantics.native_typed.aggregate_incompatible_type_count", "kind": "semantic", "expected": "12", "observed": "12", "ok": true, "note": "the prototype must error when these rows are not excluded by a type filter"}
+{"name": "semantics.native_typed.aggregate_contributing_counts", "kind": "semantic", "expected": "24\t12", "observed": "24\t12", "ok": true, "note": "present rows versus contributing int rows; missing values are not zero"}
+{"name": "semantics.native_typed.unguarded_sum_includes_defaults", "kind": "characterization", "expected": "9232379236109516923", "observed": "9232379236109516923", "ok": true, "note": "without a type/presence guard the aggregate silently includes every row whose key is absent or another type as the default 0"}
+{"name": "semantics.native_typed.unguarded_sum_int64_wraps", "kind": "characterization", "expected": "-9214364837600034693", "observed": "-9214364837600034693", "ok": true, "note": "the fixture's integer total exceeds Int64, so the plain Int64 aggregate wraps even though the column type is native"}
+{"name": "semantics.native_typed.serving_equivalence", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "decoded canonical values compared with the serving Maps for 27 rows"}
+{"name": "semantics.native_typed.serving_rows_checked", "kind": "semantic", "expected": "27", "observed": "27", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.row_count", "kind": "semantic", "expected": "27", "observed": "27", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.type_counts", "kind": "semantic", "expected": "bool\t1\nbytes\t1\ndouble\t5\nempty\t1\nint\t12\nmap\t1\nstring\t3", "observed": "bool\t1\nbytes\t1\ndouble\t5\nempty\t1\nint\t12\nmap\t1\nstring\t3", "ok": true, "note": "the canonical-only map carries the type for bytes/array/map/empty keys, so type identity is preserved without a full per-key sidecar"}
+{"name": "semantics.native_minimal.typed_filter_int", "kind": "semantic", "expected": "3", "observed": "3", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.typed_filter_double", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.typed_filter_string", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.group_by_literals", "kind": "semantic", "expected": "3\t1\t1\t1\t1\t1\t1\t1\t1", "observed": "3\t1\t1\t1\t1\t1\t1\t1\t1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.presence_count", "kind": "semantic", "expected": "24", "observed": "24", "ok": true, "note": "same answer as the sidecar and companion layouts: 24 present rows"}
+{"name": "semantics.native_minimal.presence_missing", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.presence_empty", "kind": "semantic", "expected": "empty\t1", "observed": "empty\t1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.presence_empty_string", "kind": "semantic", "expected": "string\t\t0", "observed": "string\t\t0", "ok": true, "note": "empty string is a string value; it is not in the canonical-only map"}
+{"name": "semantics.native_minimal.canonical_only_presence_bookkept", "kind": "semantic", "expected": "bytes\t1", "observed": "bytes\t1", "ok": true, "note": "minimal bookkeeping still answers presence/type for bytes, array, and map keys"}
+{"name": "semantics.native_minimal.nested_presence_bookkept", "kind": "semantic", "expected": "map\t1", "observed": "map\t1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.canonical_only_types_distinct", "kind": "semantic", "expected": "array\tmap\tempty", "observed": "array\tmap\tempty", "ok": true, "note": "array, map, and explicit empty keep distinct type identity"}
+{"name": "semantics.native_minimal.presence_nonfinite_supported", "kind": "semantic", "expected": "double\t1", "observed": "double\t1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.missing_lookup_default_int", "kind": "semantic", "expected": "16", "observed": "16", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.missing_lookup_default_string", "kind": "semantic", "expected": "25", "observed": "25", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.presence_guard_fixes_default", "kind": "semantic", "expected": "1", "observed": "1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.big_int_exact", "kind": "semantic", "expected": "9007199254740993", "observed": "9007199254740993", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.min_int_exact", "kind": "semantic", "expected": "-9223372036854775808", "observed": "-9223372036854775808", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.numeric_order", "kind": "semantic", "expected": "min-int\ngroup-int-zero\ngroup-int-1\nsum-c\nsum-small-a\nsum-small-b\norder-9\norder-10\norder-100\nbig-int\nsum-a\nsum-b", "observed": "min-int\ngroup-int-zero\ngroup-int-1\nsum-c\nsum-small-a\nsum-small-b\norder-9\norder-10\norder-100\nbig-int\nsum-a\nsum-b", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.namespace_collide", "kind": "semantic", "expected": "resource-value\trecord-value", "observed": "resource-value\trecord-value", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.duplicate_rejected_row_absent", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.sum_small_exact", "kind": "semantic", "expected": "3", "observed": "3", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.sum_int64_wraps_in_clickhouse", "kind": "characterization", "expected": "-1", "observed": "-1", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.aggregate_contributing_counts", "kind": "semantic", "expected": "24\t12", "observed": "24\t12", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.type_change_across_rows", "kind": "semantic", "expected": "12\t5\t3", "observed": "12\t5\t3", "ok": true, "note": ""}
+{"name": "semantics.native_minimal.serving_equivalence", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "decoded canonical values compared with the serving Maps for 27 rows"}
+{"name": "semantics.native_minimal.serving_rows_checked", "kind": "semantic", "expected": "27", "observed": "27", "ok": true, "note": ""}
+{"name": "semantics.span_scope.companion_namespace_separated", "kind": "semantic", "expected": "string\tstring\ts", "observed": "string\tstring\ts", "ok": true, "note": ""}
+{"name": "semantics.span_scope.native_typed_namespace_separated", "kind": "semantic", "expected": "string\tstring\ts", "observed": "string\tstring\ts", "ok": true, "note": ""}
+{"name": "semantics.span_scope.native_minimal_namespace_separated", "kind": "semantic", "expected": "present\ts\t0\t0", "observed": "present\ts\t0\t0", "ok": true, "note": ""}
+{"name": "semantics.span_scope.native_typed_scope_int", "kind": "semantic", "expected": "int\t11", "observed": "int\t11", "ok": true, "note": ""}
+{"name": "semantics.span_scope.native_typed_namespaces_disjoint", "kind": "semantic", "expected": "0\t0", "observed": "0\t0", "ok": true, "note": "span scope attributes do not leak into the span attribute namespace and vice versa"}
+{"name": "prototype.nan.value_comparison_rejected", "kind": "prototype", "expected": "rejected", "observed": "rejected", "ok": true, "note": "harness query-prototype behavior, not a ClickHouse guarantee"}
+{"name": "prototype.bytes-row.value_comparison_rejected", "kind": "prototype", "expected": "rejected", "observed": "rejected", "ok": true, "note": "harness query-prototype behavior, not a ClickHouse guarantee"}
+{"name": "prototype.nested-row.value_comparison_rejected", "kind": "prototype", "expected": "rejected", "observed": "rejected", "ok": true, "note": "harness query-prototype behavior, not a ClickHouse guarantee"}
+{"name": "prototype.typed-1.value_comparison_rejected", "kind": "prototype", "expected": "rejected", "observed": "rejected", "ok": true, "note": "harness query-prototype behavior, not a ClickHouse guarantee"}
+{"name": "prototype.finite_scalar_comparison_allowed", "kind": "prototype", "expected": "ok", "observed": "ok", "ok": true, "note": "presence/type inspection and finite scalar comparisons are supported"}
+{"name": "prototype.aggregate_overflow_rejected", "kind": "prototype", "expected": "rejected", "observed": "rejected", "ok": true, "note": "harness query-prototype behavior, not a ClickHouse guarantee"}
+{"name": "prototype.aggregate_in_range_allowed", "kind": "prototype", "expected": 3, "observed": 3, "ok": true, "note": ""}
+{"name": "canonical.payload_count", "kind": "semantic", "expected": "27", "observed": 27, "ok": true, "note": "the duplicate-key record is rejected by the mapping prototype"}
+{"name": "canonical.lossless_roundtrip", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "decoded payload compared with the typed fixture inventory by an independent decoder"}
+{"name": "semantics.mapping.duplicate_event_rejected", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": ""}
+{"name": "semantics.mapping.duplicate-same-type", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "harness mapping-boundary enforcement; ClickHouse has no unique-key constraint"}
+{"name": "semantics.mapping.duplicate-different-type", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "harness mapping-boundary enforcement; ClickHouse has no unique-key constraint"}
+{"name": "semantics.mapping.cross-map-conflict", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "harness mapping-boundary enforcement; ClickHouse has no unique-key constraint"}
+{"name": "semantics.mapping.sidecar-type-mismatch", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "harness mapping-boundary enforcement; ClickHouse has no unique-key constraint"}
+{"name": "semantics.mapping.canonical-only-also-typed", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "harness mapping-boundary enforcement; ClickHouse has no unique-key constraint"}
+{"name": "semantics.mapping.missing-sidecar-entry", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "harness mapping-boundary enforcement; ClickHouse has no unique-key constraint"}
+{"name": "semantics.mapping.minimal-bookkeeping-scalar", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": "harness mapping-boundary enforcement; ClickHouse has no unique-key constraint"}
+{"name": "semantics.mapping.no_unrejected_cases", "kind": "semantic", "expected": "ok", "observed": "ok", "ok": true, "note": ""}
+{"name": "semantics.mapping.dup_absent.companion", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.mapping.dup_absent.native_typed", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
+{"name": "semantics.mapping.dup_absent.native_minimal", "kind": "semantic", "expected": "0", "observed": "0", "ok": true, "note": ""}
