@@ -1,0 +1,9 @@
+{"event_id": "dup-1", "reason": "duplicate attribute key 'dup' in record namespace"}
+{"event_id": "dup-1", "reason": "duplicate attribute key 'dup' in record namespace"}
+{"case": "duplicate-same-type", "reason": "duplicate attribute key 'k' in one attribute collection"}
+{"case": "duplicate-different-type", "reason": "duplicate attribute key 'k' in one attribute collection"}
+{"case": "cross-map-conflict", "reason": "key 'k' present in more than one typed value map"}
+{"case": "sidecar-type-mismatch", "reason": "sidecar type 'string' for key 'k' does not match its typed value map"}
+{"case": "canonical-only-also-typed", "reason": "canonical-only key 'k' also has a typed value"}
+{"case": "missing-sidecar-entry", "reason": "key 'k' has a typed value but no sidecar type"}
+{"case": "minimal-bookkeeping-scalar", "reason": "minimal bookkeeping only carries canonical-only types, got 'int' for key 'k'"}
