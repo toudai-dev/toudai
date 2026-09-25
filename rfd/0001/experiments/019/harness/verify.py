@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -921,6 +922,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     results = Path(args.results)
+    # Test-only hook (harness/test-run-failure-modes.sh): raise an unexpected
+    # exception in the named phase so the harness failure path is exercised.
+    crash_phase = os.environ.get("LH019_TEST_CRASH_PHASE")
+    if crash_phase and args.phase == crash_phase:
+        raise RuntimeError("injected test crash (LH019_TEST_CRASH_PHASE)")
     c = run_phase(args.phase, results, capture=args.capture)
     for item in c.outcomes:
         mark = "PASS" if item["ok"] else ("CAPTURE" if args.capture else "FAIL")

@@ -30,6 +30,13 @@ export LH019_CH_USERS="$HERE/clickhouse-users.xml"
 CLICKHOUSE_BIN=""
 OWNS_CLICKHOUSE=0
 CH_STARTED=0
+# Failure accounting: each phase records its process exit status, and
+# summarize() fails the run when an expected phase is missing, empty, stale, or
+# nonzero. The run's exit status is therefore part of the evidence.
+HARNESS_FAILED=0
+PHASE_STATUS="$RESULTS/phase-status.tsv"
+RUN_MARKER="$RESULTS/run-start.txt"
+ALL_PHASES="stock-map stock-json managed transform identity semantics cost files"
 
 log() { printf '[019] %s\n' "$*"; }
 
@@ -144,6 +151,8 @@ reset_state() {
       DROP DATABASE IF EXISTS stock_json;
       CREATE DATABASE IF NOT EXISTS lh019;"
   rm -f "$RESULTS"/*
+  : >"$PHASE_STATUS"
+  date -u +"%Y-%m-%dT%H:%M:%SZ" >"$RUN_MARKER"
 }
 
 start_collector() { # start_collector NAME CONFIG
@@ -180,16 +189,71 @@ scrape_metrics() {
   curl -sS "http://127.0.0.1:8889/metrics" >"$1" 2>/dev/null || echo "metrics endpoint unavailable" >"$1"
 }
 
-verify() { # verify PHASE OUT
-  # A failed check is recorded in the checks file; it must not abort the run.
-  "$PY" "$HERE/verify.py" --phase "$1" --results "$RESULTS" --out "checks-$2.jsonl" || true
+record_phase() { # record_phase NAME EXIT_STATUS
+  touch "$PHASE_STATUS"
+  awk -v n="$1" '$1 != n' "$PHASE_STATUS" >"$PHASE_STATUS.tmp" 2>/dev/null || true
+  mv "$PHASE_STATUS.tmp" "$PHASE_STATUS"
+  printf '%s\t%s\n' "$1" "$2" >>"$PHASE_STATUS"
 }
 
-summarize() {
-  local failed total
-  total=$(cat "$RESULTS"/checks-*.jsonl 2>/dev/null | grep -c . || true)
-  failed=$(cat "$RESULTS"/checks-*.jsonl 2>/dev/null | "$PY" -c 'import json,sys; print(sum(1 for line in sys.stdin if line.strip() and not json.loads(line)["ok"]))' || true)
-  log "checks: ${failed:-0} failed of ${total:-0} recorded"
+verify() { # verify PHASE OUT [EXPECTED_EXIT]
+  # The phase's process exit status is part of the evidence. A crashed or
+  # missing phase must fail the run even if a checks file happens to exist, and
+  # the target file is removed first so a crash cannot leave a stale one.
+  local phase="$1" out="$2" expected="${3:-0}" rc
+  rm -f "$RESULTS/checks-$out.jsonl"
+  set +e
+  "$PY" "$HERE/verify.py" --phase "$phase" --results "$RESULTS" --out "checks-$out.jsonl"
+  rc=$?
+  set -e
+  record_phase "$out" "$rc"
+  if (( rc != expected )); then
+    log "verify $out exited $rc (expected $expected)"
+    HARNESS_FAILED=1
+  fi
+}
+
+summarize() { # summarize "phase ..." -> nonzero when coverage or checks fail
+  local expected="$1" phase file status n f total=0 failed=0 problems=""
+  local py="$PY"
+  [[ -x "$py" ]] || py="$(command -v python3)"
+  for phase in $expected; do
+    status="$(awk -v n="$phase" '$1 == n { print $2 }' "$PHASE_STATUS" 2>/dev/null | tail -1)"
+    file="$RESULTS/checks-$phase.jsonl"
+    if [[ -z "$status" ]]; then
+      problems="$problems $phase(no-status)"
+    elif (( status != 0 )); then
+      problems="$problems $phase(exit=$status)"
+    elif [[ ! -s "$file" ]]; then
+      problems="$problems $phase(no-output)"
+    elif [[ -f "$RUN_MARKER" && "$file" -ot "$RUN_MARKER" ]]; then
+      problems="$problems $phase(stale)"
+    else
+      n="$(wc -l <"$file")"
+      f="$("$py" - "$file" <<'PYEOF'
+import json
+import sys
+print(sum(1 for line in open(sys.argv[1]) if line.strip() and not json.loads(line)["ok"]))
+PYEOF
+)"
+      total=$((total + n))
+      failed=$((failed + f))
+    fi
+  done
+  log "phase coverage: ${expected:-none}"
+  log "checks: $failed failed of $total recorded"
+  if [[ -n "$problems" ]]; then
+    log "coverage problems:$problems"
+  fi
+  if (( HARNESS_FAILED != 0 )); then
+    log "harness failure flag set"
+  fi
+  if [[ -n "$problems" || "$failed" != 0 || "$HARNESS_FAILED" != 0 ]]; then
+    log "HARNESS FAILED"
+    return 1
+  fi
+  log "HARNESS PASSED"
+  return 0
 }
 
 phase_stock_map() {
@@ -216,7 +280,7 @@ phase_stock_json() {
   start_collector collector-json collector-json.yaml
   # The full typed fixture contains NaN/Inf; the JSON exporter cannot marshal
   # them and drops the whole request. This emit is the negative evidence.
-  emit logs typed emit-stock-json-logs-nan.jsonl >"$RESULTS/emit-stock-json-logs-nan.out" || true
+  emit logs typed emit-stock-json-logs-nan.jsonl >"$RESULTS/emit-stock-json-logs-nan.out"
   sleep 8
   scrape_metrics "$RESULTS/metrics-stock-json-nan.txt"
   # Reduced fixture without non-finite doubles, so the remaining typed cases
@@ -249,7 +313,7 @@ phase_managed() {
   stop_collector collector-managed
   # The required/plain payload column probe: the stock INSERT never names it.
   start_collector collector-managed-required collector-managed-required.yaml
-  emit logs typed-safe emit-managed-required.jsonl >"$RESULTS/emit-managed-required.out" || true
+  emit logs typed-safe emit-managed-required.jsonl >"$RESULTS/emit-managed-required.out"
   wait_rows lh019 "SELECT count() FROM managed_logs_payload" 25 30 || log "warning: payload-column rows missing"
   sleep 2
   stop_collector collector-managed-required
@@ -258,7 +322,20 @@ phase_managed() {
 
 phase_transform() {
   log "phase transform: stock-processor gap probes"
-  timeout 20 "$OTELCOL" --config "$HERE/collector-transform-types.yaml" >"$RESULTS/transform-types.log" 2>&1 || true
+  # Expected-negative component failure: the per-key type expression must be
+  # rejected at config load. Assert the nonzero exit instead of ignoring it; an
+  # unexpected success is a harness failure, and verify.py separately asserts
+  # the exact error text.
+  local rc=0
+  set +e
+  timeout 20 "$OTELCOL" --config "$HERE/collector-transform-types.yaml" >"$RESULTS/transform-types.log" 2>&1
+  rc=$?
+  set -e
+  record_phase "transform-config-load" "$rc"
+  if (( rc == 0 )); then
+    log "expected the transform/types config to be rejected, but it loaded"
+    HARNESS_FAILED=1
+  fi
   start_collector collector-transform-stringify collector-transform-stringify.yaml
   emit logs typed-safe emit-transform-stringify.jsonl >"$RESULTS/emit-transform-stringify.out"
   sleep 2
@@ -312,19 +389,20 @@ apply_representations() {
 }
 
 case "${1:-all}" in
-  stock-map) phase_stock_map ;;
-  stock-json) phase_stock_json ;;
-  managed) phase_managed ;;
-  transform) phase_transform ;;
-  identity) phase_identity ;;
+  stock-map) phase_stock_map; summarize "stock-map" ;;
+  stock-json) phase_stock_json; summarize "stock-json" ;;
+  managed) phase_managed; summarize "managed" ;;
+  transform) phase_transform; summarize "transform" ;;
+  identity) phase_identity; summarize "identity" ;;
   semantics)
     start_clickhouse
     apply_representations
     phase_semantics
+    summarize "semantics"
     ;;
-  cost) phase_cost ;;
-  files) verify files files ;;
-  summarize) summarize ;;
+  cost) phase_cost; summarize "cost" ;;
+  files) verify files files; summarize "files" ;;
+  check-results) shift || true; summarize "$*" ;;
   all)
     reset_state
     apply_representations
@@ -336,9 +414,9 @@ case "${1:-all}" in
     phase_semantics
     phase_cost
     verify files files
-    summarize
+    summarize "$ALL_PHASES"
     ;;
-  *) echo "usage: $0 [stock-map|stock-json|managed|transform|identity|semantics|cost|files|all]" >&2; exit 2 ;;
+  *) echo "usage: $0 [stock-map|stock-json|managed|transform|identity|semantics|cost|files|check-results|all]" >&2; exit 2 ;;
 esac
 
 log "done"
