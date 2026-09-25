@@ -62,6 +62,10 @@ COST_QUERIES = {
     "diverse": ("int_filter", "string_filter", "group_by_type", "numeric_order", "sum_typed", "presence"),
 }
 COST_ROWS = 50_000
+# The minimal layout's blanket union/type expression for known-type queries,
+# kept as a measurement to separate query generation from layout requirement.
+MINIMAL_UNION_QUERIES = ("int_filter_union", "string_filter_union",
+                         "numeric_order_union", "sum_typed_union")
 # One database per corpus so the two corpora never share tables (and therefore
 # never share parts or storage measurements).
 COST_DBS = {"base": "lh020_cost_base", "diverse": "lh020_cost_diverse"}
@@ -326,13 +330,21 @@ def phase_capabilities(c: Checks, results: Path):
         ("map_lc_string_bool", "cap_lc_bool", "CREATE TABLE cap_lc_bool (m Map(LowCardinality(String), Bool)) ENGINE=Memory",
          'INSERT INTO cap_lc_bool FORMAT JSONEachRow\n{"m":{"a":true}}',
          "SELECT m['a'], toTypeName(m['a']) FROM cap_lc_bool", "true\tBool"),
-        ("map_lc_string_string", "cap_lc_str", "CREATE TABLE cap_lc_str (m Map(LowCardinality(String), String)) ENGINE=Memory",
-         'INSERT INTO cap_lc_str FORMAT JSONEachRow\n{"m":{"a":"s"}}',
-         "SELECT m['a'], toTypeName(m['a']) FROM cap_lc_str", "s\tString"),
-        ("map_lc_value_not_preserved", "cap_lc_lc",
+        ("map_lc_declared_type", "cap_lc_lc",
          "CREATE TABLE cap_lc_lc (m Map(LowCardinality(String), LowCardinality(String))) ENGINE=Memory",
          'INSERT INTO cap_lc_lc FORMAT JSONEachRow\n{"m":{"a":"s"}}',
-         "SELECT m['a'], toTypeName(m['a']) FROM cap_lc_lc", "s\tString"),
+         "SELECT type FROM system.columns WHERE database='lh020_caps' AND table='cap_lc_lc' AND name='m'",
+         "Map(LowCardinality(String), LowCardinality(String))"),
+        ("map_lc_expression_type", "cap_lc_lc",
+         "CREATE TABLE cap_lc_lc (m Map(LowCardinality(String), LowCardinality(String))) ENGINE=Memory",
+         'INSERT INTO cap_lc_lc FORMAT JSONEachRow\n{"m":{"a":"s"}}',
+         "SELECT toTypeName(m), toTypeName(m['a']), m['a'] FROM cap_lc_lc",
+         "Map(LowCardinality(String), LowCardinality(String))\tString\ts"),
+        ("map_lc_string_declared_type", "cap_lc_str",
+         "CREATE TABLE cap_lc_str (m Map(LowCardinality(String), String)) ENGINE=Memory",
+         'INSERT INTO cap_lc_str FORMAT JSONEachRow\n{"m":{"a":"s"}}',
+         "SELECT type FROM system.columns WHERE database='lh020_caps' AND table='cap_lc_str' AND name='m'",
+         "Map(LowCardinality(String), String)"),
         ("map_lc_string_enum8", "cap_enum", "CREATE TABLE cap_enum (m Map(LowCardinality(String), Enum8('s' = 1, 'i' = 2))) ENGINE=Memory",
          "INSERT INTO cap_enum FORMAT JSONEachRow\n{\"m\":{\"k\":\"i\"}}",
          "SELECT m['k'] FROM cap_enum", "i"),
@@ -366,6 +378,13 @@ def phase_capabilities(c: Checks, results: Path):
          "18446744073709551615"),
         ("negative_zero", None, None, None,
          "SELECT toString(toFloat64(-0.0)), toFloat64(-0.0) = 0", "-0\t1"),
+        ("float64_int64_min_exact", None, None, None,
+         "SELECT toFloat64(-9223372036854775808) = -9223372036854775808, "
+         "toInt64(toFloat64(-9223372036854775808)) = toInt64(-9223372036854775808), "
+         "toString(toFloat64(-9223372036854775808))", "1\t1\t-9223372036854776000"),
+        ("float64_above_2_53_lossy", None, None, None,
+         "SELECT toFloat64(9007199254740993) = 9007199254740993, "
+         "toFloat64(9007199254740993) = 9007199254740992", "0\t1"),
         ("bool_false_not_int_zero", None, None, None,
          "SELECT map('b',false)['b'], map('i',0)['i']", "false\t0"),
         ("json_quote_denormals", None, None, None,
@@ -873,13 +892,21 @@ def phase_negative(c: Checks, results: Path):
     c.sql("negative.float_only.correct_layout_double_matches", "lh020",
           "SELECT count() FROM rep_native_typed WHERE record_double['metric.value'] = 1", "1", kind="semantic",
           note="the same query on the correct layout answers 1")
-    c.sql("negative.float_only.big_int_rounded", "lh020",
+    c.sql("negative.float_only.big_int_printed_rounded", "lh020",
           "SELECT record_double['metric.value'] FROM rep_wrong_float_only WHERE event_id='big-int'",
           "9007199254740992", kind="semantic",
-          note="9007199254740993 is not representable in Float64")
-    c.sql("negative.float_only.int64_min_rounded", "lh020",
-          "SELECT record_double['metric.value'] FROM rep_wrong_float_only WHERE event_id='min-int'",
-          "-9223372036854776000", kind="semantic", note="Int64 minimum is rounded by Float64")
+          note="the collapsed layout prints 9007199254740992 for 9007199254740993")
+    c.sql("negative.float_only.big_int_equality_lost", "lh020",
+          "SELECT record_double['metric.value'] = 9007199254740993, "
+          "record_double['metric.value'] = 9007199254740992 "
+          "FROM rep_wrong_float_only WHERE event_id='big-int'", "0\t1", kind="semantic",
+          note="genuine precision loss above 2^53: the stored Float64 equals 2^53, not 2^53+1")
+    c.sql("negative.float_only.int64_min_exact", "lh020",
+          "SELECT record_double['metric.value'] = toFloat64(-9223372036854775808), "
+          "toString(record_double['metric.value']) FROM rep_wrong_float_only WHERE event_id='min-int'",
+          "1\t-9223372036854776000", kind="semantic",
+          note="Float64 represents -2^63 exactly; the printed decimal is rounded formatting, "
+               "not numerical loss")
     c.sql("negative.double_presence.union_counts_twice", "lh020",
           "SELECT countIf(mapContains(record_int,'int.one')) + countIf(mapContains(record_string,'int.one')) "
           "FROM rep_wrong_double_presence WHERE event_id='typed-1'", "2", kind="semantic",
@@ -900,17 +927,45 @@ def phase_negative(c: Checks, results: Path):
 # Cost
 # ---------------------------------------------------------------------------
 
-def _presence(variant, namespace, key):
-    if variant in ("companion", "native_typed"):
-        return f"mapContains({namespace}_types, '{key}')"
+def _union_presence(namespace, key):
     return "(" + " OR ".join(f"mapContains({namespace}_{t}, '{key}')" for t in SCALARS + ("other",)) + ")"
 
 
-def _type_expr(variant, namespace, key):
-    if variant in ("companion", "native_typed"):
-        return f"{namespace}_types['{key}']"
+def _multi_if_type(namespace, key):
     return ("multiIf(" + ", ".join(f"mapContains({namespace}_{t}, '{key}'), '{t}'" for t in SCALARS)
             + f", mapContains({namespace}_other, '{key}'), {namespace}_other['{key}'], '')")
+
+
+def _unknown_type_presence(variant, namespace, key):
+    """Presence for a key whose type is not known in advance.
+
+    The companion layout and the full-sidecar layout answer it from their type
+    map; the minimal layout has no per-key type map, so it unions the value maps.
+    """
+    if variant in ("companion", "native_typed"):
+        return f"mapContains({namespace}_types, '{key}')"
+    return _union_presence(namespace, key)
+
+
+def _unknown_type_expr(variant, namespace, key):
+    """Type expression for a key whose type is not known in advance."""
+    if variant in ("companion", "native_typed"):
+        return f"{namespace}_types['{key}']"
+    return _multi_if_type(namespace, key)
+
+
+def _known_type_guard(variant, namespace, key, type_name):
+    """Presence guard for a key whose type is known at query time.
+
+    The companion layout has no per-type value map, so it must use its type map.
+    The native layouts guard directly on the typed value map, so the query reads
+    only that map. That is a query-generation choice, not a layout requirement:
+    the `*_union` measurements keep the blanket union/type expression to
+    quantify the difference.
+    """
+    if variant == "companion":
+        return f"{namespace}_types['{key}'] = '{type_name}'"
+    return f"mapContains({namespace}_{type_name}, '{key}')"
 
 
 def _value_expr(variant, namespace, key, type_name):
@@ -926,10 +981,9 @@ def _value_expr(variant, namespace, key, type_name):
     return f"{namespace}_{type_name}['{key}']"
 
 
-def cost_query(corpus, variant, name):
-    table = COST_TABLES[variant]
+def _cost_keys(corpus):
     if corpus == "base":
-        keys = {
+        return {
             "int_filter": ("int.one", "int", "5"),
             "string_filter": ("str.one", "string", "'s5'"),
             "group_by_type": ("int.one", None, None),
@@ -938,56 +992,94 @@ def cost_query(corpus, variant, name):
             "presence": ("int.one", None, None),
             "canonical_bytes_payload": ("bytes.raw", "bytes", None),
         }
-    else:
-        keys = {
-            "int_filter": ("http.status_code", "int", "200"),
-            "string_filter": ("http.method", "string", "'GET'"),
-            "group_by_type": ("attr.mixed", None, None),
-            "numeric_order": ("duration_ms", "double", None),
-            "sum_typed": ("retry.count", "int", None),
-            "presence": ("attr.mixed", None, None),
-        }
-    key, type_name, literal = keys[name]
-    presence = _presence(variant, "record", key)
-    type_expr = _type_expr(variant, "record", key)
-    value = _value_expr(variant, "record", key, type_name) if type_name else None
-    if name == "canonical_bytes_payload":
-        # Canonical-only values live in the payload in every layout; this reads
-        # the payload column to show the retrieval cost that stays unchanged.
-        return (f"SELECT JSONExtract(payload, 'record', 'bytes.raw', 'v', 'String') FROM {table} "
-                f"WHERE event_id='cost-0'")
+    return {
+        "int_filter": ("http.status_code", "int", "200"),
+        "string_filter": ("http.method", "string", "'GET'"),
+        "group_by_type": ("attr.mixed", None, None),
+        "numeric_order": ("duration_ms", "double", None),
+        "sum_typed": ("retry.count", "int", None),
+        "presence": ("attr.mixed", None, None),
+    }
+
+
+def cost_query_union(corpus, variant, name):
+    """The minimal layout's blanket union/type expression for a known-type query.
+
+    Measurement-only: it exists to separate the layout requirement (the minimal
+    layout can answer with a direct typed-map guard) from this query-generation
+    choice.
+    """
+    table = COST_TABLES[variant]
+    key, type_name, literal = _cost_keys(corpus)[name]
+    presence = _union_presence("record", key)
+    type_expr = _multi_if_type("record", key)
+    value = _value_expr(variant, "record", key, type_name)
     if name in ("int_filter", "string_filter"):
         return (f"SELECT count() FROM {table} WHERE {presence} AND {type_expr}='{type_name}' "
                 f"AND {value}={literal}")
-    if name == "group_by_type":
-        return f"SELECT {type_expr} AS t, count() FROM {table} WHERE {presence} GROUP BY t ORDER BY t"
     if name == "numeric_order":
         return (f"SELECT {value} FROM {table} WHERE {presence} AND {type_expr}='{type_name}' "
                 f"ORDER BY 1 DESC LIMIT 5")
     if name == "sum_typed":
         return (f"SELECT sum(toInt128({value})) FROM {table} WHERE {presence} "
                 f"AND {type_expr}='{type_name}'")
+    raise SystemExit(f"unknown union cost query {name}")
+
+
+def cost_query(corpus, variant, name):
+    table = COST_TABLES[variant]
+    if name.endswith("_union"):
+        return cost_query_union(corpus, variant, name[:-len("_union")])
+    key, type_name, literal = _cost_keys(corpus)[name]
+    if name == "canonical_bytes_payload":
+        # Canonical-only values live in the payload in every layout; this reads
+        # the payload column to show the retrieval cost that stays unchanged.
+        return (f"SELECT JSONExtract(payload, 'record', 'bytes.raw', 'v', 'String') FROM {table} "
+                f"WHERE event_id='cost-0'")
+    if name in ("int_filter", "string_filter"):
+        guard = _known_type_guard(variant, "record", key, type_name)
+        value = _value_expr(variant, "record", key, type_name)
+        return f"SELECT count() FROM {table} WHERE {guard} AND {value}={literal}"
+    if name == "group_by_type":
+        presence = _unknown_type_presence(variant, "record", key)
+        type_expr = _unknown_type_expr(variant, "record", key)
+        return f"SELECT {type_expr} AS t, count() FROM {table} WHERE {presence} GROUP BY t ORDER BY t"
+    if name == "numeric_order":
+        guard = _known_type_guard(variant, "record", key, type_name)
+        value = _value_expr(variant, "record", key, type_name)
+        return f"SELECT {value} FROM {table} WHERE {guard} ORDER BY 1 DESC LIMIT 5"
+    if name == "sum_typed":
+        guard = _known_type_guard(variant, "record", key, type_name)
+        value = _value_expr(variant, "record", key, type_name)
+        return f"SELECT sum(toInt128({value})) FROM {table} WHERE {guard}"
     if name == "presence":
+        presence = _unknown_type_presence(variant, "record", key)
         return f"SELECT countIf({presence}) FROM {table}"
     raise SystemExit(f"unknown cost query {name}")
 
 
 def measure(db, marker, sql):
-    """Run a query twice and read the warm execution from system.query_log."""
-    marked = f"/* {marker} */ {sql}"
+    """Run a query twice and read the warm execution from system.query_log.
+
+    The query condition cache is disabled for the measured execution: otherwise
+    a repeated predicate can be answered from cached granule conditions, and the
+    read cost of one variant then depends on which queries ran before it.
+    """
+    marked = f"/* {marker} */ {sql} SETTINGS use_query_condition_cache=0"
     result_text = ""
     for _ in range(2):
         result_text = ch(db, marked)
     text = ""
     for _ in range(20):
         text = ch(db, "SELECT query_duration_ms, read_rows, read_bytes, result_rows, "
+                      "ProfileEvents['ReadCompressedBytes'], "
                       "ProfileEvents['OSCPUVirtualTimeMicroseconds'], memory_usage "
                       "FROM system.query_log WHERE type='QueryFinish' "
                       f"AND query LIKE '/* {marker} */%' ORDER BY event_time DESC LIMIT 1")
         if text:
             break
         time.sleep(0.5)
-    parts = text.split("\t") if text else ["", "", "", "", "", ""]
+    parts = text.split("\t") if text else ["", "", "", "", "", "", ""]
     return {
         "marker": marker,
         "result": result_text,
@@ -995,8 +1087,9 @@ def measure(db, marker, sql):
         "read_rows": int(parts[1] or 0),
         "read_bytes": int(parts[2] or 0),
         "result_rows": int(parts[3] or 0),
-        "cpu_us": int(parts[4] or 0),
-        "memory_bytes": int(parts[5] or 0),
+        "compressed_bytes": int(parts[4] or 0),
+        "cpu_us": int(parts[5] or 0),
+        "memory_bytes": int(parts[6] or 0),
     }
 
 
@@ -1033,13 +1126,47 @@ def phase_cost(c: Checks, results: Path):
                 observed[variant] = measurement["result"]
                 c.info(f"cost.{corpus}.{variant}.{name}",
                        f"{measurement['duration_ms']}ms rows={measurement['read_rows']} "
-                       f"bytes={measurement['read_bytes']} result={measurement['result'][:60]!r}")
+                       f"compressed={measurement['compressed_bytes']} "
+                       f"result={measurement['result'][:60]!r}")
             values = list(observed.values())
             same = len(set(values)) == 1 and values[0] not in ("", "0")
             c.check(f"cost.{corpus}.same_answer.{name}", "ok" if same else f"mismatch: {values}", "ok",
                     kind="semantic",
                     note="companion, full-sidecar, and minimal-bookkeeping layouts must answer the "
                          "same question with the same result")
+        # Query-generation sensitivity for the minimal layout: the same
+        # known-type questions with the blanket union/type expression instead of
+        # the direct typed-map guard. The answers must match; the read cost is
+        # what the report separates from the layout requirement.
+        for name in MINIMAL_UNION_QUERIES:
+            marker = f"q020-{corpus}-{name}-native_minimal"
+            measurement = measure(db, marker, cost_query(corpus, "native_minimal", name))
+            measurement["corpus"] = corpus
+            measurement["variant"] = "native_minimal"
+            measurement["query"] = name
+            measurements.append(measurement)
+            direct = next(item for item in measurements
+                          if item["corpus"] == corpus and item["variant"] == "native_minimal"
+                          and item["query"] == name[:-len("_union")])
+            c.check(f"cost.{corpus}.same_answer.{name}_vs_direct",
+                    "ok" if measurement["result"] == direct["result"] else
+                    f"mismatch: {measurement['result']!r} vs {direct['result']!r}", "ok", kind="semantic",
+                    note="the union/type expression and the direct typed-map guard answer identically")
+            c.info(f"cost.{corpus}.native_minimal.{name}",
+                   f"{measurement['duration_ms']}ms rows={measurement['read_rows']} "
+                   f"compressed={measurement['compressed_bytes']} "
+                   f"result={measurement['result'][:60]!r}")
+        # The canonical payload is logically identical across layouts; only its
+        # physical compressed size can differ, so compare a content checksum.
+        payload_identity = {
+            variant: scalar(db, f"SELECT count(), sum(cityHash64(payload)) FROM {COST_TABLES[variant]}")
+            for variant in VARIANTS
+        }
+        c.check(f"cost.{corpus}.same_answer.payload_identity",
+                "ok" if len(set(payload_identity.values())) == 1 else str(payload_identity), "ok",
+                kind="semantic",
+                note="count and checksum of the canonical payload are identical across layouts; "
+                     "physical compressed sizes are not")
     (results / "cost-storage.jsonl").write_text("".join(json.dumps(item) + "\n" for item in storage))
     (results / "cost-queries.jsonl").write_text("".join(json.dumps(item) + "\n" for item in measurements))
 

@@ -6,8 +6,9 @@
 {"name": "capabilities.map_lc_string_int64", "kind": "characterization", "expected": "1\tInt64", "observed": "1\tInt64", "ok": true, "note": ""}
 {"name": "capabilities.map_lc_string_float64", "kind": "characterization", "expected": "1.5\tFloat64", "observed": "1.5\tFloat64", "ok": true, "note": ""}
 {"name": "capabilities.map_lc_string_bool", "kind": "characterization", "expected": "true\tBool", "observed": "true\tBool", "ok": true, "note": ""}
-{"name": "capabilities.map_lc_string_string", "kind": "characterization", "expected": "s\tString", "observed": "s\tString", "ok": true, "note": ""}
-{"name": "capabilities.map_lc_value_not_preserved", "kind": "characterization", "expected": "s\tString", "observed": "s\tString", "ok": true, "note": ""}
+{"name": "capabilities.map_lc_declared_type", "kind": "characterization", "expected": "Map(LowCardinality(String), LowCardinality(String))", "observed": "Map(LowCardinality(String), LowCardinality(String))", "ok": true, "note": ""}
+{"name": "capabilities.map_lc_expression_type", "kind": "characterization", "expected": "Map(LowCardinality(String), LowCardinality(String))\tString\ts", "observed": "Map(LowCardinality(String), LowCardinality(String))\tString\ts", "ok": true, "note": ""}
+{"name": "capabilities.map_lc_string_declared_type", "kind": "characterization", "expected": "Map(LowCardinality(String), String)", "observed": "Map(LowCardinality(String), String)", "ok": true, "note": ""}
 {"name": "capabilities.map_lc_string_enum8", "kind": "characterization", "expected": "i", "observed": "i", "ok": true, "note": ""}
 {"name": "capabilities.map_lc_string_int128", "kind": "characterization", "expected": "1\tInt128", "observed": "1\tInt128", "ok": true, "note": ""}
 {"name": "capabilities.map_nullable_float64", "kind": "characterization", "expected": "1\t1\t1.5", "observed": "1\t1\t1.5", "ok": true, "note": ""}
@@ -20,5 +21,7 @@
 {"name": "capabilities.sum_int64_wraps", "kind": "characterization", "expected": "-1", "observed": "-1", "ok": true, "note": ""}
 {"name": "capabilities.sum_int128_wide", "kind": "characterization", "expected": "18446744073709551615", "observed": "18446744073709551615", "ok": true, "note": ""}
 {"name": "capabilities.negative_zero", "kind": "characterization", "expected": "-0\t1", "observed": "-0\t1", "ok": true, "note": ""}
+{"name": "capabilities.float64_int64_min_exact", "kind": "characterization", "expected": "1\t1\t-9223372036854776000", "observed": "1\t1\t-9223372036854776000", "ok": true, "note": ""}
+{"name": "capabilities.float64_above_2_53_lossy", "kind": "characterization", "expected": "0\t1", "observed": "0\t1", "ok": true, "note": ""}
 {"name": "capabilities.bool_false_not_int_zero", "kind": "characterization", "expected": "false\t0", "observed": "false\t0", "ok": true, "note": ""}
 {"name": "capabilities.json_quote_denormals", "kind": "characterization", "expected": "{\"n\":\"nan\",\"z\":-0}", "observed": "{\"n\":\"nan\",\"z\":-0}", "ok": true, "note": ""}
