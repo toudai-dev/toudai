@@ -52,14 +52,19 @@ cost more than one string Map. `serving_spans` names the instrumentation scope
 Native metrics are not part of this slice: the fixture and the checks cover logs
 and spans only. The complete DDL is `harness/serving-tables.sql`.
 
-Span timing is preserve-and-flag: a span whose end precedes its start keeps both
-supplied timestamps and stays searchable, its derived `duration_ns` is NULL, and
-`span_timing_status` records `end_before_start`; missing timing (OTLP 0/0) stores
-NULL duration with `missing`, and a valid zero duration stores `0` with `ok`.
-Nothing is discarded or substituted, and the canonical payload keeps the supplied
-`start_ns`/`end_ns` with no derived duration when the duration is unavailable.
-How an unavailable duration is presented is future work; the layout and the
-diagnostic vocabulary are provisional for this PoC trial.
+Span timing is preserve-and-flag. OTLP has no timestamp presence (an unset
+`start_time_unix_nano`/`end_time_unix_nano` is 0 and an explicit 0 is
+indistinguishable), so an unset start or end is missing timing and takes
+precedence over the reversed classification: a missing start never fabricates a
+duration from epoch 0 and a missing end is never read as `end < start`. Every span
+keeps its supplied timestamps and stays searchable; its derived `duration_ns` is
+NULL whenever it is not observable (`missing` or `end_before_start`) and 0 for a
+valid zero duration (`ok`). Nothing is discarded or substituted, and the canonical
+payload keeps the supplied `start_ns`/`end_ns` with no derived duration when the
+duration is unavailable. Duration counts are span-only: the fixture's span rows
+live in `serving_spans` and its log rows in `serving_logs`, and a log row is never
+part of a span count. How an unavailable duration is presented is future work; the
+layout and the diagnostic vocabulary are provisional for this PoC trial.
 
 The fixed order is canonical first, with no shared transaction between the two
 inserts. An export request is validated and canonicalized completely before the
@@ -102,14 +107,15 @@ cannot override the injected values, and catch-up provenance is not tested here.
   with an injected verifier crash (`LH021_TEST_CRASH_PHASE`, a verify.py test-only
   hook) and once normally. Both modes passed on the committed harness (`fast`
   15/15, `full` 19/19). The fast mode includes a span-timing fixture regression:
-  missing timing, reversed timing, and a valid zero duration must stay distinct,
-  and the mixed request must carry one valid and one reversed span.
+  missing timing (either timestamp unset), reversed timing, and a valid zero
+  duration must stay distinct, and the mixed request must carry one valid and one
+  reversed span.
 - `harness/fixture021.py` emits the OTLP fixture and reuses Experiment 019's typed
   inventory; the imported 019 sources are pinned by hash in
   `results/fixture019-sha256.txt` and re-checked by the verifier, so a changed
   019 fixture would be reported instead of silently moving the expectations. It
-  adds the missing-timing, zero-duration, and reversed-timing spans and the
-  one-request valid+reversed batch.
+  adds the unset-timestamp (both unset, start-only, end-only), zero-duration, and
+  reversed-timing spans and the one-request valid+reversed batch.
 - `harness/verify.py` evaluates the phases from the fixture inventory, literals
   authored from it, and the raw stored rows. It does not import the component's
   mapping code. Stored write identities are content-derived (`lh1-<32 hex>`) and
@@ -134,7 +140,8 @@ cannot override the injected values, and catch-up provenance is not tested here.
 - `results/semantics-span-timing.jsonl`: the stored span-timing rows
   (`span_name`, identity, both supplied timestamps, `duration_ns`,
   `span_timing_status`), so the preserve-and-flag policy is reviewable from the
-  evidence. The `files` phase re-checks it against the fixture inventory.
+  evidence. The `files` phase re-checks it against the fixture inventory; the
+  snapshot covers span rows only (log rows are in `serving_logs`).
 - `results/phase-status.tsv`, `results/phase-times.tsv`, `results/run-start.txt`,
   `results/phase-preflight.tsv`: phase exit status, phase windows, the run marker,
   and the pre-phase row counts that prove no phase started on stale state.

@@ -76,8 +76,11 @@ plus the hybrid serving tables through a real OTLP path; typed attributes,
 resource/scope namespaces, span scope, and lossless canonical retrieval were
 verified against independent fixture expectations for logs and spans, with native
 metrics outside the slice. Span timestamps were verified under the accepted
-preserve-and-flag policy for reversed timing (both supplied timestamps kept, NULL
-duration, explicit diagnostic) alongside missing and valid zero durations.
+preserve-and-flag policy: a span with an unset start or end (OTLP encodes an unset
+timestamp as 0, with missing timing taking precedence over the reversed
+classification) or with its end before its start keeps its supplied timestamps and
+an unavailable duration with an explicit diagnostic, alongside missing and valid
+zero durations.
 Long-term component boundary, dataset routing, and retained-scale qualification
 remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].

@@ -74,9 +74,10 @@ span with missing or reversed timing stores an unavailable (NULL) duration and i
 excluded from contributing-value counts, a reversed span is still preserved,
 searchable by its supplied timestamps, and counted in an explicit timing-error
 count, and a valid zero duration contributes with value 0 (the fixture-derived
-expectation is 4 contributing / 3 excluded / 2 timing errors of 7 spans). No
-duration aggregate was implemented and presentation of an unavailable duration is
-open. See
+expectation is 4 contributing / 5 excluded / 2 timing errors of the fixture's 9
+span rows; the same-workspace log rows live in `serving_logs` and are never part
+of a span count). That count contract is agreed; the service/query implementation
+of it and the presentation of an unavailable duration remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.

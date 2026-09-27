@@ -56,14 +56,19 @@ operation errors remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
 Span timing through the same path follows the accepted preserve-and-flag policy:
-a span whose end precedes its start is preserved with both supplied timestamps and
-an unavailable (NULL) duration plus an explicit `end_before_start` diagnostic;
-missing timing and a valid zero duration stay distinct (`missing` with NULL versus
-`ok` with zero). The canonical payload keeps the supplied timestamps and omits the
+a span whose start or end is unset (OTLP encodes an unset timestamp as 0) or whose
+end precedes its start is preserved with its supplied timestamps and an
+unavailable (NULL) duration plus an explicit diagnostic; missing timing takes
+precedence over the reversed classification, so a missing start never fabricates a
+duration from epoch 0 and a missing end is never read as reversed. Missing timing
+and a valid zero duration stay distinct (`missing` with NULL versus `ok` with
+zero). The canonical payload keeps the supplied timestamps and omits the
 unavailable duration, and the fixture-derived contributing/excluded/error counts
-(4/3/2 of 7 spans) are recorded as the count contract for future duration
-aggregates. How an unavailable duration is presented and counted in a waterfall or
-dashboard remains open, and the earlier rejection behavior measured before the
-policy change is superseded in that experiment's report.
+(4/5/2 of the fixture's 9 span rows, with the same-workspace log rows never part
+of a span count) are recorded as the agreed count contract for duration
+aggregates. The service/query/UI implementation of that contract and the
+presentation of an unavailable duration in a waterfall or dashboard remain open,
+and the earlier rejection behavior measured before the policy change is superseded
+in that experiment's report.
 
 * [ ] Provide a minimal operator-facing client and record an operator completing time comparison, grouping, heatmap/percentile inspection, outlier identification, and exact-event drill-down against the fixture; verify results against its known events.
