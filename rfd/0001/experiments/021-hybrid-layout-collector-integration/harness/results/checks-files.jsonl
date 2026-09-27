@@ -1,0 +1,29 @@
+{"phase": "files", "check": "files.build-manifest.txt", "ok": true, "detail": "build-manifest.txt missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.go-modules.txt", "ok": true, "detail": "go-modules.txt missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.run-start.txt", "ok": true, "detail": "run-start.txt missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.phase-status.tsv", "ok": true, "detail": "phase-status.tsv missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.phase-times.tsv", "ok": true, "detail": "phase-times.tsv missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.fixture019-sha256.txt", "ok": true, "detail": "fixture019-sha256.txt missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.metrics-semantics.txt", "ok": true, "detail": "metrics-semantics.txt missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.semantics-emits.jsonl", "ok": true, "detail": "semantics-emits.jsonl missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "files.semantics-schema.jsonl", "ok": true, "detail": "semantics-schema.jsonl missing or empty in /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results"}
+{"phase": "files", "check": "meta.module.github_com_ClickHouse_clickhouse_go_v2_v", "ok": true, "detail": "github.com/ClickHouse/clickhouse-go/v2 v2.47.0 not in go-modules.txt"}
+{"phase": "files", "check": "meta.module.go_opentelemetry_io_collector_exporter_e", "ok": true, "detail": "go.opentelemetry.io/collector/exporter/exporterhelper v0.161.0 not in go-modules.txt"}
+{"phase": "files", "check": "meta.module.go_opentelemetry_io_collector_exporter_v", "ok": true, "detail": "go.opentelemetry.io/collector/exporter v1.67.0 not in go-modules.txt"}
+{"phase": "files", "check": "meta.module.github_com_open_telemetry_opentelemetry_", "ok": true, "detail": "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter not in go-modules.txt"}
+{"phase": "files", "check": "meta.no_other_collector_version", "ok": true, "detail": "the module manifest names a collector version other than the pin"}
+{"phase": "files", "check": "meta.fixture019.fixture.py.unchanged", "ok": true, "detail": "the imported 019 fixture changed: expectations would not be independent"}
+{"phase": "files", "check": "meta.fixture019.model.py.unchanged", "ok": true, "detail": "the imported 019 fixture changed: expectations would not be independent"}
+{"phase": "files", "check": "meta.build_manifest_pins_collector", "ok": true, "detail": "build manifest does not record the collector pin"}
+{"phase": "files", "check": "meta.build_manifest_records_core_series", "ok": true, "detail": "build manifest does not record the collector core module series"}
+{"phase": "files", "check": "meta.build_manifest_pins_clickhouse", "ok": true, "detail": "build manifest does not record the ClickHouse pin"}
+{"phase": "files", "check": "meta.phase_preflight_recorded", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/phase-preflight.tsv missing or empty"}
+{"phase": "files", "check": "meta.no_stale_fixture_state_before_phases", "ok": true, "detail": "phases started with pre-existing fixture rows: []"}
+{"phase": "files", "check": "files.split.repair_sql", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/split-repair.sql missing or without a repair statement"}
+{"phase": "files", "check": "fail.split.repair_derives_identity_from_canonical", "ok": true, "detail": "the recorded repair must derive the serving identity from the canonical payload"}
+{"phase": "files", "check": "files.split.repair_result", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/split-repair-result.txt missing"}
+{"phase": "files", "check": "fail.split.repair_landed_one_minimal_row_per_canonical_row", "ok": true, "detail": "repair landed 1 minimal serving rows for 1 canonical rows"}
+{"phase": "files", "check": "files.split-retry.repair_sql", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/split-retry-repair.sql missing or without a repair statement"}
+{"phase": "files", "check": "fail.split-retry.repair_derives_identity_from_canonical", "ok": true, "detail": "the recorded repair must derive the serving identity from the canonical payload"}
+{"phase": "files", "check": "files.split-retry.repair_result", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/split-retry-repair-result.txt missing"}
+{"phase": "files", "check": "fail.split-retry.repair_landed_one_minimal_row_per_canonical_row", "ok": true, "detail": "repair landed 7 minimal serving rows for 7 canonical rows"}

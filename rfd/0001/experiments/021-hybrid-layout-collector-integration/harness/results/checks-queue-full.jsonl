@@ -1,0 +1,8 @@
+{"phase": "queue-full", "check": "fail.queue_full.producer_visible_rejection", "ok": true, "detail": "expected at least one producer-visible 503, statuses=[200, 200, 503, 503, 503, 503]"}
+{"phase": "queue-full", "check": "fail.queue_full.admitted_before_full", "ok": true, "detail": "expected the bounded queue to admit first, statuses=[200, 200, 503, 503, 503, 503]"}
+{"phase": "queue-full", "check": "comp.enqueue_failed_counter", "ok": true, "detail": "no enqueue-failure counter for the full queue"}
+{"phase": "queue-full", "check": "fail.queue_full.fault-queue-1.not_written", "ok": true, "detail": "a request admitted to a stalled queue and discarded on shutdown must not appear"}
+{"phase": "queue-full", "check": "fail.queue_full.fault-queue-2.not_written", "ok": true, "detail": "a request admitted to a stalled queue and discarded on shutdown must not appear"}
+{"phase": "queue-full", "check": "fail.queue_full.no_canonical_rows", "ok": true, "detail": "canonical rows exist for the stalled-queue requests"}
+{"phase": "queue-full", "check": "fail.queue_full.rejection_is_queue_admission", "ok": true, "detail": "503 is a queue-admission failure; per-record validation rejection is not producer visible"}
+{"phase": "queue-full", "check": "comp.queue_full_error_named", "ok": true, "detail": "the collector log does not mention the queue"}

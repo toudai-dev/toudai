@@ -1,0 +1,27 @@
+{"phase": "stock-probe", "check": "stock.source.module_present", "ok": true, "detail": "looked for clickhouseexporter@v0.161.0 under /home/user/lh021/gomodcache"}
+{"phase": "stock-probe", "check": "stock.source.logs.insert_template_present", "ok": true, "detail": "/home/user/lh021/gomodcache/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter@v0.161.0/internal/sqltemplates/logs_insert.sql missing or has no INSERT statement"}
+{"phase": "stock-probe", "check": "stock.source.spans.insert_template_present", "ok": true, "detail": "/home/user/lh021/gomodcache/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter@v0.161.0/internal/sqltemplates/traces_insert.sql missing or has no INSERT statement"}
+{"phase": "stock-probe", "check": "stock.source.logs_insert_is_fixed", "ok": true, "detail": "logs insert: INSERT INTO {{ident .Database}}.{{ident .TableName}} (\n    Timestamp,\n    TraceId,\n    SpanId,\n    TraceFlags,\n    SeverityText,\n    SeverityNumber,\n    ServiceName,\n    Body,\n    ResourceSchemaUrl,\n "}
+{"phase": "stock-probe", "check": "stock.source.logs_insert_scope_attributes_string_map", "ok": true, "detail": "logs insert has no scope attribute column: INSERT INTO {{ident .Database}}.{{ident .TableName}} (\n    Timestamp,\n    TraceId,\n    SpanId,\n    TraceFlags,\n    SeverityText,\n    SeverityNumber,\n    ServiceName,\n    Body,\n    ResourceSchemaUrl,\n "}
+{"phase": "stock-probe", "check": "stock.source.spans_insert_has_no_scope_attributes", "ok": true, "detail": "spans insert: INSERT INTO %q.%q (\n    Timestamp,\n    TraceId,\n    SpanId,\n    ParentSpanId,\n    TraceState,\n    SpanName,\n    SpanKind,\n    ServiceName,\n    ResourceAttributes,\n    ScopeName,\n    ScopeVersion,\n    "}
+{"phase": "stock-probe", "check": "stock.source.config_has_no_extra_columns", "ok": true, "detail": "extra_columns unexpectedly present in config.go"}
+{"phase": "stock-probe", "check": "stock.source.config_has_no_payload_column", "ok": true, "detail": "payload_column unexpectedly present in config.go"}
+{"phase": "stock-probe", "check": "stock.source.config_has_no_canonical", "ok": true, "detail": "canonical unexpectedly present in config.go"}
+{"phase": "stock-probe", "check": "stock.transform.typed_int_created", "ok": true, "detail": "expected a typed int probe.int in the transform probe output"}
+{"phase": "stock-probe", "check": "stock.transform.typed_double_created", "ok": true, "detail": "typed double missing"}
+{"phase": "stock-probe", "check": "stock.transform.guarded_statement_applied", "ok": true, "detail": "the guarded statement on the string key str.one did not apply"}
+{"phase": "stock-probe", "check": "stock.transform.guarded_statement_skipped", "ok": true, "detail": "the guard on the int key int.one applied to a non-string value"}
+{"phase": "stock-probe", "check": "stock.transform.stringify_collapses_types", "ok": true, "detail": "stringify_all should turn int/double/string 1 into the same string"}
+{"phase": "stock-probe", "check": "stock.transform.types_expression_rejected", "ok": true, "detail": "expected a config-load error for the MapEach/ternary type-map expression"}
+{"phase": "stock-probe", "check": "stock.stored.logs_attributes_single_string_map", "ok": true, "detail": "LogAttributes='Map(LowCardinality(String), String)'"}
+{"phase": "stock-probe", "check": "stock.stored.no_RecordInt", "ok": true, "detail": "unexpected column RecordInt"}
+{"phase": "stock-probe", "check": "stock.stored.no_record_int", "ok": true, "detail": "unexpected column record_int"}
+{"phase": "stock-probe", "check": "stock.stored.no_Payload", "ok": true, "detail": "unexpected column Payload"}
+{"phase": "stock-probe", "check": "stock.stored.no_CanonicalPayload", "ok": true, "detail": "unexpected column CanonicalPayload"}
+{"phase": "stock-probe", "check": "stock.stored.spans_no_scope_attribute_column", "ok": true, "detail": "span columns: ['Duration', 'Events.Attributes', 'Events.Name', 'Events.Timestamp', 'Links.Attributes', 'Links.SpanId', 'Links.TraceId', 'Links.TraceState', 'ParentSpanId', 'ResourceAttributes', 'ScopeName', 'ScopeVersion', 'ServiceName', 'SpanAttributes', 'SpanId', 'SpanKind', 'SpanName', 'StatusCode', 'StatusMessage', 'Timestamp', 'TraceId', 'TraceState']"}
+{"phase": "stock-probe", "check": "stock.stored.int_double_string_collapse", "ok": true, "detail": "stored strings: {'int_one': '1', 'double_one': '1', 'str_one': '1', 'bytes_raw': 'AAH+/w==', 'array_mixed': '[\"a\",1,true]', 'empty_value': '', 'int_big': '9007199254740993', 'double_nan': 'NaN'}"}
+{"phase": "stock-probe", "check": "stock.stored.big_int_string_exact", "ok": true, "detail": "'9007199254740993'"}
+{"phase": "stock-probe", "check": "stock.stored.nan_string", "ok": true, "detail": "'NaN'"}
+{"phase": "stock-probe", "check": "stock.stored.bytes_present", "ok": true, "detail": "'AAH+/w=='"}
+{"phase": "stock-probe", "check": "stock.stored.array_json_text", "ok": true, "detail": "'[\"a\",1,true]'"}
+{"phase": "stock-probe", "check": "stock.stored.empty_is_empty_string", "ok": true, "detail": "''"}

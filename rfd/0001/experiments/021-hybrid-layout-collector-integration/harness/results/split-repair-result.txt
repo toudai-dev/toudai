@@ -1,0 +1,2 @@
+repaired_minimal_serving_rows	1
+canonical_rows	1

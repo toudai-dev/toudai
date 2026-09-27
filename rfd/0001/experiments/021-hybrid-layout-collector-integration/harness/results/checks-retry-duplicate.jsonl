@@ -1,0 +1,7 @@
+{"phase": "retry-duplicate", "check": "fail.retry.producer_sent_twice", "ok": true, "detail": "expected two identical requests, got 2"}
+{"phase": "retry-duplicate", "check": "query.retry-a-1.serving_rows_resolved", "ok": true, "detail": "expected 2 serving row(s) for fixture identity retry-a-1 via body/span name in lh021, got 2"}
+{"phase": "retry-duplicate", "check": "fail.retry.identity_stable_across_retries", "ok": true, "detail": "the re-sent request must keep one stored write identity, got ['lh1-b45f2534dcfec3df9e2805fd9c0f7f7d']"}
+{"phase": "retry-duplicate", "check": "fail.retry.serving_duplicates_measured", "ok": true, "detail": "expected 2 serving rows, got 2"}
+{"phase": "retry-duplicate", "check": "fail.retry.canonical_duplicates_measured", "ok": true, "detail": "deduplication is unselected: expected 2 canonical rows, got 2"}
+{"phase": "retry-duplicate", "check": "fail.retry.identical_payload", "ok": true, "detail": "the re-sent request must produce the same canonical payload"}
+{"phase": "retry-duplicate", "check": "fail.retry.no_producer_visible_dedup", "ok": true, "detail": "both identical requests were accepted; deduplication remains unselected"}

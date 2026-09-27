@@ -1,0 +1,8 @@
+{"phase": "no-trust", "check": "fail.no_trust.rejected_from_trusted_db", "ok": true, "detail": "an untrusted request must not reach the trusted database"}
+{"phase": "no-trust", "check": "fail.no_trust.rejected_in_untrusted_pipeline", "ok": true, "detail": "the trusted-scope check did not fail closed"}
+{"phase": "no-trust", "check": "comp.no_trust.rejected_record_counter", "ok": true, "detail": "no rejected-record counter with reason=missing_trusted_scope"}
+{"phase": "no-trust", "check": "comp.no_trust.rejected_batch_counter", "ok": true, "detail": "the all-rejected batch was not counted"}
+{"phase": "no-trust", "check": "fail.no_trust.receiver_accepted_request", "ok": true, "detail": "the receiver file copy is missing: cannot show the request was admitted then rejected"}
+{"phase": "no-trust", "check": "fail.no_trust.forged_marker_not_in_trusted_db", "ok": true, "detail": "a forged-marker request must never land in the trusted database"}
+{"phase": "no-trust", "check": "fail.no_trust.forged_marker_gap_measured", "ok": true, "detail": "expected the documented limitation (1 row with the forged workspace) in lh021_untrusted, got 1"}
+{"phase": "no-trust", "check": "fail.no_trust.forged_marker_gap_is_producer_scope", "ok": true, "detail": "stored workspace 99999999-9999-4999-8999-999999999999"}

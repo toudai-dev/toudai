@@ -1,0 +1,8 @@
+{"phase": "ambiguous", "check": "query.emit.ambiguous.ambiguous-a.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
+{"phase": "ambiguous", "check": "query.ambiguous-a-1.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity ambiguous-a-1 via body/span name in lh021, got 1"}
+{"phase": "ambiguous", "check": "fail.ambiguous.canonical_duplicate_from_retry", "ok": true, "detail": "expected two canonical rows (commit + retry after the lost response), got 2"}
+{"phase": "ambiguous", "check": "fail.ambiguous.serving_exactly_once", "ok": true, "detail": "expected exactly one serving row, got 1"}
+{"phase": "ambiguous", "check": "xdest.ambiguous.same_identity_and_payload", "ok": true, "detail": "the duplicated canonical rows must share identity and payload hash"}
+{"phase": "ambiguous", "check": "xdest.ambiguous.duplicate_canonical_not_missing_serving", "ok": true, "detail": "two canonical rows with one serving row: a canonical duplicate, not a missing serving row for the accepted write"}
+{"phase": "ambiguous", "check": "fail.ambiguous.proxy_withheld_insert_response", "ok": true, "detail": "the injection never withheld an INSERT response"}
+{"phase": "ambiguous", "check": "fail.ambiguous.destination_committed_twice", "ok": true, "detail": "query_log shows 2 finished canonical inserts"}

@@ -1,0 +1,2 @@
+{"signal":"logs","label":"fault-crash-1","description":"fault-crash-1 logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.88,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T02:13:57.108027+00:00"}
+{"signal":"logs","label":"fault-crash-2","description":"fault-crash-2 logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":7,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T02:13:58.337826+00:00"}
