@@ -1,7 +1,7 @@
 {"phase": "canonical-permanent", "check": "query.emit.canonical-permanent.fault-canonical.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
 {"phase": "canonical-permanent", "check": "fail.canonical.serving_absent", "ok": true, "detail": "the serving destination must not be written when the canonical insert fails first"}
 {"phase": "canonical-permanent", "check": "fail.canonical.canonical_absent", "ok": true, "detail": "no canonical row should exist"}
-{"phase": "canonical-permanent", "check": "fail.canonical.attempted", "ok": true, "detail": "expected canonical insert attempts, saw 5.0"}
+{"phase": "canonical-permanent", "check": "fail.canonical.attempted", "ok": true, "detail": "expected canonical insert attempts, saw 6.0"}
 {"phase": "canonical-permanent", "check": "comp.canonical_schema_error_logged", "ok": true, "detail": "the component error for the schema failure was not logged"}
 {"phase": "canonical-permanent", "check": "comp.canonical_batch_dropped_after_retries", "ok": true, "detail": "expected the exporter helper to drop the batch after the retry budget"}
 {"phase": "canonical-permanent", "check": "comp.producer_not_told_about_record_rejection", "ok": true, "detail": "no producer-visible per-record rejection is expected on this path"}

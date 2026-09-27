@@ -3,6 +3,7 @@ semantics	identity-ws-a	0
 semantics	identity-ws-b	0
 semantics	batch-a	0
 semantics	batch-b	0
+semantics	timing-mixed	0
 ack	ack-off	0
 ack	ack-on	0
 mixed-validation	mixed-valid-1	0

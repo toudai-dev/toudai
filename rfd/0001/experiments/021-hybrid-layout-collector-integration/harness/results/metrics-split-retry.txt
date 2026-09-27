@@ -1,15 +1,15 @@
 # HELP lighthouse_exporter_batches Exported batches, by signal and whether the batch carried more than one workspace.
 # TYPE lighthouse_exporter_batches counter
-lighthouse_exporter_batches{cross_workspace="false",signal="logs"} 7
+lighthouse_exporter_batches{cross_workspace="false",signal="logs"} 8
 # HELP lighthouse_exporter_insert_failures Failed inserts, by signal and destination.
 # TYPE lighthouse_exporter_insert_failures counter
-lighthouse_exporter_insert_failures{destination="serving",signal="logs"} 7
+lighthouse_exporter_insert_failures{destination="serving",signal="logs"} 8
 # HELP lighthouse_exporter_partial_write_batches Batches where the canonical insert committed and the serving insert failed.
 # TYPE lighthouse_exporter_partial_write_batches counter
-lighthouse_exporter_partial_write_batches{signal="logs"} 7
+lighthouse_exporter_partial_write_batches{signal="logs"} 8
 # HELP lighthouse_exporter_records Records successfully inserted, by signal and destination.
 # TYPE lighthouse_exporter_records counter
-lighthouse_exporter_records{destination="canonical",signal="logs"} 7
+lighthouse_exporter_records{destination="canonical",signal="logs"} 8
 # HELP otelcol_exporter_in_flight_requests Number of export requests currently in-flight (including retry backoff). [Development]
 # TYPE otelcol_exporter_in_flight_requests gauge
 otelcol_exporter_in_flight_requests{data_type="logs",exporter="lighthouse"} 0
@@ -29,22 +29,22 @@ otelcol_exporter_send_failed_log_records{exporter="lighthouse"} 1
 otelcol_exporter_sent_log_records{exporter="lighthouse"} 0
 # HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
 # TYPE otelcol_process_cpu_seconds counter
-otelcol_process_cpu_seconds 0.08
+otelcol_process_cpu_seconds 0.09
 # HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
 # TYPE otelcol_process_memory_rss gauge
-otelcol_process_memory_rss 4.4539904e+07
+otelcol_process_memory_rss 4.3126784e+07
 # HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
 # TYPE otelcol_process_runtime_heap_alloc_bytes gauge
-otelcol_process_runtime_heap_alloc_bytes 5.07472e+06
+otelcol_process_runtime_heap_alloc_bytes 4.061112e+06
 # HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
 # TYPE otelcol_process_runtime_total_alloc_bytes counter
-otelcol_process_runtime_total_alloc_bytes 1.2491272e+07
+otelcol_process_runtime_total_alloc_bytes 1.2696432e+07
 # HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
 # TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
-otelcol_process_runtime_total_sys_memory_bytes 1.8192648e+07
+otelcol_process_runtime_total_sys_memory_bytes 1.852444e+07
 # HELP otelcol_process_uptime Uptime of the process [Alpha]
 # TYPE otelcol_process_uptime counter
-otelcol_process_uptime 6.003913965
+otelcol_process_uptime 6.027497508
 # HELP otelcol_processor_incoming_items Number of items passed to the processor. [Alpha]
 # TYPE otelcol_processor_incoming_items counter
 otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-a"} 1
@@ -66,4 +66,4 @@ promhttp_metric_handler_errors_total{cause="encoding"} 0
 promhttp_metric_handler_errors_total{cause="gathering"} 0
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_instance_id="9a54067f-75f5-4fd0-8afa-30661004819c",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1
+target_info{service_instance_id="ce370eb2-8010-4383-a95d-91ba08a41c13",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1

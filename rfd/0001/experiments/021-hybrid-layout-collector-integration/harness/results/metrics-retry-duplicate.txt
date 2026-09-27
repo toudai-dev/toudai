@@ -21,22 +21,22 @@ otelcol_exporter_queue_size{data_type="traces",exporter="lighthouse"} 0
 otelcol_exporter_sent_log_records{exporter="lighthouse"} 6
 # HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
 # TYPE otelcol_process_cpu_seconds counter
-otelcol_process_cpu_seconds 0.07
+otelcol_process_cpu_seconds 0.060000000000000005
 # HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
 # TYPE otelcol_process_memory_rss gauge
-otelcol_process_memory_rss 4.3925504e+07
+otelcol_process_memory_rss 4.6424064e+07
 # HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
 # TYPE otelcol_process_runtime_heap_alloc_bytes gauge
-otelcol_process_runtime_heap_alloc_bytes 4.217784e+06
+otelcol_process_runtime_heap_alloc_bytes 5.742048e+06
 # HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
 # TYPE otelcol_process_runtime_total_alloc_bytes counter
-otelcol_process_runtime_total_alloc_bytes 1.1595696e+07
+otelcol_process_runtime_total_alloc_bytes 1.1617288e+07
 # HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
 # TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
 otelcol_process_runtime_total_sys_memory_bytes 1.8192648e+07
 # HELP otelcol_process_uptime Uptime of the process [Alpha]
 # TYPE otelcol_process_uptime counter
-otelcol_process_uptime 4.231167802
+otelcol_process_uptime 4.186903463
 # HELP otelcol_processor_incoming_items Number of items passed to the processor. [Alpha]
 # TYPE otelcol_processor_incoming_items counter
 otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-a"} 6
@@ -58,4 +58,4 @@ promhttp_metric_handler_errors_total{cause="encoding"} 0
 promhttp_metric_handler_errors_total{cause="gathering"} 0
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_instance_id="0badb04f-e5e4-45da-bfeb-83a6f0cec5d6",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1
+target_info{service_instance_id="7e83be9f-4eb0-4c19-866e-cf72d5bf1168",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1

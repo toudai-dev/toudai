@@ -1,18 +1,17 @@
 # HELP lighthouse_exporter_batches Exported batches, by signal and whether the batch carried more than one workspace.
 # TYPE lighthouse_exporter_batches counter
 lighthouse_exporter_batches{cross_workspace="false",signal="logs"} 1
-lighthouse_exporter_batches{cross_workspace="false",signal="spans"} 1
+lighthouse_exporter_batches{cross_workspace="false",signal="spans"} 2
 lighthouse_exporter_batches{cross_workspace="true",signal="logs"} 1
 # HELP lighthouse_exporter_records Records successfully inserted, by signal and destination.
 # TYPE lighthouse_exporter_records counter
 lighthouse_exporter_records{destination="canonical",signal="logs"} 31
-lighthouse_exporter_records{destination="canonical",signal="spans"} 3
+lighthouse_exporter_records{destination="canonical",signal="spans"} 7
 lighthouse_exporter_records{destination="serving",signal="logs"} 31
-lighthouse_exporter_records{destination="serving",signal="spans"} 3
+lighthouse_exporter_records{destination="serving",signal="spans"} 7
 # HELP lighthouse_exporter_rejected_records Records rejected by pre-write validation, by signal, reason, and namespace.
 # TYPE lighthouse_exporter_rejected_records counter
 lighthouse_exporter_rejected_records{namespace="record",reason="duplicate_or_invalid_record_attributes",signal="logs"} 1
-lighthouse_exporter_rejected_records{namespace="span",reason="negative_span_duration",signal="spans"} 1
 # HELP otelcol_exporter_in_flight_requests Number of export requests currently in-flight (including retry backoff). [Development]
 # TYPE otelcol_exporter_in_flight_requests gauge
 otelcol_exporter_in_flight_requests{data_type="logs",exporter="lighthouse"} 0
@@ -30,41 +29,41 @@ otelcol_exporter_queue_size{data_type="traces",exporter="lighthouse"} 0
 otelcol_exporter_sent_log_records{exporter="lighthouse"} 32
 # HELP otelcol_exporter_sent_spans Number of spans successfully sent to destination. [Alpha]
 # TYPE otelcol_exporter_sent_spans counter
-otelcol_exporter_sent_spans{exporter="lighthouse"} 4
+otelcol_exporter_sent_spans{exporter="lighthouse"} 7
 # HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
 # TYPE otelcol_process_cpu_seconds counter
 otelcol_process_cpu_seconds 0.08
 # HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
 # TYPE otelcol_process_memory_rss gauge
-otelcol_process_memory_rss 4.6542848e+07
+otelcol_process_memory_rss 4.6690304e+07
 # HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
 # TYPE otelcol_process_runtime_heap_alloc_bytes gauge
-otelcol_process_runtime_heap_alloc_bytes 5.874648e+06
+otelcol_process_runtime_heap_alloc_bytes 4.371424e+06
 # HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
 # TYPE otelcol_process_runtime_total_alloc_bytes counter
-otelcol_process_runtime_total_alloc_bytes 1.345436e+07
+otelcol_process_runtime_total_alloc_bytes 1.3828024e+07
 # HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
 # TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
 otelcol_process_runtime_total_sys_memory_bytes 1.8454792e+07
 # HELP otelcol_process_uptime Uptime of the process [Alpha]
 # TYPE otelcol_process_uptime counter
-otelcol_process_uptime 3.867723128
+otelcol_process_uptime 6.124994674
 # HELP otelcol_processor_incoming_items Number of items passed to the processor. [Alpha]
 # TYPE otelcol_processor_incoming_items counter
 otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-a"} 30
 otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-b"} 2
-otelcol_processor_incoming_items{otel_signal="traces",processor="resource/ws-a"} 4
+otelcol_processor_incoming_items{otel_signal="traces",processor="resource/ws-a"} 7
 # HELP otelcol_processor_outgoing_items Number of items emitted from the processor. [Alpha]
 # TYPE otelcol_processor_outgoing_items counter
 otelcol_processor_outgoing_items{otel_signal="logs",processor="resource/ws-a"} 30
 otelcol_processor_outgoing_items{otel_signal="logs",processor="resource/ws-b"} 2
-otelcol_processor_outgoing_items{otel_signal="traces",processor="resource/ws-a"} 4
+otelcol_processor_outgoing_items{otel_signal="traces",processor="resource/ws-a"} 7
 # HELP otelcol_receiver_accepted_log_records Number of log records successfully pushed into the pipeline. [Alpha]
 # TYPE otelcol_receiver_accepted_log_records counter
 otelcol_receiver_accepted_log_records{receiver="otlp/gateway",transport="http"} 32
 # HELP otelcol_receiver_accepted_spans Number of spans successfully pushed into the pipeline. [Alpha]
 # TYPE otelcol_receiver_accepted_spans counter
-otelcol_receiver_accepted_spans{receiver="otlp/gateway",transport="http"} 4
+otelcol_receiver_accepted_spans{receiver="otlp/gateway",transport="http"} 7
 # HELP otelcol_receiver_failed_log_records The number of log records that failed to be processed by the receiver due to internal errors. [Alpha]
 # TYPE otelcol_receiver_failed_log_records counter
 otelcol_receiver_failed_log_records{receiver="otlp/gateway",transport="http"} 0
@@ -83,4 +82,4 @@ promhttp_metric_handler_errors_total{cause="encoding"} 0
 promhttp_metric_handler_errors_total{cause="gathering"} 0
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_instance_id="78af8aee-75b5-4162-a584-9c19ef6d4dc2",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1
+target_info{service_instance_id="2cd580a2-9e28-4605-800d-c290990f3ea4",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1

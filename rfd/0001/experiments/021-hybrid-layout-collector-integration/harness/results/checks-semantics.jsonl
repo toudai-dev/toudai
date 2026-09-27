@@ -2302,6 +2302,7 @@
 {"phase": "semantics", "check": "canon.span-1.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
 {"phase": "semantics", "check": "canon.span-1.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
 {"phase": "semantics", "check": "canon.span-1.0.ts_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.span-1.0.end_ns", "ok": true, "detail": "fixture=1788246000123458289 canonical-reconstruction=1788246000123458289"}
 {"phase": "semantics", "check": "canon.span-1.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
 {"phase": "semantics", "check": "canon.span-1.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
 {"phase": "semantics", "check": "canon.span-1.0.span_name", "ok": true, "detail": "fixture='span/typed' canonical-reconstruction='span/typed'"}
@@ -2309,6 +2310,7 @@
 {"phase": "semantics", "check": "canon.span-1.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
 {"phase": "semantics", "check": "canon.span-1.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
 {"phase": "semantics", "check": "canon.span-1.0.duration_ns", "ok": true, "detail": "fixture=1500 canonical-reconstruction=1500"}
+{"phase": "semantics", "check": "canon.span-1.0.timing_status", "ok": true, "detail": "fixture='ok' canonical-reconstruction='ok'"}
 {"phase": "semantics", "check": "xdest.span-1.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=4c9c579ed5aef19763b27657fc99594550e1ed1d1d7dbbd5893772d04c685c49 matches no canonical row"}
 {"phase": "semantics", "check": "xdest.span-1.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
 {"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
@@ -2393,6 +2395,8 @@
 {"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.duration_exact", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "query.span-scope.serving_present", "ok": true, "detail": "expected exactly one serving span for span-scope, got 1"}
 {"phase": "semantics", "check": "query.span-scope.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
@@ -2410,6 +2414,7 @@
 {"phase": "semantics", "check": "canon.span-scope.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
 {"phase": "semantics", "check": "canon.span-scope.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
 {"phase": "semantics", "check": "canon.span-scope.0.ts_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.span-scope.0.end_ns", "ok": true, "detail": "fixture=1788246000123456799 canonical-reconstruction=1788246000123456799"}
 {"phase": "semantics", "check": "canon.span-scope.0.span_scope", "ok": true, "detail": "fixture={'scope.span.attr': 's', 'scope.span.int': '11'} canonical-reconstruction={'scope.span.attr': 's', 'scope.span.int': '11'}"}
 {"phase": "semantics", "check": "canon.span-scope.0.span_scope_types", "ok": true, "detail": "fixture={'scope.span.attr': 'string', 'scope.span.int': 'int'} canonical-reconstruction={'scope.span.attr': 'string', 'scope.span.int': 'int'}"}
 {"phase": "semantics", "check": "canon.span-scope.0.span_name", "ok": true, "detail": "fixture='span/scope-attrs' canonical-reconstruction='span/scope-attrs'"}
@@ -2417,6 +2422,7 @@
 {"phase": "semantics", "check": "canon.span-scope.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
 {"phase": "semantics", "check": "canon.span-scope.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
 {"phase": "semantics", "check": "canon.span-scope.0.duration_ns", "ok": true, "detail": "fixture=10 canonical-reconstruction=10"}
+{"phase": "semantics", "check": "canon.span-scope.0.timing_status", "ok": true, "detail": "fixture='ok' canonical-reconstruction='ok'"}
 {"phase": "semantics", "check": "xdest.span-scope.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=8048fbdaebe86a3a6f3c151847e47568b7756faf2fdf92ee5e3a9dce221a0b9f matches no canonical row"}
 {"phase": "semantics", "check": "xdest.span-scope.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
 {"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
@@ -2476,9 +2482,98 @@
 {"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.duration_exact", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "query.span-negative.serving_absent", "ok": true, "detail": "a span whose end precedes its start must be rejected"}
-{"phase": "semantics", "check": "query.span-negative.canonical_absent", "ok": true, "detail": "a malformed span must not be canonicalized"}
+{"phase": "semantics", "check": "query.span-negative.serving_present", "ok": true, "detail": "expected exactly one serving span for span-negative, got 1"}
+{"phase": "semantics", "check": "query.span-negative.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
+{"phase": "semantics", "check": "query.span-negative.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
+{"phase": "semantics", "check": "canon.span-negative.0.sha256_matches_payload", "ok": true, "detail": "payload_sha256 must be the sha256 of the stored payload"}
+{"phase": "semantics", "check": "canon.span-negative.0.schema_version", "ok": true, "detail": "lighthouse.canonical.event/1"}
+{"phase": "semantics", "check": "canon.span-negative.0.signal", "ok": true, "detail": "spans"}
+{"phase": "semantics", "check": "canon.span-negative.0.workspace", "ok": true, "detail": "expected 11111111-1111-4111-8111-111111111111, got 11111111-1111-4111-8111-111111111111"}
+{"phase": "semantics", "check": "canon.span-negative.0.dataset", "ok": true, "detail": "fixture"}
+{"phase": "semantics", "check": "canon.span-negative.0.event_id_links_selected", "ok": true, "detail": "the canonical row must carry the resolved stored write identity"}
+{"phase": "semantics", "check": "canon.span-negative.0.identity_binding", "ok": true, "detail": "the canonical payload identity must match the stored row identity"}
+{"phase": "semantics", "check": "canon.span-negative.0.workspace", "ok": true, "detail": "fixture='11111111-1111-4111-8111-111111111111' canonical-reconstruction='11111111-1111-4111-8111-111111111111'"}
+{"phase": "semantics", "check": "canon.span-negative.0.dataset", "ok": true, "detail": "fixture='fixture' canonical-reconstruction='fixture'"}
+{"phase": "semantics", "check": "canon.span-negative.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.malformed': 'yes'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.malformed': 'yes'}, 'other': {}}"}
+{"phase": "semantics", "check": "canon.span-negative.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
+{"phase": "semantics", "check": "canon.span-negative.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
+{"phase": "semantics", "check": "canon.span-negative.0.ts_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.span-negative.0.end_ns", "ok": true, "detail": "fixture=1788246000123455789 canonical-reconstruction=1788246000123455789"}
+{"phase": "semantics", "check": "canon.span-negative.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
+{"phase": "semantics", "check": "canon.span-negative.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
+{"phase": "semantics", "check": "canon.span-negative.0.span_name", "ok": true, "detail": "fixture='span/negative-duration' canonical-reconstruction='span/negative-duration'"}
+{"phase": "semantics", "check": "canon.span-negative.0.span_kind", "ok": true, "detail": "fixture='Server' canonical-reconstruction='Server'"}
+{"phase": "semantics", "check": "canon.span-negative.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
+{"phase": "semantics", "check": "canon.span-negative.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
+{"phase": "semantics", "check": "canon.span-negative.0.duration_ns", "ok": true, "detail": "fixture=None canonical-reconstruction=None"}
+{"phase": "semantics", "check": "canon.span-negative.0.timing_status", "ok": true, "detail": "fixture='end_before_start' canonical-reconstruction='end_before_start'"}
+{"phase": "semantics", "check": "xdest.span-negative.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=b746141739bb0c1e5ea252551a844d95e63b45b4f20c632e839b3085c4c65571 matches no canonical row"}
+{"phase": "semantics", "check": "xdest.span-negative.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
+{"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_int.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_double.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_bool.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_string.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_string.span_malformed", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_other.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope_types.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope_types.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b189e3517b315812131a9e7224505f3e.span_scope_types.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.status_code", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.parent_span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.duration_null", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "query.span-missing-time.serving_present", "ok": true, "detail": "expected exactly one serving span for span-missing-time, got 1"}
 {"phase": "semantics", "check": "query.span-missing-time.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
 {"phase": "semantics", "check": "query.span-missing-time.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
@@ -2495,6 +2590,7 @@
 {"phase": "semantics", "check": "canon.span-missing-time.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.ts_ns", "ok": true, "detail": "fixture=0 canonical-reconstruction=0"}
+{"phase": "semantics", "check": "canon.span-missing-time.0.end_ns", "ok": true, "detail": "fixture=0 canonical-reconstruction=0"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.span_name", "ok": true, "detail": "fixture='span/missing-timing' canonical-reconstruction='span/missing-timing'"}
@@ -2502,6 +2598,7 @@
 {"phase": "semantics", "check": "canon.span-missing-time.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.duration_ns", "ok": true, "detail": "fixture=None canonical-reconstruction=None"}
+{"phase": "semantics", "check": "canon.span-missing-time.0.timing_status", "ok": true, "detail": "fixture='missing' canonical-reconstruction='missing'"}
 {"phase": "semantics", "check": "xdest.span-missing-time.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=b10e0153b62039228267950b8f6161ebb54e188299dc9627e7fe500262717091 matches no canonical row"}
 {"phase": "semantics", "check": "xdest.span-missing-time.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
 {"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
@@ -2563,14 +2660,301 @@
 {"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.duration_null", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "query.span-zero.serving_present", "ok": true, "detail": "expected exactly one serving span for span-zero, got 1"}
+{"phase": "semantics", "check": "query.span-zero.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
+{"phase": "semantics", "check": "query.span-zero.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
+{"phase": "semantics", "check": "canon.span-zero.0.sha256_matches_payload", "ok": true, "detail": "payload_sha256 must be the sha256 of the stored payload"}
+{"phase": "semantics", "check": "canon.span-zero.0.schema_version", "ok": true, "detail": "lighthouse.canonical.event/1"}
+{"phase": "semantics", "check": "canon.span-zero.0.signal", "ok": true, "detail": "spans"}
+{"phase": "semantics", "check": "canon.span-zero.0.workspace", "ok": true, "detail": "expected 11111111-1111-4111-8111-111111111111, got 11111111-1111-4111-8111-111111111111"}
+{"phase": "semantics", "check": "canon.span-zero.0.dataset", "ok": true, "detail": "fixture"}
+{"phase": "semantics", "check": "canon.span-zero.0.event_id_links_selected", "ok": true, "detail": "the canonical row must carry the resolved stored write identity"}
+{"phase": "semantics", "check": "canon.span-zero.0.identity_binding", "ok": true, "detail": "the canonical payload identity must match the stored row identity"}
+{"phase": "semantics", "check": "canon.span-zero.0.workspace", "ok": true, "detail": "fixture='11111111-1111-4111-8111-111111111111' canonical-reconstruction='11111111-1111-4111-8111-111111111111'"}
+{"phase": "semantics", "check": "canon.span-zero.0.dataset", "ok": true, "detail": "fixture='fixture' canonical-reconstruction='fixture'"}
+{"phase": "semantics", "check": "canon.span-zero.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.zero': 'yes'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.zero': 'yes'}, 'other': {}}"}
+{"phase": "semantics", "check": "canon.span-zero.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
+{"phase": "semantics", "check": "canon.span-zero.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
+{"phase": "semantics", "check": "canon.span-zero.0.ts_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.span-zero.0.end_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.span-zero.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
+{"phase": "semantics", "check": "canon.span-zero.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
+{"phase": "semantics", "check": "canon.span-zero.0.span_name", "ok": true, "detail": "fixture='span/zero-duration' canonical-reconstruction='span/zero-duration'"}
+{"phase": "semantics", "check": "canon.span-zero.0.span_kind", "ok": true, "detail": "fixture='Server' canonical-reconstruction='Server'"}
+{"phase": "semantics", "check": "canon.span-zero.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
+{"phase": "semantics", "check": "canon.span-zero.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
+{"phase": "semantics", "check": "canon.span-zero.0.duration_ns", "ok": true, "detail": "fixture=0 canonical-reconstruction=0"}
+{"phase": "semantics", "check": "canon.span-zero.0.timing_status", "ok": true, "detail": "fixture='ok' canonical-reconstruction='ok'"}
+{"phase": "semantics", "check": "xdest.span-zero.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=e9a08085c1231f2bbc51560f5e72866bf274f3f82e735fff0053360eee3afc95 matches no canonical row"}
+{"phase": "semantics", "check": "xdest.span-zero.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
+{"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_int.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_double.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_bool.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_string.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_string.span_zero", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_other.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope_types.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope_types.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-a9e2ac513b9cb228d9866e646c17d271.span_scope_types.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.status_code", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.parent_span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.duration_exact", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "query.timing-mixed-valid.serving_present", "ok": true, "detail": "expected exactly one serving span for timing-mixed-valid, got 1"}
+{"phase": "semantics", "check": "query.timing-mixed-valid.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
+{"phase": "semantics", "check": "query.timing-mixed-valid.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.sha256_matches_payload", "ok": true, "detail": "payload_sha256 must be the sha256 of the stored payload"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.schema_version", "ok": true, "detail": "lighthouse.canonical.event/1"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.signal", "ok": true, "detail": "spans"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.workspace", "ok": true, "detail": "expected 11111111-1111-4111-8111-111111111111, got 11111111-1111-4111-8111-111111111111"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.dataset", "ok": true, "detail": "fixture"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.event_id_links_selected", "ok": true, "detail": "the canonical row must carry the resolved stored write identity"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.identity_binding", "ok": true, "detail": "the canonical payload identity must match the stored row identity"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.workspace", "ok": true, "detail": "fixture='11111111-1111-4111-8111-111111111111' canonical-reconstruction='11111111-1111-4111-8111-111111111111'"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.dataset", "ok": true, "detail": "fixture='fixture' canonical-reconstruction='fixture'"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'timing.attr': 'valid'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'timing.attr': 'valid'}, 'other': {}}"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.ts_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.end_ns", "ok": true, "detail": "fixture=1788246000123459289 canonical-reconstruction=1788246000123459289"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.span_name", "ok": true, "detail": "fixture='timing-mixed/valid' canonical-reconstruction='timing-mixed/valid'"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.span_kind", "ok": true, "detail": "fixture='Server' canonical-reconstruction='Server'"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.duration_ns", "ok": true, "detail": "fixture=2500 canonical-reconstruction=2500"}
+{"phase": "semantics", "check": "canon.timing-mixed-valid.0.timing_status", "ok": true, "detail": "fixture='ok' canonical-reconstruction='ok'"}
+{"phase": "semantics", "check": "xdest.timing-mixed-valid.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=1a5bd6b109c16a9125a6932dcd63d9d178efe66f90663ef7b7932ebd02297a25 matches no canonical row"}
+{"phase": "semantics", "check": "xdest.timing-mixed-valid.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
+{"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_int.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_double.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_bool.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_string.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_string.timing_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_other.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope_types.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope_types.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-2a6344e5d85fe269d729979dcb2d9360.span_scope_types.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.status_code", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.parent_span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.duration_exact", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "query.timing-mixed-reversed.serving_present", "ok": true, "detail": "expected exactly one serving span for timing-mixed-reversed, got 1"}
+{"phase": "semantics", "check": "query.timing-mixed-reversed.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
+{"phase": "semantics", "check": "query.timing-mixed-reversed.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.sha256_matches_payload", "ok": true, "detail": "payload_sha256 must be the sha256 of the stored payload"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.schema_version", "ok": true, "detail": "lighthouse.canonical.event/1"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.signal", "ok": true, "detail": "spans"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.workspace", "ok": true, "detail": "expected 11111111-1111-4111-8111-111111111111, got 11111111-1111-4111-8111-111111111111"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.dataset", "ok": true, "detail": "fixture"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.event_id_links_selected", "ok": true, "detail": "the canonical row must carry the resolved stored write identity"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.identity_binding", "ok": true, "detail": "the canonical payload identity must match the stored row identity"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.workspace", "ok": true, "detail": "fixture='11111111-1111-4111-8111-111111111111' canonical-reconstruction='11111111-1111-4111-8111-111111111111'"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.dataset", "ok": true, "detail": "fixture='fixture' canonical-reconstruction='fixture'"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'timing.attr': 'reversed'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'timing.attr': 'reversed'}, 'other': {}}"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.ts_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.end_ns", "ok": true, "detail": "fixture=1788246000123454289 canonical-reconstruction=1788246000123454289"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.span_name", "ok": true, "detail": "fixture='timing-mixed/reversed' canonical-reconstruction='timing-mixed/reversed'"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.span_kind", "ok": true, "detail": "fixture='Server' canonical-reconstruction='Server'"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.duration_ns", "ok": true, "detail": "fixture=None canonical-reconstruction=None"}
+{"phase": "semantics", "check": "canon.timing-mixed-reversed.0.timing_status", "ok": true, "detail": "fixture='end_before_start' canonical-reconstruction='end_before_start'"}
+{"phase": "semantics", "check": "xdest.timing-mixed-reversed.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=e1ffe13fad48348486737b460f9a65c604fee4b332d8c67117e8346f8ecd3c64 matches no canonical row"}
+{"phase": "semantics", "check": "xdest.timing-mixed-reversed.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
+{"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_int.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_double.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_bool.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_string.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_string.timing_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_other.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope_types.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope_types.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-b87650b112f4bd311afd959bfa734dbd.span_scope_types.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.status_code", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.parent_span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.duration_null", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "query.span-scope.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-scope via body/span name in lh021, got 1"}
 {"phase": "semantics", "check": "rep.span.span_scope_attrs_preserved", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.span_scope_int_projected", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.span_scope_not_record", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "query.span-missing-time.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-missing-time via body/span name in lh021, got 1"}
+{"phase": "semantics", "check": "query.span-negative.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-negative via body/span name in lh021, got 1"}
+{"phase": "semantics", "check": "query.span-zero.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-zero via body/span name in lh021, got 1"}
+{"phase": "semantics", "check": "rep.span.missing_timing_status", "ok": true, "detail": "missing-timing status = 'missing'"}
+{"phase": "semantics", "check": "rep.span.reversed_timing_status", "ok": true, "detail": "reversed-timing status = 'end_before_start'"}
+{"phase": "semantics", "check": "rep.span.zero_timing_status", "ok": true, "detail": "zero-duration status = 'ok'"}
+{"phase": "semantics", "check": "rep.span.timing_statuses_distinct", "ok": true, "detail": "timing diagnostics are not distinct: {'missing_status': 'missing', 'reversed_status': 'end_before_start', 'zero_status': 'ok'}"}
 {"phase": "semantics", "check": "rep.span.missing_timing_is_null_not_underflow", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.missing_timing_keeps_zero_start", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_timing_keeps_zero_end", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_timing_diagnostic", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.reversed_duration_unavailable", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.reversed_keeps_original_timestamps", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.reversed_span_preserved", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.reversed_diagnostic", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.aggregate_total", "ok": true, "detail": "fixture has 7 spans, stored total = 7"}
+{"phase": "semantics", "check": "rep.span.aggregate_contributing", "ok": true, "detail": "fixture expects 4 contributing spans, stored = 4"}
+{"phase": "semantics", "check": "rep.span.aggregate_excluded", "ok": true, "detail": "fixture expects 3 excluded spans, stored = 3"}
+{"phase": "semantics", "check": "rep.span.aggregate_errors", "ok": true, "detail": "fixture expects 2 reversed-timing spans, stored = 2"}
+{"phase": "semantics", "check": "rep.span.aggregate_missing", "ok": true, "detail": "fixture expects 1 missing-timing spans, stored = 1"}
+{"phase": "semantics", "check": "rep.span.aggregate_distinct_statuses", "ok": true, "detail": "stored distinct statuses = 3"}
 {"phase": "semantics", "check": "query.identity-ws-a.serving_present", "ok": true, "detail": "expected exactly one serving row for identity-ws-a, got 1"}
 {"phase": "semantics", "check": "query.identity-ws-a.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
 {"phase": "semantics", "check": "query.identity-ws-a.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
@@ -2917,6 +3301,7 @@
 {"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "comp.cross_workspace_batch", "ok": true, "detail": "no cross-workspace batch recorded by the component"}
 {"phase": "semantics", "check": "comp.batch_summary_log_mixed_workspaces", "ok": true, "detail": "no batch summary line naming both workspaces and both fixture identities in one export (a=['lh1-d983720c48ae686ab37b649c6d523c12'], b=['lh1-8e0df894d1b987d5aea859332515fa8b'])"}
+{"phase": "semantics", "check": "comp.timing_mixed_batch_log", "ok": true, "detail": "no single span batch summary line names both stored identities of the valid+reversed request (['lh1-2a6344e5d85fe269d729979dcb2d9360', 'lh1-b87650b112f4bd311afd959bfa734dbd'])"}
 {"phase": "semantics", "check": "comp.no_dropped_data", "ok": true, "detail": "the collector dropped data in the semantics phase"}
 {"phase": "semantics", "check": "comp.no_rejected_batches", "ok": true, "detail": "a batch was rejected whole in the semantics phase"}
 {"phase": "semantics", "check": "query.no_duplicates.serving_logs", "ok": true, "detail": "duplicates: []"}
@@ -2925,7 +3310,7 @@
 {"phase": "semantics", "check": "query.no_fixture_duplicates.serving_logs", "ok": true, "detail": "duplicates: []"}
 {"phase": "semantics", "check": "query.no_fixture_duplicates.serving_spans", "ok": true, "detail": "duplicates: []"}
 {"phase": "semantics", "check": "comp.rejected_duplicate_key_record", "ok": true, "detail": "no rejected-record counter for the duplicate-key record"}
-{"phase": "semantics", "check": "comp.rejected_negative_duration", "ok": true, "detail": "no rejected-record counter for the negative-duration span"}
+{"phase": "semantics", "check": "comp.no_negative_duration_rejection", "ok": true, "detail": "the approved policy accepts reversed-timing spans; no negative-duration rejection is expected (the pre-policy run measured one)"}
 {"phase": "semantics", "check": "rep.schema.record_int_native", "ok": true, "detail": "Map(LowCardinality(String), Int64)"}
 {"phase": "semantics", "check": "rep.schema.record_double_native", "ok": true, "detail": "Map(LowCardinality(String), Float64)"}
 {"phase": "semantics", "check": "rep.schema.record_bool_native", "ok": true, "detail": "Map(LowCardinality(String), Bool)"}
@@ -2933,3 +3318,5 @@
 {"phase": "semantics", "check": "rep.schema.spans_span_scope_present", "ok": true, "detail": "span scope namespace missing from serving_spans"}
 {"phase": "semantics", "check": "rep.schema.spans_no_duplicate_scope_column", "ok": true, "detail": "serving_spans should not carry both scope and span_scope"}
 {"phase": "semantics", "check": "rep.schema.duration_nullable", "ok": true, "detail": "Nullable(Int64)"}
+{"phase": "semantics", "check": "rep.schema.spans_end_ts_present", "ok": true, "detail": "DateTime64(9)"}
+{"phase": "semantics", "check": "rep.schema.spans_timing_status_present", "ok": true, "detail": "LowCardinality(String)"}

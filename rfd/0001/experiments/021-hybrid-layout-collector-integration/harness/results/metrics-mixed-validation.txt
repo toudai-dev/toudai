@@ -30,22 +30,22 @@ otelcol_exporter_send_failed_log_records{exporter="lighthouse"} 1
 otelcol_exporter_sent_log_records{exporter="lighthouse"} 2
 # HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
 # TYPE otelcol_process_cpu_seconds counter
-otelcol_process_cpu_seconds 0.08
+otelcol_process_cpu_seconds 0.07
 # HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
 # TYPE otelcol_process_memory_rss gauge
-otelcol_process_memory_rss 4.417536e+07
+otelcol_process_memory_rss 4.4552192e+07
 # HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
 # TYPE otelcol_process_runtime_heap_alloc_bytes gauge
-otelcol_process_runtime_heap_alloc_bytes 3.808256e+06
+otelcol_process_runtime_heap_alloc_bytes 5.145784e+06
 # HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
 # TYPE otelcol_process_runtime_total_alloc_bytes counter
-otelcol_process_runtime_total_alloc_bytes 1.1220552e+07
+otelcol_process_runtime_total_alloc_bytes 1.1128832e+07
 # HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
 # TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
-otelcol_process_runtime_total_sys_memory_bytes 1.8192648e+07
+otelcol_process_runtime_total_sys_memory_bytes 1.8262296e+07
 # HELP otelcol_process_uptime Uptime of the process [Alpha]
 # TYPE otelcol_process_uptime counter
-otelcol_process_uptime 8.515213271
+otelcol_process_uptime 8.577286943
 # HELP otelcol_processor_incoming_items Number of items passed to the processor. [Alpha]
 # TYPE otelcol_processor_incoming_items counter
 otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-a"} 3
@@ -67,4 +67,4 @@ promhttp_metric_handler_errors_total{cause="encoding"} 0
 promhttp_metric_handler_errors_total{cause="gathering"} 0
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_instance_id="0f2aeaff-2c89-49d5-806d-67cb5cd8c17f",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1
+target_info{service_instance_id="c35a364b-d612-4b94-a497-bedd68f97bd0",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1

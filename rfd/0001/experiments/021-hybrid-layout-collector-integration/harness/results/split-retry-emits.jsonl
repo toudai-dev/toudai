@@ -1,1 +1,1 @@
-{"signal":"logs","label":"fault-split-retry","description":"fault-split-retry logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.07,"response_body":"\n","request_bytes":647,"sent_at":"2026-09-27T02:51:47.903858+00:00"}
+{"signal":"logs","label":"fault-split-retry","description":"fault-split-retry logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.53,"response_body":"\n","request_bytes":647,"sent_at":"2026-09-27T08:25:06.456606+00:00"}
