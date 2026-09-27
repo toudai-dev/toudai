@@ -41,5 +41,18 @@ The envelope therefore needs a mapping component outside the stock schema
 prototype's envelope round-tripped losslessly against the typed inventory and
 matched the exporter's stored serving values. See
 link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
++
+Experiment 021 table-tested the same semantic surface through a real
+OTLP -> Collector -> ClickHouse path with the owned exporter: strict
+int/double/string separation, missing versus explicit-empty versus empty string,
+false and zero, integers above 2^53 and the `Int64` extrema, non-finite doubles
+and negative zero, bytes and nested collections marked as unsupported in the
+serving row but preserved in the canonical payload, namespace separation
+including span scope, duplicate/conflicting keys, and lossless canonical
+retrieval with reconstruction of the serving values against the fixture
+inventory. That is representation conformance for logs and spans through the
+component; the operator workflow, metrics, and the query layer's unsupported-
+operation errors remain open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Provide a minimal operator-facing client and record an operator completing time comparison, grouping, heatmap/percentile inspection, outlier identification, and exact-event drill-down against the fixture; verify results against its known events.

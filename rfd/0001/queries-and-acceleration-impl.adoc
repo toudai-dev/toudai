@@ -58,6 +58,18 @@ contributing-value counts remain query-layer obligations. PoC DDL selection,
 planner support for the minimal layout's union/type expressions, and
 retained-scale read behavior remain open. See
 link:experiments/020-native-typed-map-comparison.adoc[Experiment 020].
++
+Experiment 021 exercised the minimal native typed layout (per-type record value
+Maps plus the canonical-only kind map, with string Maps and companion type Maps
+for resource and scope) through a real OTLP -> Collector -> ClickHouse path
+instead of a direct-insert harness. Stored type identity, presence, extremes,
+non-finite and negative-zero carriage, unsupported-type marking, namespace
+separation, and canonical round-trip all held for logs and spans, and known-type
+readback used direct map guards on the matching typed Map rather than scanning
+five Maps. This is real-path representation conformance on a tiny corpus: it adds
+no storage, cost, or latency evidence, does not select DDL, and leaves the
+query-layer error, overflow, and unknown-key union obligations open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
 

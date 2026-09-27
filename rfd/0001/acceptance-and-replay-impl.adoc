@@ -26,6 +26,16 @@ into one downstream request while preserving each resource group's attributes
 (the captured batch was same-workspace only; cross-workspace batching was not
 exercised), and that a producer retry after a crash inserted the same records
 again with no deduplication. Application-event encoding itself remains open.
++
+Experiment 021 measured one real cross-workspace downstream batch from the owned
+exporter: a single logged export carried both synthetic workspaces and the four
+stored event identities of its records, so batching across workspaces is observed
+on batch contents rather than inferred from two requests sharing a queue. The
+stored write identity is content-derived and stable across producer retries,
+crash recovery, and ambiguous-insert retries; no notification-driven or
+proprietary batch ID is involved. Cross-workspace query isolation and the
+final application-event encoding remain open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
 +
@@ -49,7 +59,34 @@ processor configuration can supply the type information was not ruled out
 (conditional `where` statements and other processors were not tested), and
 dataset routing remains open. See
 link:experiments/019-typed-canonical-storage.adoc[Experiment 019].
++
+Experiment 021 answered the component-boundary half of this item for the
+provisional hybrid layout: the pinned exporter's INSERT lists are fixed in
+`internal/sqltemplates/logs_insert.sql` and `traces_insert.sql` (logs store
+`LogAttributes`/`ScopeAttributes` as string Maps with no typed column, spans have
+no scope-attributes column), and a stock `transform` *can* create typed int and
+double attributes and guard per key, so the blocker is the write path rather than
+an absence of typed transformation. The experiment therefore built the smallest
+bounded owned exporter (built into a small distribution with `otelcol.NewCommand`,
+reusing `exporterhelper` for queue/retry/timeout) and wrote the canonical payload
+plus the hybrid serving tables through a real OTLP path; typed attributes,
+resource/scope namespaces, span scope, and lossless canonical retrieval were
+verified against independent fixture expectations for logs and spans, with native
+metrics outside the slice. Long-term component boundary, dataset routing, and
+retained-scale qualification remain open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 * [ ] Integrate authenticated tenant policy before both exports; demonstrate normal-path ingestion and exact-event retrieval against independent fixture expectations.
++
+Experiment 021 ran the provisional layout with real credential validation inside
+the tested distribution (`bearertokenauth`: a request with no token or a wrong
+token received HTTP 401 and produced no rows), a synthetic credential-to-workspace
+binding stated as static, and independent fixture expectations for every stored
+row. Forged resource/scope/record attributes could not override the trusted
+workspace or dataset or inject the trusted-scope marker on the gateway path, and
+the canonical payload was retrieved losslessly for the fixture. Dynamic key
+resolution, rotation/revocation, dataset routing rejection, and broader
+authorization guarantees remain out of scope and open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 == PoC-required: failure, overflow, and duplicates
 
@@ -72,6 +109,17 @@ retried and spilled), and the destination write when all queues were disabled
 (1246 ms during an outage). A SIGKILL after admission lost the in-memory queue;
 a `file_storage` queue recovered and drained the same batches after restart.
 Node loss was not tested.
++
+Experiment 021 re-measured the boundary on the two-destination hybrid write:
+queue disabled meant the row was visible at acknowledgement (131.88 ms) while
+queue enabled acknowledged in 5.87 ms with the row visible only at 0.41 s, and a
+SIGKILL with a file-backed queue left `exporter_lighthouse__logs`/`__traces` on
+disk and drained both destinations exactly once after restart with unchanged
+identity. Because the component validates the whole export request before its
+first insert, an invalid later record rejects the batch rather than half-writing
+it; per-record rejection after queue admission is still not producer visible.
+Node loss and multi-consumer queues remain open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Exercise OTLP partial success, permanent/retryable errors, full queues, retry expiry, and simultaneous destination failure; verify rejection/drop counters and producer-visible behavior rather than assuming all-or-nothing acceptance.
 +
@@ -81,6 +129,16 @@ then drop with `otelcol_exporter_send_failed_log_records`), a full bounded queue
 and retry expiry. No OTLP partial success was produced: the stock receiver does
 not validate records individually. Simultaneous ClickHouse and object-store
 failure remains open.
++
+Experiment 021 repeated the permanent-error, full-queue, and retry-expiry cases
+on the hybrid write: a permanently broken canonical destination left both
+destinations empty after five attempts, logged the component error, dropped the
+batch after the retry budget, and still returned 200 to the producer with no
+per-record rejection; a bounded queue with a stalled destination returned
+`200, 200, 503, 503, 503, 503`, and the requests admitted to the stalled queue
+were not written when the process stopped. Simultaneous destination failure and
+OTLP partial success remain untested. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Inject an ambiguous successful ClickHouse insert, repeated object notifications, and Collector restart/rebatching; quantify duplicates and verify raw and derived results against fixture expectations before choosing deduplication mechanisms.
 +
@@ -89,12 +147,30 @@ Experiment 018 quantified restart/re-batching and repeated replay duplicates
 counts 4/3/1/1 per fixture body) and confirmed that nothing deduplicates them.
 An ambiguous successful insert (ClickHouse commits but the response is lost) and
 real repeated S3 notifications were not injected.
++
+Experiment 021 injected the ambiguous successful insert on the hybrid write: the
+destination committed the canonical row while the response was withheld from the
+client, the client failed at its 5 s timeout, the exporter retried, and the result
+was two canonical rows with the same identity and payload hash plus exactly one
+serving row, with `query_log` showing two finished canonical inserts. A producer
+retry of an identical request produced two serving rows and two canonical rows
+with one stored identity. Deduplication is unselected, so these duplicates are
+measured rather than suppressed; repeated object notifications and derived
+results remain open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 * [ ] Stop ClickHouse, verify overflow object contents, restore it, and drain catch-up; test failed inserts and missing/expired notifications, then verify recovery and object-cleanup safety.
 +
 Experiment 018 stopped ClickHouse, verified the spilled object's contents (trusted
 workspace attribute plus the two records), restarted it, and replayed the object
 through a catch-up receiver. Missing/expired notifications, object cleanup, and
 drain safety remain open.
++
+Experiment 021 stopped ClickHouse behind a shared-queue hybrid write: the
+producer still received 200, an insert failure was counted, and after restart the
+queued request landed exactly once in both destinations with a shared identity
+and no duplicates. No object-store overflow was involved in this run, so the
+object-content, notification, and cleanup parts of this item remain open. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Publish queue depth, export failures, rejected/dropped records, overflow backlog, and catch-up progress independently of ClickHouse; verify visibility during outages and disclose incomplete recovery coverage.
 +
@@ -107,9 +183,28 @@ topology's scrapes (a statement about the tested configuration, not proof that n
 stock component can expose one); such signals must come from outside the tested
 pipeline. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
++
+Experiment 021 added per-destination instrumentation in the owned component
+(records and insert failures per destination, partial-write batches, rejected
+records by namespace and reason, rejected batches, and cross-workspace batch
+counts) and verified it during the outage, full-queue, permanent-failure, and
+split-write phases; the outage phase also recorded that the destination endpoint
+was actually refusing connections while the counters were scraped. Overflow
+backlog and catch-up progress signals remain unimplemented in this slice. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 == PoC-required: reconstruction and recovery decision
 
 * [ ] Rebuild an isolated serving layout from retained canonical fixture data; compare identities, canonical payload checksums, and raw/derived results, leaving the original layout intact on validation failure.
++
+Experiment 021 demonstrated only the bounded half of this: after a canonical-first
+split write left canonical rows without serving rows, a recorded repair statement
+derived a *minimal* serving row (routing identity, timestamps, kind, payload
+checksum) from the retained canonical payload and landed exactly one such row per
+canonical row (1/1 for the single failure and 7/7 for the retried failure). The
+full typed serving representation was not rebuilt from canonical data by a
+service, so this item remains open; the semantics phase verifies the
+reconstruction rules against the fixture instead. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 * [ ] Run a small ClickHouse backup/restore test with a declared recovery point; distinguish normal-path recovery from overflow replay and document uncovered failures.
 * [ ] Decide whether full independent archival is required in addition to canonical retention and backups; record recovery objectives, cost, and failure-domain trade-offs, and add archive-specific work only if selected.
