@@ -30,6 +30,18 @@ const (
 
 const canonicalSchema = "lighthouse.canonical.event/1"
 
+// Span timing diagnostics stored in serving_spans.span_timing_status. A span
+// whose end precedes its start is preserved and searchable: the supplied
+// timestamps stay as received and the derived duration is unavailable with an
+// explicit diagnostic, never discarded, never substituted with zero, and never
+// converted by unsigned underflow into a huge duration (Experiment 018 measured
+// 18446744073709550616 for a reversed span).
+const (
+	spanTimingOK             = "ok"               // duration is observable, including a valid zero
+	spanTimingMissing        = "missing"          // OTLP carries no timing (0/0)
+	spanTimingEndBeforeStart = "end_before_start" // data error: end < start
+)
+
 // valueKind is the OTLP AnyValue kind the exporter preserves.
 type valueKind uint8
 
@@ -367,6 +379,10 @@ type spanRow struct {
 	Dataset     string
 	EventID     string
 	TS          time.Time
+	// EndTS is the supplied end timestamp as received (zero when OTLP carries
+	// no timing); it is kept so a reversed span stays searchable by both
+	// timestamps instead of only by its derived duration.
+	EndTS       time.Time
 	ServiceName string
 	TraceID     string
 	SpanID      string
@@ -375,6 +391,9 @@ type spanRow struct {
 	SpanKind    string
 	StatusCode  int32
 	DurationNS  *int64
+	// TimingStatus is the machine-readable diagnostic (spanTimingOK,
+	// spanTimingMissing, or spanTimingEndBeforeStart).
+	TimingStatus string
 
 	Resource       map[string]string
 	ResourceTypes  map[string]string
@@ -616,20 +635,18 @@ func prepareSpans(td ptrace.Traces) preparedSpans {
 				}
 				start, end := uint64(sp.StartTimestamp()), uint64(sp.EndTimestamp())
 				var duration *int64
+				timing := spanTimingOK
 				switch {
 				case start == 0 && end == 0:
-					// Missing timing is not a zero-duration span; it stays NULL.
-					duration = nil
+					// Missing timing is not a zero-duration span; it stays NULL
+					// and is diagnosed separately from a reversed span.
+					timing = spanTimingMissing
 				case end < start:
-					// Malformed timing is rejected rather than converted by
-					// unsigned underflow into a huge duration (Experiment 018
-					// measured 18446744073709550616 for a negative span).
-					out.rejections = append(out.rejections, rejection{
-						Reason:    "negative_span_duration",
-						Detail:    fmt.Sprintf("start=%d end=%d", start, end),
-						Namespace: "span",
-					})
-					continue
+					// Reversed timing is accepted and preserved: the supplied
+					// timestamps are stored as received and the derived duration
+					// is unavailable with an explicit diagnostic, instead of the
+					// unsigned underflow Experiment 018 measured.
+					timing = spanTimingEndBeforeStart
 				default:
 					d := int64(end - start)
 					duration = &d
@@ -638,6 +655,7 @@ func prepareSpans(td ptrace.Traces) preparedSpans {
 					WorkspaceID:    workspace,
 					Dataset:        dataset,
 					TS:             nsTime(start),
+					EndTS:          nsTime(end),
 					ServiceName:    resValues["service.name"],
 					TraceID:        hexTraceID(sp.TraceID()),
 					SpanID:         hexSpanID(sp.SpanID()),
@@ -646,6 +664,7 @@ func prepareSpans(td ptrace.Traces) preparedSpans {
 					SpanKind:       sp.Kind().String(),
 					StatusCode:     int32(sp.Status().Code()),
 					DurationNS:     duration,
+					TimingStatus:   timing,
 					Resource:       nilIfEmpty(resValues),
 					ResourceTypes:  nilIfEmpty(resTypes),
 					SpanScope:      nilIfEmpty(scope.strings),

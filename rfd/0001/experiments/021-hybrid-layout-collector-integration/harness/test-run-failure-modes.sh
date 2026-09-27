@@ -23,6 +23,9 @@ PY="$ROOT/venv/bin/python"
 MODE="${1:-fast}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+# Keep bytecode caches out of the tracked tree: this script imports the harness
+# modules directly for the fixture regression check.
+export PYTHONDONTWRITEBYTECODE=1
 PASS=0
 FAIL=0
 
@@ -226,6 +229,48 @@ if (( rc != 0 )) && grep -q "already in use" "$WORK/injector-guard.log"; then
 else
   no "held injector port did not fail closed (exit $rc)"
   sed 's/^/    /' "$WORK/injector-guard.log" | tail -5
+fi
+
+# 13. The span-timing fixture must keep missing timing, reversed timing, and a
+#     valid zero duration distinct, and the mixed request must really carry one
+#     valid and one reversed span. The integration phase asserts against this
+#     surface, so a fixture regression must fail here instead of silently
+#     weakening the semantics phase.
+rc=0
+set +e
+PYTHONPATH="$HERE" "$PY" - <<'PYEOF' >"$WORK/span-timing.log" 2>&1
+# Import the 021 verifier first: importing fixture021 puts Experiment 019's
+# harness directory at the front of sys.path, and that directory also has a
+# verify.py.
+import verify
+import fixture021
+
+spans = {e["event_id"]: e for e in fixture021.ALL_SPAN_EVENTS}
+statuses = {i: verify.span_timing_status(e) for i, e in spans.items()}
+assert statuses["span-missing-time"] == "missing", statuses
+assert statuses["span-negative"] == "end_before_start", statuses
+assert statuses["span-zero"] == "ok", statuses
+assert statuses["timing-mixed-valid"] == "ok", statuses
+assert statuses["timing-mixed-reversed"] == "end_before_start", statuses
+assert verify.span_duration_ns(spans["span-zero"]) == 0, "a zero duration stays observable"
+assert verify.span_duration_ns(spans["span-negative"]) is None, "a reversed duration is unavailable"
+assert verify.span_duration_ns(spans["span-missing-time"]) is None, "a missing duration is unavailable"
+data, _ = fixture021.build_spans("timing-mixed")
+req = fixture021.trace_service_pb2.ExportTraceServiceRequest()
+req.ParseFromString(data)
+spans_pb = [(s.start_time_unix_nano, s.end_time_unix_nano)
+            for rl in req.resource_spans for sl in rl.scope_spans for s in sl.spans]
+assert len(spans_pb) == 2, spans_pb
+assert any(e >= s for s, e in spans_pb) and any(e < s for s, e in spans_pb), spans_pb
+print("span timing fixture ok")
+PYEOF
+rc=$?
+set -e
+if (( rc == 0 )); then
+  ok "span timing fixture keeps missing/reversed/zero distinct in a mixed batch"
+else
+  no "span timing fixture regression"
+  sed 's/^/    /' "$WORK/span-timing.log" | tail -5
 fi
 
 if [[ "$MODE" == full ]]; then

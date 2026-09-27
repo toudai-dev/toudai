@@ -24,7 +24,8 @@ This module adds the records the integration slice needs:
   provenance, so the effect of an invalidating rejection on a mixed request is
   measured;
 * a span with missing timing (0/0) next to Experiment 019's zero, positive, and
-  negative-duration spans.
+  reversed-duration spans, plus a one-request mixed batch carrying one valid and
+  one reversed span.
 
 Everything is deterministic: fixed timestamps and fixed values.
 
@@ -82,13 +83,35 @@ def source_hashes() -> dict:
 
 # Experiment 019's span set plus the missing-timing span: OTLP encodes missing
 # timing as 0/0, which the contract requires to stay distinct from a
-# zero-duration span.
+# zero-duration span, and a reversed span (end < start), which the approved
+# policy preserves with an unavailable duration and a timing diagnostic.
 SPAN_MISSING_TIME = fixture019._event(
     "span-missing-time", [("span.missing", "string", "yes")], kind="span",
     span_name="span/missing-timing", start_ns=0, end_ns=0,
     trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID)
 
-SPAN_EVENTS = list(fixture019.SPAN_EVENTS) + [SPAN_MISSING_TIME]
+SPAN_ZERO = fixture019._event(
+    "span-zero", [("span.zero", "string", "yes")], kind="span",
+    span_name="span/zero-duration", start_ns=TS, end_ns=TS,
+    trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID)
+
+SPAN_EVENTS = list(fixture019.SPAN_EVENTS) + [SPAN_MISSING_TIME, SPAN_ZERO]
+
+# One export request carrying a valid span and a reversed span together: the
+# mixed batch is what proves the policy does not depend on the request being
+# all-valid or all-reversed.
+TIMING_MIXED = [
+    fixture019._event("timing-mixed-valid", [("timing.attr", "string", "valid")],
+                      kind="span", span_name="timing-mixed/valid",
+                      start_ns=TS, end_ns=TS + 2500,
+                      trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID),
+    fixture019._event("timing-mixed-reversed", [("timing.attr", "string", "reversed")],
+                      kind="span", span_name="timing-mixed/reversed",
+                      start_ns=TS, end_ns=TS - 2500,
+                      trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID),
+]
+
+ALL_SPAN_EVENTS = list(SPAN_EVENTS) + list(TIMING_MIXED)
 
 FORGED_RESOURCE = list(fixture019.FULL_RESOURCE) + [
     ("lighthouse.workspace_id", "string", WS_FORGED),
@@ -315,23 +338,34 @@ def build_logs(label):
     return _logs_request(events), f"{label} logs: {len(events)} records"
 
 
-def build_spans(label):
-    if label not in ("typed",):
-        raise SystemExit(f"unknown traces fixture label: {label}")
+def _span_pb(event):
+    s = trace_pb2.Span()
+    s.trace_id = event["trace_id"] or fixture019.TRACE_ID
+    s.span_id = event["span_id"] or fixture019.SPAN_ID
+    s.parent_span_id = fixture019.PARENT_SPAN_ID
+    s.trace_state = "vendor=value"
+    s.name = event["span_name"]
+    s.kind = trace_pb2.Span.SpanKind.SPAN_KIND_SERVER
+    s.start_time_unix_nano = event["start_ns"]
+    s.end_time_unix_nano = event["end_ns"]
+    s.attributes.extend(fixture019.attrs_pairs(event["record"]))
+    s.status.code = 1
+    return s
 
-    def span(event):
-        s = trace_pb2.Span()
-        s.trace_id = event["trace_id"] or fixture019.TRACE_ID
-        s.span_id = event["span_id"] or fixture019.SPAN_ID
-        s.parent_span_id = fixture019.PARENT_SPAN_ID
-        s.trace_state = "vendor=value"
-        s.name = event["span_name"]
-        s.kind = trace_pb2.Span.SpanKind.SPAN_KIND_SERVER
-        s.start_time_unix_nano = event["start_ns"]
-        s.end_time_unix_nano = event["end_ns"]
-        s.attributes.extend(fixture019.attrs_pairs(event["record"]))
-        s.status.code = 1
-        return s
+
+def build_spans(label):
+    if label not in ("typed", "timing-mixed"):
+        raise SystemExit(f"unknown traces fixture label: {label}")
+    if label == "timing-mixed":
+        rl = trace_pb2.ResourceSpans()
+        rl.resource.CopyFrom(fixture019.resource_pb2.Resource(
+            attributes=fixture019.attrs_pairs(fixture019.FULL_RESOURCE)))
+        sl = rl.scope_spans.add()
+        sl.scope.CopyFrom(fixture019._scope("lighthouse.fixture.spans"))
+        sl.spans.extend([_span_pb(e) for e in TIMING_MIXED])
+        req = trace_service_pb2.ExportTraceServiceRequest()
+        req.resource_spans.extend([rl])
+        return req.SerializeToString(), f"timing-mixed spans: {len(TIMING_MIXED)} spans"
 
     rl = trace_pb2.ResourceSpans()
     rl.resource.CopyFrom(fixture019.resource_pb2.Resource(
@@ -339,16 +373,16 @@ def build_spans(label):
     first = [e for e in SPAN_EVENTS if e["event_id"] not in ("span-scope", "span-missing-time")]
     sl = rl.scope_spans.add()
     sl.scope.CopyFrom(fixture019._scope("lighthouse.fixture.spans"))
-    sl.spans.extend([span(e) for e in first])
+    sl.spans.extend([_span_pb(e) for e in first])
     # Span scope attributes on their own scope group.
     sl2 = rl.scope_spans.add()
     sl2.scope.CopyFrom(fixture019._scope("lighthouse.fixture.spans",
                                          extra=fixture019.SPAN_SCOPE_ATTRS))
-    sl2.spans.append(span(next(e for e in SPAN_EVENTS if e["event_id"] == "span-scope")))
+    sl2.spans.append(_span_pb(next(e for e in SPAN_EVENTS if e["event_id"] == "span-scope")))
     # The missing-timing span shares the first scope group's scope attributes.
     sl3 = rl.scope_spans.add()
     sl3.scope.CopyFrom(fixture019._scope("lighthouse.fixture.spans"))
-    sl3.spans.append(span(next(e for e in SPAN_EVENTS if e["event_id"] == "span-missing-time")))
+    sl3.spans.append(_span_pb(next(e for e in SPAN_EVENTS if e["event_id"] == "span-missing-time")))
 
     req = trace_service_pb2.ExportTraceServiceRequest()
     req.resource_spans.extend([rl])

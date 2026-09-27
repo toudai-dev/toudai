@@ -59,7 +59,11 @@ CREATE TABLE {{DB}}.serving_spans (
     workspace_id String,
     dataset LowCardinality(String),
     event_id String,
+    -- Both supplied timestamps are preserved: `ts` is the span start and
+    -- `end_ts` is the supplied end (0 when OTLP carries no timing), so a span
+    -- whose end precedes its start stays searchable by its real timestamps.
     ts DateTime64(9),
+    end_ts DateTime64(9),
     kind LowCardinality(String),
     service_name String,
     trace_id String,
@@ -68,10 +72,17 @@ CREATE TABLE {{DB}}.serving_spans (
     span_name String,
     span_kind LowCardinality(String),
     status_code Int32,
-    -- Explicit: a malformed negative span is rejected by the mapping component,
-    -- and missing timing is NULL rather than a UInt64 underflow (Experiment 018
-    -- measured 18446744073709550616 for a span whose end precedes its start).
+    -- Derived duration, NULL whenever it is not observable: missing timing
+    -- (OTLP 0/0) or a reversed span (end < start). A valid zero duration stays
+    -- 0. Never a zero substitute and never an unsigned underflow (Experiment
+    -- 018 measured 18446744073709550616 for a span whose end precedes its
+    -- start).
     duration_ns Nullable(Int64),
+    -- Machine-readable timing diagnostic: 'ok' (observable duration, including
+    -- a valid zero), 'missing' (0/0), or 'end_before_start' (data error; the
+    -- span is preserved with an unavailable duration). These are distinct
+    -- values so the three cases cannot be conflated.
+    span_timing_status LowCardinality(String),
     resource Map(LowCardinality(String), String),
     resource_types Map(LowCardinality(String), LowCardinality(String)),
     -- A span's instrumentation scope namespace is named `span_scope` here, as in

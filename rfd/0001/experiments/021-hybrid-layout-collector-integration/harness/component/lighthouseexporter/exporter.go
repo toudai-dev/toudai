@@ -250,14 +250,14 @@ func (e *lighthouseExporter) insertServingSpans(ctx context.Context, rows []span
 		return nil
 	}
 	batch, err := e.conn.PrepareBatch(ctx, fmt.Sprintf(
-		"INSERT INTO %s (workspace_id, dataset, event_id, ts, kind, service_name, trace_id, span_id, parent_span_id, span_name, span_kind, status_code, duration_ns, resource, resource_types, span_scope, span_scope_types, span_int, span_double, span_string, span_bool, span_other, payload_sha256)",
+		"INSERT INTO %s (workspace_id, dataset, event_id, ts, end_ts, kind, service_name, trace_id, span_id, parent_span_id, span_name, span_kind, status_code, duration_ns, span_timing_status, resource, resource_types, span_scope, span_scope_types, span_int, span_double, span_string, span_bool, span_other, payload_sha256)",
 		e.cfg.databaseTable(e.cfg.ServingSpansTable)))
 	if err != nil {
 		return err
 	}
 	for _, r := range rows {
-		if err := batch.Append(r.WorkspaceID, r.Dataset, r.EventID, r.TS, "span", r.ServiceName,
-			r.TraceID, r.SpanID, r.ParentID, r.SpanName, r.SpanKind, r.StatusCode, r.DurationNS,
+		if err := batch.Append(r.WorkspaceID, r.Dataset, r.EventID, r.TS, r.EndTS, "span", r.ServiceName,
+			r.TraceID, r.SpanID, r.ParentID, r.SpanName, r.SpanKind, r.StatusCode, r.DurationNS, r.TimingStatus,
 			r.Resource, r.ResourceTypes, r.SpanScope, r.SpanScopeTypes,
 			r.SpanInt, r.SpanDouble, r.SpanString, r.SpanBool, r.SpanOther, r.PayloadSHA256); err != nil {
 			return err

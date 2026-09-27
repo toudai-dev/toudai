@@ -520,7 +520,7 @@ phase_stock_probe() {
 phase_semantics() {
   log "phase semantics: typed representation through the gateway pipeline"
   phase_start semantics
-  guard_fresh semantics typed identity-ws-a identity-ws-b batch-a batch-b
+  guard_fresh semantics typed identity-ws-a identity-ws-b batch-a batch-b timing-mixed
   # The four single-record requests below (identity-a, identity-b, batch-a,
   # batch-b) are admitted roughly 230ms apart, so the queue's min_size of four
   # items is what makes them one downstream export. The flush window is the
@@ -540,6 +540,9 @@ phase_semantics() {
   # Typed corpus, then the forged-scope and shared-batch identities.
   emit semantics "$url" logs typed "Authorization: Bearer lh021-ws-a-key"
   emit semantics "$url" traces typed "Authorization: Bearer lh021-ws-a-key"
+  # One trace request carrying a valid span and a reversed-timing span together,
+  # so the preserved-span policy is exercised inside a mixed batch.
+  emit semantics "$url" traces timing-mixed "Authorization: Bearer lh021-ws-a-key"
   emit semantics "$url" logs identity-a "Authorization: Bearer lh021-ws-a-key"
   emit semantics "$url" logs identity-b "Authorization: Bearer lh021-ws-b-key"
   # Back-to-back requests from both credentials so one downstream batch can merge
@@ -548,7 +551,7 @@ phase_semantics() {
   emit semantics "$url" logs batch-b "Authorization: Bearer lh021-ws-b-key"
   wait_rows "$DB" "SELECT count() FROM serving_logs WHERE dataset = 'fixture'" 31 40 ||
     log "serving logs row count short"
-  wait_rows "$DB" "SELECT count() FROM serving_spans" 3 40 || log "serving spans row count short"
+  wait_rows "$DB" "SELECT count() FROM serving_spans" 7 40 || log "serving spans row count short"
   sleep 1
   scrape_metrics metrics-semantics.txt 8891
   "$PY" - <<PYEOF >"$RESULTS/semantics-schema.jsonl"
@@ -556,6 +559,19 @@ import json
 import verify
 for table in ("canonical_events", "serving_logs", "serving_spans"):
     print(json.dumps({"table": table, "columns": verify.table_columns(verify.DB, table)}))
+PYEOF
+  # The stored span-timing rows as they were written, so the preserved-span
+  # policy is reviewable from the evidence and not only from check names.
+  "$PY" - <<PYEOF >"$RESULTS/semantics-span-timing.jsonl"
+import json
+import verify
+rows = verify.ch(
+    "SELECT span_name, event_id, workspace_id, dataset, "
+    "toUnixTimestamp64Nano(ts) AS ts_ns, toUnixTimestamp64Nano(end_ts) AS end_ts_ns, "
+    "duration_ns, span_timing_status FROM serving_spans "
+    "WHERE dataset = {d:String} ORDER BY span_name", {"d": verify.DATASET})
+for row in rows:
+    print(json.dumps(row, default=str))
 PYEOF
   stop_collector lighthouse-gateway
   copy_log lighthouse-gateway collector-semantics.log

@@ -3,6 +3,7 @@ package lighthouseexporter
 import (
 	"encoding/json"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -205,7 +206,11 @@ func TestPrepareLogsDropsProducerReservedKeys(t *testing.T) {
 	}
 }
 
-func TestSpanDurationRejectionAndMissingTiming(t *testing.T) {
+// A reversed span (end < start) is accepted and preserved: both supplied
+// timestamps are stored, the derived duration is unavailable, and the timing
+// diagnostic distinguishes missing timing from a reversed span and from a valid
+// zero duration.
+func TestSpanTimingStatusAndPreservedTimestamps(t *testing.T) {
 	build := func(start, end uint64) preparedSpans {
 		td := ptrace.NewTraces()
 		rs := td.ResourceSpans().AppendEmpty()
@@ -223,28 +228,31 @@ func TestSpanDurationRejectionAndMissingTiming(t *testing.T) {
 	tests := []struct {
 		name       string
 		start, end uint64
-		wantRows   int
-		wantReject string
+		wantStatus string
 		wantDur    *int64
 	}{
-		{"positive duration", 10, 20, 1, "", ptr(int64(10))},
-		{"zero duration", 10, 10, 1, "", ptr(int64(0))},
-		{"missing timing", 0, 0, 1, "", nil},
-		{"negative duration", 20, 10, 0, "negative_span_duration", nil},
+		{"positive duration", 10, 20, spanTimingOK, ptr(int64(10))},
+		{"zero duration", 10, 10, spanTimingOK, ptr(int64(0))},
+		{"missing timing", 0, 0, spanTimingMissing, nil},
+		{"reversed timing", 20, 10, spanTimingEndBeforeStart, nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := build(tc.start, tc.end)
-			if len(got.rows) != tc.wantRows {
-				t.Fatalf("rows = %d, want %d (rejections %+v)", len(got.rows), tc.wantRows, got.rejections)
-			}
-			if tc.wantReject != "" {
-				if len(got.rejections) != 1 || got.rejections[0].Reason != tc.wantReject {
-					t.Fatalf("rejections = %+v, want reason %s", got.rejections, tc.wantReject)
-				}
-				return
+			if len(got.rows) != 1 || len(got.rejections) != 0 {
+				t.Fatalf("rows = %d, rejections = %+v; a span must be preserved, not rejected",
+					len(got.rows), got.rejections)
 			}
 			row := got.rows[0]
+			if row.TimingStatus != tc.wantStatus {
+				t.Fatalf("timing status = %q, want %q", row.TimingStatus, tc.wantStatus)
+			}
+			if got := uint64(row.TS.UnixNano()); got != tc.start {
+				t.Fatalf("stored start = %d, want %d", got, tc.start)
+			}
+			if got := uint64(row.EndTS.UnixNano()); got != tc.end {
+				t.Fatalf("stored end = %d, want %d", got, tc.end)
+			}
 			switch {
 			case tc.wantDur == nil && row.DurationNS != nil:
 				t.Fatalf("duration = %d, want NULL", *row.DurationNS)
@@ -252,6 +260,22 @@ func TestSpanDurationRejectionAndMissingTiming(t *testing.T) {
 				t.Fatalf("duration = NULL, want %d", *tc.wantDur)
 			case tc.wantDur != nil && *row.DurationNS != *tc.wantDur:
 				t.Fatalf("duration = %d, want %d", *row.DurationNS, *tc.wantDur)
+			}
+			// The canonical payload keeps the supplied timestamps and carries no
+			// derived duration when the duration is not observable.
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(row.Payload), &doc); err != nil {
+				t.Fatalf("payload is not JSON: %v", err)
+			}
+			span := doc["span"].(map[string]any)
+			if span["start_ns"] != strconv.FormatUint(tc.start, 10) ||
+				span["end_ns"] != strconv.FormatUint(tc.end, 10) {
+				t.Fatalf("canonical start/end = %v/%v, want %d/%d",
+					span["start_ns"], span["end_ns"], tc.start, tc.end)
+			}
+			_, hasDuration := span["duration_ns"]
+			if hasDuration != (tc.wantDur != nil) {
+				t.Fatalf("canonical duration_ns present = %v, want %v", hasDuration, tc.wantDur != nil)
 			}
 		})
 	}

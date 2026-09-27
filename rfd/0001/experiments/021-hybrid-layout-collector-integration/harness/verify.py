@@ -69,6 +69,9 @@ SPAN_SCOPE_OF = {
     "span-scope": fixture019.SPAN_SCOPE_ATTRS,
     "span-missing-time": fixture019.FULL_SCOPE,
     "span-negative": fixture019.FULL_SCOPE,
+    "span-zero": fixture019.FULL_SCOPE,
+    "timing-mixed-valid": fixture019.FULL_SCOPE,
+    "timing-mixed-reversed": fixture019.FULL_SCOPE,
 }
 
 
@@ -316,11 +319,31 @@ def log_expectation(event: dict, workspace: str) -> dict:
     }
 
 
+def span_timing_status(event: dict) -> str:
+    """Fixture-derived timing classification, independent of the component.
+
+    The three cases the approved policy must keep apart: a valid duration
+    (including zero), missing OTLP timing (0/0), and reversed timing (end <
+    start, whose derived duration is unavailable).
+    """
+    start, end = event["start_ns"], event["end_ns"]
+    if start == 0 and end == 0:
+        return "missing"
+    if end < start:
+        return "end_before_start"
+    return "ok"
+
+
+def span_duration_ns(event: dict) -> int | None:
+    """The observable duration, or None when it is unavailable."""
+    if span_timing_status(event) != "ok":
+        return None
+    return event["end_ns"] - event["start_ns"]
+
+
 def span_expectation(event: dict) -> dict:
     scope_strings, scope_types = project_pairs(SPAN_SCOPE_OF[event["event_id"]])
     resource_strings, resource_types = expected_resource(event["resource"], WS_A)
-    start, end = event["start_ns"], event["end_ns"]
-    duration = None if start == 0 and end == 0 else (None if end < start else end - start)
     return {
         "workspace": WS_A,
         "dataset": DATASET,
@@ -329,8 +352,10 @@ def span_expectation(event: dict) -> dict:
         "resource_types": resource_types,
         "span_scope": scope_strings,
         "span_scope_types": scope_types,
-        "ts_ns": start,
-        "duration_ns": duration,
+        "ts_ns": event["start_ns"],
+        "end_ns": event["end_ns"],
+        "timing_status": span_timing_status(event),
+        "duration_ns": span_duration_ns(event),
         "span_name": event["span_name"],
         "parent_span_id": fixture019.PARENT_SPAN_ID.hex(),
         "span_kind": "Server",
@@ -338,7 +363,6 @@ def span_expectation(event: dict) -> dict:
         "service_name": service_name(event["resource"]),
         "trace_id": (event["trace_id"] or fixture019.TRACE_ID).hex(),
         "span_id": (event["span_id"] or fixture019.SPAN_ID).hex(),
-        "rejected": end < start,
     }
 
 
@@ -426,6 +450,8 @@ def reconstruct_serving(doc: dict, kind: str) -> dict:
         })
     else:
         span = doc["span"]
+        start = int(doc["time"]["timestamp_ns"])
+        end = int(span["end_ns"])
         expected.update({
             "span_scope": scope_strings,
             "span_scope_types": scope_types,
@@ -433,6 +459,11 @@ def reconstruct_serving(doc: dict, kind: str) -> dict:
             "span_kind": span["kind"],
             "status_code": int(span["status_code"]),
             "parent_span_id": span["parent_span_id"],
+            "end_ns": end,
+            # The serving timing diagnostic and unavailable duration are
+            # reconstructed from the canonical start/end by the documented rule.
+            "timing_status": ("missing" if (start == 0 and end == 0)
+                              else ("end_before_start" if end < start else "ok")),
             "duration_ns": int(span["duration_ns"]) if "duration_ns" in span else None,
         })
     return expected
@@ -443,8 +474,8 @@ CANONICAL_COMPARE_KEYS = {
             "observed_ns", "body", "body_kind", "scope", "scope_types", "severity_text",
             "severity_number"],
     "span": ["workspace", "dataset", "record", "resource", "resource_types", "ts_ns",
-             "span_scope", "span_scope_types", "span_name", "span_kind", "status_code",
-             "parent_span_id", "duration_ns"],
+             "end_ns", "span_scope", "span_scope_types", "span_name", "span_kind",
+             "status_code", "parent_span_id", "duration_ns", "timing_status"],
 }
 
 
@@ -553,7 +584,8 @@ def check_common_row(c: Checks, table: str, event_id: str, expected: dict, kind:
             map_exprs(event_id, column, expected[column], exprs, params)
         params.update({"spname": expected["span_name"], "skind": expected["span_kind"],
                        "scode": str(expected["status_code"]), "pid": expected["parent_span_id"],
-                       "tid": expected["trace_id"], "sid": expected["span_id"]})
+                       "tid": expected["trace_id"], "sid": expected["span_id"],
+                       "endn": str(expected["end_ns"]), "timing": expected["timing_status"]})
         exprs["rep.row.span_name"] = "span_name = {spname:String}"
         exprs["rep.row.span_kind"] = "span_kind = {skind:String}"
         exprs["rep.row.status_code"] = "status_code = {scode:Int32}"
@@ -561,6 +593,10 @@ def check_common_row(c: Checks, table: str, event_id: str, expected: dict, kind:
         exprs["rep.row.trace_id"] = "trace_id = {tid:String}"
         exprs["rep.row.span_id"] = "span_id = {sid:String}"
         exprs["rep.row.kind"] = "kind = 'span'"
+        # Both supplied timestamps are stored exactly as received, including the
+        # reversed and the missing-timing spans.
+        exprs["rep.row.end_ts"] = "toUnixTimestamp64Nano(end_ts) = {endn:Int64}"
+        exprs["rep.row.timing_status"] = "span_timing_status = {timing:String}"
         if expected["duration_ns"] is None:
             exprs["rep.row.duration_null"] = "isNull(duration_ns)"
         else:
@@ -709,7 +745,7 @@ def fixture_log(label: str, index: int = 0) -> dict:
 
 def fixture_event(fixture_id: str) -> dict:
     """The fixture inventory record for a readable fixture identity."""
-    for events in (fixture021.TYPED_LOGS, fixture021.SPAN_EVENTS):
+    for events in (fixture021.TYPED_LOGS, fixture021.ALL_SPAN_EVENTS):
         for event in events:
             if event["event_id"] == fixture_id:
                 return event
@@ -1048,18 +1084,13 @@ def phase_semantics(c: Checks) -> None:
     else:
         c.check("rep.typed.rows_resolved", False,
                 "the typed fixture row did not resolve to a serving row")
-    # Spans.
-    for event in fixture021.SPAN_EVENTS:
+    # Spans. Every span is preserved, including the reversed-timing span: the
+    # approved policy keeps the span and both supplied timestamps, stores the
+    # derived duration as unavailable, and records the timing diagnostic.
+    for event in fixture021.ALL_SPAN_EVENTS:
         fixture_id = event["event_id"]
         expected = span_expectation(event)
         rows = serving_rows_for_fixture(event, WS_A, DATASET)
-        if expected["rejected"]:
-            c.check(f"query.{fixture_id}.serving_absent", len(rows) == 0,
-                    "a span whose end precedes its start must be rejected")
-            c.check(f"query.{fixture_id}.canonical_absent",
-                    len(canonical_rows_for_fixture(fixture_id, WS_A)) == 0,
-                    "a malformed span must not be canonicalized")
-            continue
         if not c.check(f"query.{fixture_id}.serving_present", len(rows) == 1,
                        f"expected exactly one serving span for {fixture_id}, got {len(rows)}"):
             continue
@@ -1079,11 +1110,80 @@ def phase_semantics(c: Checks) -> None:
         run_row_exprs(c, "serving_spans", "event_id = {e:String}",
                       {"e": scope_rows[0]["event_id"], "ks": "scope.span.attr",
                        "ki": "scope.span.int"}, scope_exprs)
-    missing_rows = resolve_stored(c, "span-missing-time")
+    # The three timing cases must stay distinct in the stored diagnostic, and
+    # the reversed span keeps its original timestamps.
+    timing_rows = {label: resolve_stored(c, label)
+                   for label in ("span-missing-time", "span-negative", "span-zero")}
+    if all(timing_rows.values()):
+        statuses = ch(
+            "SELECT "
+            "(SELECT span_timing_status FROM serving_spans WHERE event_id = {m:String}) AS missing_status, "
+            "(SELECT span_timing_status FROM serving_spans WHERE event_id = {r:String}) AS reversed_status, "
+            "(SELECT span_timing_status FROM serving_spans WHERE event_id = {z:String}) AS zero_status",
+            {"m": timing_rows["span-missing-time"][0]["event_id"],
+             "r": timing_rows["span-negative"][0]["event_id"],
+             "z": timing_rows["span-zero"][0]["event_id"]})
+        row = statuses[0] if statuses else {}
+        c.check("rep.span.missing_timing_status", row.get("missing_status") == "missing",
+                f"missing-timing status = {row.get('missing_status')!r}")
+        c.check("rep.span.reversed_timing_status", row.get("reversed_status") == "end_before_start",
+                f"reversed-timing status = {row.get('reversed_status')!r}")
+        c.check("rep.span.zero_timing_status", row.get("zero_status") == "ok",
+                f"zero-duration status = {row.get('zero_status')!r}")
+        c.check("rep.span.timing_statuses_distinct",
+                len({row.get("missing_status"), row.get("reversed_status"),
+                     row.get("zero_status")}) == 3,
+                f"timing diagnostics are not distinct: {row}")
+    missing_rows = timing_rows["span-missing-time"]
     if missing_rows:
         run_row_exprs(c, "serving_spans", "event_id = {e:String}", {"e": missing_rows[0]["event_id"]},
                       {"rep.span.missing_timing_is_null_not_underflow": "isNull(duration_ns)",
-                       "rep.span.missing_timing_keeps_zero_start": "toUnixTimestamp64Nano(ts) = 0"})
+                       "rep.span.missing_timing_keeps_zero_start": "toUnixTimestamp64Nano(ts) = 0",
+                       "rep.span.missing_timing_keeps_zero_end": "toUnixTimestamp64Nano(end_ts) = 0",
+                       "rep.span.missing_timing_diagnostic": "span_timing_status = 'missing'"})
+    reversed_rows = timing_rows["span-negative"]
+    if reversed_rows:
+        run_row_exprs(c, "serving_spans", "event_id = {e:String}", {"e": reversed_rows[0]["event_id"]},
+                      {"rep.span.reversed_duration_unavailable": "isNull(duration_ns)",
+                       "rep.span.reversed_keeps_original_timestamps":
+                           "toUnixTimestamp64Nano(end_ts) < toUnixTimestamp64Nano(ts)",
+                       "rep.span.reversed_span_preserved":
+                           "span_name = 'span/negative-duration' AND trace_id != ''",
+                       "rep.span.reversed_diagnostic": "span_timing_status = 'end_before_start'"})
+    # Independent aggregate expectations for span timing, derived from the
+    # fixture inventory (never from the stored rows): contributing spans have an
+    # observable duration (a valid zero counts), excluded spans have none, and
+    # the error count is the reversed-timing subset. This is the count contract a
+    # future duration aggregate must honour, not a production aggregate.
+    fixture_spans = list(fixture021.ALL_SPAN_EVENTS)
+    want_ok = sum(1 for e in fixture_spans if span_timing_status(e) == "ok")
+    want_missing = sum(1 for e in fixture_spans if span_timing_status(e) == "missing")
+    want_reversed = sum(1 for e in fixture_spans if span_timing_status(e) == "end_before_start")
+    agg = ch("SELECT count() AS total, countIf(duration_ns IS NOT NULL) AS contributing, "
+             "countIf(isNull(duration_ns)) AS excluded, "
+             "countIf(span_timing_status = 'end_before_start') AS errors, "
+             "countIf(span_timing_status = 'missing') AS missing, "
+             "uniqExact(span_timing_status) AS distinct_statuses "
+             "FROM serving_spans WHERE workspace_id = {w:String} AND dataset = {d:String}",
+             {"w": WS_A, "d": DATASET})
+    row = agg[0] if agg else {}
+    c.check("rep.span.aggregate_total", int(row.get("total", -1)) == len(fixture_spans),
+            f"fixture has {len(fixture_spans)} spans, stored total = {row.get('total')}")
+    c.check("rep.span.aggregate_contributing",
+            int(row.get("contributing", -1)) == want_ok,
+            f"fixture expects {want_ok} contributing spans, stored = {row.get('contributing')}")
+    c.check("rep.span.aggregate_excluded",
+            int(row.get("excluded", -1)) == want_missing + want_reversed,
+            f"fixture expects {want_missing + want_reversed} excluded spans, "
+            f"stored = {row.get('excluded')}")
+    c.check("rep.span.aggregate_errors", int(row.get("errors", -1)) == want_reversed,
+            f"fixture expects {want_reversed} reversed-timing spans, stored = {row.get('errors')}")
+    c.check("rep.span.aggregate_missing", int(row.get("missing", -1)) == want_missing,
+            f"fixture expects {want_missing} missing-timing spans, stored = {row.get('missing')}")
+    c.check("rep.span.aggregate_distinct_statuses",
+            int(row.get("distinct_statuses", -1)) == len(
+                {span_timing_status(e) for e in fixture_spans}),
+            f"stored distinct statuses = {row.get('distinct_statuses')}")
     # Forged producer identity must not override the trusted scope.
     for label, workspace in (("identity-a", WS_A), ("identity-b", WS_B)):
         event = fixture_log(label)
@@ -1139,6 +1239,17 @@ def phase_semantics(c: Checks) -> None:
         c.check("comp.batch_summary_log_mixed_workspaces", bool(mixed),
                 "no batch summary line naming both workspaces and both fixture "
                 f"identities in one export (a={ids_a}, b={ids_b})")
+        # The mixed timing batch is one export item: one summary line names both
+        # stored identities of the valid+reversed request, so the preserved-span
+        # policy was exercised inside a single downstream export.
+        timing_ids = [r["event_id"] for event in fixture021.TIMING_MIXED
+                      for r in serving_rows_for_fixture(event, WS_A, DATASET)]
+        timing_batch = [line for line in text.splitlines()
+                        if "lighthouse exporter batch" in line and '"signal": "spans"' in line
+                        and all(f'"{i}"' in line for i in timing_ids)]
+        c.check("comp.timing_mixed_batch_log", bool(timing_batch),
+                "no single span batch summary line names both stored identities of "
+                f"the valid+reversed request ({timing_ids})")
         c.check("comp.no_dropped_data", "Dropping data" not in text,
                 "the collector dropped data in the semantics phase")
         c.check("comp.no_rejected_batches",
@@ -1159,10 +1270,11 @@ def phase_semantics(c: Checks) -> None:
             metric_sum(metrics, "lighthouse_exporter_rejected_records",
                        reason="duplicate_or_invalid_record_attributes") >= 1,
             "no rejected-record counter for the duplicate-key record")
-    c.check("comp.rejected_negative_duration",
+    c.check("comp.no_negative_duration_rejection",
             metric_sum(metrics, "lighthouse_exporter_rejected_records",
-                       reason="negative_span_duration") >= 1,
-            "no rejected-record counter for the negative-duration span")
+                       reason="negative_span_duration") == 0,
+            "the approved policy accepts reversed-timing spans; no negative-duration "
+            "rejection is expected (the pre-policy run measured one)")
     logs_columns = table_columns(DB, "serving_logs")
     spans_columns = table_columns(DB, "serving_spans")
     c.check("rep.schema.record_int_native",
@@ -1182,6 +1294,11 @@ def phase_semantics(c: Checks) -> None:
             "serving_spans should not carry both scope and span_scope")
     c.check("rep.schema.duration_nullable", "Nullable(Int64)" in spans_columns.get("duration_ns", ""),
             spans_columns.get("duration_ns", ""))
+    c.check("rep.schema.spans_end_ts_present",
+            "DateTime64" in spans_columns.get("end_ts", ""), spans_columns.get("end_ts", ""))
+    c.check("rep.schema.spans_timing_status_present",
+            "LowCardinality(String)" in spans_columns.get("span_timing_status", ""),
+            spans_columns.get("span_timing_status", ""))
 
 
 def phase_ack(c: Checks) -> None:
@@ -1685,7 +1802,7 @@ def phase_files(c: Checks) -> None:
     required = [
         "build-manifest.txt", "go-modules.txt", "run-start.txt", "phase-status.tsv",
         "phase-times.tsv", "fixture019-sha256.txt", "metrics-semantics.txt",
-        "semantics-emits.jsonl", "semantics-schema.jsonl",
+        "semantics-emits.jsonl", "semantics-schema.jsonl", "semantics-span-timing.jsonl",
         "metrics-mixed-validation.txt", "mixed-validation-emits.jsonl",
         "metrics-ambiguous-serving.txt", "ambiguous-serving-emits.jsonl",
         "proxy-ambiguous-serving.log",
@@ -1742,6 +1859,26 @@ def phase_files(c: Checks) -> None:
                  if len(line.split("\t")) == 3 and line.split("\t")[2].strip() != "0"]
         c.check("meta.no_stale_fixture_state_before_phases", not stale,
                 f"phases started with pre-existing fixture rows: {stale[:5]}")
+    # The stored span-timing snapshot must show the fixture's timing cases; the
+    # expectation comes from the fixture inventory, not from the file's own
+    # claims, so a policy or mapping regression cannot hide in the evidence.
+    snapshot = RESULTS / "semantics-span-timing.jsonl"
+    if snapshot.exists():
+        rows = [json.loads(line) for line in snapshot.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+        want_statuses = sorted(span_timing_status(e) for e in fixture021.ALL_SPAN_EVENTS)
+        c.check("files.span_timing_snapshot_rows", len(rows) == len(want_statuses),
+                f"snapshot has {len(rows)} rows, fixture has {len(want_statuses)} spans")
+        c.check("files.span_timing_snapshot_statuses",
+                sorted(r["span_timing_status"] for r in rows) == want_statuses,
+                f"snapshot statuses = {sorted(r['span_timing_status'] for r in rows)}")
+        c.check("files.span_timing_snapshot_durations",
+                all((r["duration_ns"] is None) == (r["span_timing_status"] != "ok") for r in rows),
+                "a stored duration must be present exactly when the timing is observable")
+        c.check("files.span_timing_snapshot_reversed_timestamps",
+                all(int(r["end_ts_ns"]) < int(r["ts_ns"]) for r in rows
+                    if r["span_timing_status"] == "end_before_start"),
+                "a reversed span must keep its original end < start timestamps")
     # The serving-response-loss injection must be aimed at the serving insert, so
     # that phase cannot pass on a withheld canonical response.
     proxy = RESULTS / "proxy-ambiguous-serving.log"
