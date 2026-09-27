@@ -1,0 +1,52 @@
+# Experiment 021 fail-closed probe: the untrusted pipeline has no resource
+# processor, so the trusted-scope marker and the trusted workspace are never
+# injected. The exporter must reject such a batch as a whole (permanent error, no
+# rows) instead of trusting whatever the producer sent.
+#
+# This database is separate from the tested serving database so the probe cannot
+# pollute the trusted-path checks. It also isolates the honest limitation probe:
+# a producer that forges lighthouse.scope_source=gateway as well as the workspace
+# is indistinguishable from an injected scope for this component; the tested
+# gateway path cannot hit that case because the resource processor upserts the
+# marker, which is why the gateway phases are the authority for scope.
+receivers:
+  otlp/untrusted:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:${env:LH021_OTLP_PORT:-4339}
+
+exporters:
+  lighthouse:
+    endpoint: ${env:LH021_ENDPOINT:-127.0.0.1:19101}
+    database: ${env:LH021_DATABASE:-lh021_untrusted}
+    timeout: 5s
+    log_batch_summaries: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 100ms
+      max_interval: 500ms
+      max_elapsed_time: 2s
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 100
+  file/untrusted-received:
+    path: ${env:LH021_RESULTS}/no-trust-received.jsonl
+    format: json
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: ${env:LH021_METRICS_PORT:-8892}
+  pipelines:
+    logs/untrusted:
+      receivers: [otlp/untrusted]
+      exporters: [lighthouse, file/untrusted-received]

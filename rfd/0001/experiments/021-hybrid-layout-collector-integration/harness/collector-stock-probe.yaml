@@ -1,0 +1,95 @@
+# Experiment 021 stock-write-path probe: does a small stock transformation/config
+# path meet the approved hybrid layout? Three pipelines share one receiver:
+#
+# * logs/transform-typed: OTTL statements that create typed values and a guarded
+#   statement, captured by the file exporter. This tests whether the pinned
+#   transform processor can produce typed data (Experiment 019 tested only two
+#   expressions, so this experiment does not repeat a universal claim).
+# * logs/stringify: Experiment 019's stringify_all control, which is the
+#   conversion the stock exporter performs.
+# * logs/stock + traces/stock: the stock ClickHouse exporter with
+#   create_schema: true in its default Map mode, fed with the same typed fixture.
+#   The stored columns are the evidence for what the fixed stock INSERT list can
+#   and cannot carry.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:${env:LH021_OTLP_PORT:-4337}
+
+processors:
+  transform/typed:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["probe.int"], Int(1))
+          - set(attributes["probe.double"], Double(1.5))
+          - set(attributes["probe.bool"], true)
+          # Type-guarded statements: the fixture's str.one is a string, int.one an
+          # int, so one guard must apply and the other must not.
+          - set(attributes["probe.guarded"], Int(2)) where IsString(attributes["str.one"])
+          - set(attributes["probe.never"], Int(3)) where IsString(attributes["int.one"])
+  transform/stringify:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - stringify_all(attributes)
+
+exporters:
+  clickhouse/stock:
+    endpoint: tcp://127.0.0.1:19101
+    database: ${env:LH021_STOCK_DATABASE:-lh021_stock}
+    create_schema: true
+    async_insert: false
+    timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 5s
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 1000
+  file/transform-typed:
+    path: ${env:LH021_RESULTS}/stock-transform-typed.jsonl
+    format: json
+  file/stringify:
+    path: ${env:LH021_RESULTS}/stock-transform-stringify.jsonl
+    format: json
+  file/stock-received-logs:
+    path: ${env:LH021_RESULTS}/stock-received-logs.jsonl
+    format: json
+  file/stock-received-traces:
+    path: ${env:LH021_RESULTS}/stock-received-traces.jsonl
+    format: json
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: ${env:LH021_METRICS_PORT:-8893}
+  pipelines:
+    logs/transform-typed:
+      receivers: [otlp]
+      processors: [transform/typed]
+      exporters: [file/transform-typed]
+    logs/stringify:
+      receivers: [otlp]
+      processors: [transform/stringify]
+      exporters: [file/stringify]
+    logs/stock:
+      receivers: [otlp]
+      exporters: [clickhouse/stock, file/stock-received-logs]
+    traces/stock:
+      receivers: [otlp]
+      exporters: [clickhouse/stock, file/stock-received-traces]
