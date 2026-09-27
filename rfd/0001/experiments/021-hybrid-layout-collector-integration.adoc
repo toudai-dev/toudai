@@ -1,0 +1,331 @@
+= Experiment 021: Provisional hybrid layout through a real Collector path
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed (bounded slice); failover and object-store catch-up left open
+- *Run:* 2026-09-27T02:12:33Z-02:14:22Z (committed run, `./run.sh all`, exit 0)
+- *Source mutation:* None; disposable local ClickHouse service, synthetic fixtures, loopback only
+- *Branch/base:* `exp-021-hybrid-layout` on `5f01e039aea29604b4dad992819ea8006b0155cf` (PR #15 merge, verified `origin/main`)
+- *Harness:* `021-hybrid-layout-collector-integration/harness/`; layout and evidence files are described in link:021-hybrid-layout-collector-integration/README.adoc[the evidence README]
+- *Result:* 3082 recorded checks passed, 0 failed, across all thirteen phases (`results/phase-status.tsv`); the run exits nonzero on a missing, crashed, stale, or failing phase, so the passing summary cannot omit a phase. The committed run is the third consecutive passing `./run.sh all` after the shared-batch flush window was widened (a 700 ms window once expired ~40 ms before the fourth single-record request, stranding `batch-b`; the check had passed on a previous run, so the margin was measured, not assumed). `test-run-failure-modes.sh fast` passed 12/12 (coverage, empty phase, nonzero exit, failed check line, missing/stale status, verifier failures against an empty database, unknown phase) and `full` passed 16/16 including an injected verifier crash failing `run.sh all` and a normal full run.
+
+== Question
+
+Experiments 018-020 established the stock path's gaps, the canonical envelope,
+and the native typed Map encodings separately. None of them ran the combined
+layout through a real OTLP -> Collector path. This experiment asks:
+
+. Can a *real* OTLP -> Collector -> ClickHouse path write the provisional hybrid
+  layout: native typed Maps for record attributes with minimal empty/canonical-only
+  bookkeeping, string Maps plus companion type Maps for resource and scope
+  attributes including span scope, and a separate type-preserving canonical
+  payload table?
+. Which component boundary is the smallest one that can actually write it: a
+  stock processor/config path, or an owned exporter?
+. What happens to producer acknowledgement, retries, crashes, and duplicates when
+  the two destinations cannot be written atomically?
+. Does the representation keep the Experiment 018/019/020 semantic surface
+  (strict type separation, presence versus empty, extreme and non-finite values,
+  bytes/nested identity, namespaces, span scope) through that path?
+
+This is a bounded integration trial: no automatic schema promotion, dynamic
+authorization service, production query planner, cloud capacity test, or
+general-purpose ingestion framework. Native metrics are outside this slice.
+
+== Hypothesis
+
+Written before the run:
+
+* The pinned stock ClickHouse exporter cannot write this layout: its INSERT
+  column lists are fixed in its SQL templates, so typed Maps, companion type
+  Maps, and a payload column have no path in, whatever the transform output is.
+* A stock `transform` *can* put typed values into a record's attributes, so any
+  claim that no stock processor can produce typed data is wrong; the blocker is
+  the write path, not the transformation.
+* Canonical-first, non-atomic writes will produce measurable duplicates on retry
+  and an ambiguous insert will duplicate the canonical row, while leaving exactly
+  one serving row; that is a property of the design, not a defect to hide.
+* The Experiment 019/020 typed surface should survive when the mapping component
+  supplies the types, with the caveat that unsupported operations remain
+  query-layer obligations.
+
+== Component boundary and scope note
+
+The parent asked for a concrete processor-versus-exporter decision grounded in
+whatever the write path actually requires. The measured answer:
+
+*Fixed insertion constraints (source-verified, not inferred).* The pinned
+`clickhouseexporter` v0.161.0 builds its INSERT statements from embedded templates
+(`internal/sqltemplates/logs_insert.sql`, `traces_insert.sql`): the logs list is
+`Timestamp, TraceId, SpanId, ..., LogAttributes Map(LowCardinality(String),
+String), ScopeAttributes, ...` with no typed value column, and the spans list has
+no scope-attributes column at all. There is no configuration option that adds or
+renames a column (`config.go` has no extra-column, payload-column, or canonical
+option; the stock probe asserts this in the pinned module source). After a real
+stock write of the same fixture, the stored log attributes are exactly one
+`Map(LowCardinality(String), String)`.
+
+*Tested transforms.* In the same pinned binary, a stock `transform` creates typed
+int and double attributes on the wire (measured), and a guarded statement applies
+to a string key while being skipped for an int key, so per-key conditional work is
+possible. `stringify_all` collapses integer `1`, double `1.0`, and string `"1"`
+into one string, and the natural per-key *type-name* expression
+(`MapEach` + ternary) fails configuration load, which is recorded as a nonzero
+config-load phase rather than a silent skip. The statement supported here is
+narrow: these are the three transforms tested in addition to Experiment 019's two
+expressions, not a survey of every OTTL configuration, and Experiment 019's other
+options (conditional `where` multi-pass, other processors) remain untested.
+
+*Selected path.* Because typed attributes cannot survive the pinned exporter's
+fixed INSERT list, the experiment implements the smallest bounded owned
+component: `lighthouseexporter`, built into a small Collector distribution with
+`otelcol.NewCommand` (not a parallel runtime), reusing `exporterhelper` for queue,
+retry, timeout, and exporter telemetry, and owning only mapping, whole-request
+validation, and the two ordered inserts. Every other component in the
+distribution is stock at the pinned version.
+
+*Pins.* ClickHouse 26.8.2.7-lts (Nix-provided); `otelcol-contrib` v0.161.0 release
+tarball, SHA-256 `778c689efa681ff6e4722ce9f66b9b7f57c3ba009ab2e2b43dc2e0315862c731`;
+contrib modules v0.161.0 with the matching collector core module series v1.67.0
+(`exporterhelper` v0.161.0 requires `component`/`exporter`/`pdata` v1.67.0);
+`clickhouse-go/v2` v2.47.0; owned distribution `lighthouse-collector-021`
+v0.1.0-exp021. `results/build-manifest.txt` and `results/go-modules.txt` record
+the resolved graph of the committed build; no version assumptions are introduced
+beyond these.
+
+*Component finding.* With the driver's default read timeout (300 s), a destination
+that accepted an insert and never answered left the export blocked for more than
+31 s with no retry and no failure log: the exporter helper's timeout did not
+unblock the socket read within that window. Binding the ClickHouse client's read
+timeout to the configured export timeout made the same failure bounded and
+retryable (measured at 5 s in the ambiguous phase). That change is part of the
+component, not of the harness.
+
+== Environment
+
+Disposable sandbox (E2B orb): 2 vCPU, 3.8 GiB RAM, kernel 6.1.158+. ClickHouse
+26.8.2.7-lts ran as a supervised orb service with its own configuration and a
+loopback-only user profile; the Collector processes and two harness-only TCP
+injectors bound loopback ports. All state lived outside the repository under
+`/home/user/lh021`. No cloud resource, shared database, deployment, or repository
+benchmark data was used, and no sustained-ingestion or latency claim is made from
+this corpus.
+
+== Dataset and fixture
+
+The fixture is Experiment 021's own emitter over the imported Experiment 019
+typed inventory: 27 typed log records covering the semantic surface, 3 spans
+(including one with a scope namespace and one with missing timing), 4 identity
+records for two synthetic credentials, a duplicate-attribute-key record, a
+negative-duration span, and two authentication probes. Expectations come from the
+typed inventory and literals authored from it; the verifier never reads the
+component's mapping code. The two credentials bound statically to workspaces
+`1111...` and `2222...` each carry a forged workspace/dataset/marker attempt.
+
+== Method
+
+`./run.sh all` resets the disposable databases, then runs thirteen phases:
+`stock-probe` (source-verified stock write path and tested transforms),
+`semantics` (typed corpus, namespaces, forged attributes, mixed-workspace batch),
+`ack`, `outage`, `split`, `split-retry`, `canonical-permanent`, `queue-full`,
+`crash`, `ambiguous`, `retry-duplicate`, `no-trust`, and `files`. Each phase runs
+its own Collector configuration, records its exit status, and is verified by
+`verify.py`; `files` verifies the evidence set, the module pins, the repair
+results, and the stale-state preflight. The phases that assert exact row counts
+first prove the fixture labels had no pre-existing rows.
+
+== Commands
+
+[source,bash]
+----
+cd rfd/0001/experiments/021-hybrid-layout-collector-integration/harness
+./setup.sh
+amp orb service start clickhouse-021 --command "$PWD/start-clickhouse.sh"
+./run.sh all                      # exit 0 on the committed run; 3082 checks
+./run.sh split                    # single phase (per-phase runs are supported)
+./test-run-failure-modes.sh fast  # 12/12; no services needed
+./test-run-failure-modes.sh full  # 16/16; adds an injected verifier crash and a normal full run
+cd component && go test ./... && go vet ./... && gofmt -l .
+----
+
+== Results
+
+=== Semantics through the real path (2931 checks)
+
+34 fixture records (31 log rows, 3 span rows) landed with 34 canonical payloads;
+every canonical `payload_sha256` matched the stored payload, and canonical and
+serving rows shared one content-derived write identity per fixture
+(`results/identity-map.tsv`). Measured representation facts, all read back from
+ClickHouse rather than from the component:
+
+* Strict type separation: `record_int['int.one'] = 1`, `record_double['double.one']
+  = 1`, and `record_string['str.one'] = '1'` are three distinct entries;
+  `record_bool['bool.false']` is present and false, which is distinguishable from
+  a missing key only by map presence, as Experiments 019/020 recorded.
+* Extremes and carriage: `record_int['int.big'] = 9007199254740993` (above 2^53)
+  and `int.min = -9223372036854775808`; `record_double` stores `nan`, `inf`,
+  `-inf`, and negative zero, whose stored bit pattern is `0x8000000000000000`
+  (`toString` renders `-0`).
+* Presence versus empty: explicit empty, empty string, missing key, zero, and
+  false are separate cases in the typed corpus and in the `*_types` maps
+  (`empty` versus `string`).
+* Canonical-only types: bytes, array, and map values are marked in
+  `record_other`/`span_other` with their kind, and the canonical payload retains
+  the value and type (`{"t":"bytes","v":"AAH+/w=="}`,
+  `{"t":"array","v":[{"t":"string","v":"a"},...]}`); the canonical envelope also
+  preserves `nan`/`inf`/`-inf`, `-0.0`, and `empty` distinctly, so the serving
+  values are reconstructable from the payload for this fixture.
+* Namespaces: resource, scope, and record attributes stay separate; spans carry
+  `span_scope`/`span_scope_types` and no duplicate `scope` column; producer keys
+  that collide with reserved identity keys are dropped from the stored
+  resource/scope namespaces.
+* Trusted scope: forged `lighthouse.workspace_id`/`lighthouse.dataset` and a
+  forged `lighthouse.scope_source` marker in resource, scope, and record
+  attributes did not override the trusted workspace or dataset, and the trusted
+  values appear in the stored row and in the canonical identity.
+* One downstream export really carried the mixed batch:
+  `cross_workspace=true`, workspaces `[1111..., 2222...]`, and the four stored
+  event identities of `identity-ws-a`, `identity-ws-b`, `batch-a-1`, `batch-b-1`
+  in one logged batch, so the cross-workspace case is measured on batch contents,
+  not inferred from two requests sharing a queue.
+* Credential validation is real and in the custom distribution: a request with no
+  token and one with a wrong token received HTTP 401 and produced no rows.
+* A record with duplicate attribute keys and a span whose end precedes its start
+  were rejected whole (no canonical row, no serving row, recorded rejection
+  counters), and a span with missing timing stored a NULL duration instead of an
+  unsigned underflow.
+
+=== Failure, acknowledgement, and duplicate behavior
+
+* *Ack versus visibility* (`ack`): with the queue disabled the row was visible at
+  acknowledgement (131.88 ms); with the queue enabled the producer saw 200 in
+  5.87 ms while the row became visible only at 0.41 s. Both requests were
+  accepted, so OTLP success is queue admission, not storage confirmation.
+* *Transient outage* (`outage`): ClickHouse was stopped, the producer still
+  received 200, an insert failure was counted, and after restart the queued
+  request landed exactly once in both destinations with a shared identity.
+* *Permanent schema failure* (`canonical-permanent`): with the canonical
+  destination broken, the batch was attempted five times, no serving row was
+  written (the canonical insert is first), the component logged the schema error,
+  the helper dropped the batch after its retry budget, and the producer still saw
+  200 with no per-record rejection. Exporter validation and failures are not
+  producer-visible events on this path.
+* *Full queue* (`queue-full`): with a bounded queue and a stalled destination the
+  producer saw `200, 200, 503, 503, 503, 503`; the 503s are queue-admission
+  failures, admission happened before the queue filled, and the requests admitted
+  to the stalled queue were not written when the process was stopped.
+* *Crash with a file-backed queue* (`crash`): both requests were admitted, the
+  file-backed queue held `exporter_lighthouse__logs`/`__traces` on disk when the
+  process was SIGKILLed, and after restart the recovered batches drained into
+  both destinations exactly once with unchanged write identity.
+* *Ambiguous insert* (`ambiguous`): the destination committed the canonical
+  insert while the response was withheld from the client (`query_log` records a
+  finished canonical insert during the withheld window and the row is present);
+  the client failed with a timeout at 5 s, the helper retried, and the result was
+  two canonical rows with the same identity and payload hash and exactly one
+  serving row. Deduplication is unselected: the duplicate canonical row is the
+  measured cost of the ambiguous acknowledgement, not a deduplicated no-op.
+* *Producer retry* (`retry-duplicate`): the same request sent twice was accepted
+  twice, producing two serving rows and two canonical rows with one stored
+  identity and identical payloads.
+* *Fail-closed probe without the trusted scope* (`no-trust`): the trusted
+  database stayed untouched; in the untrusted probe pipeline a request without
+  the injected scope was rejected whole (record counter `missing_trusted_scope`,
+  batch counter `all_records_rejected`, no rows). A request that forges both the
+  workspace and the marker is indistinguishable from injected scope for this
+  component and landed one row in the *untrusted probe database only*; that is a
+  documented limitation of trusting a marker attribute, and it is why the gateway
+  phases are the authority for scope.
+
+=== Non-atomic split writes and the bounded repair
+
+The two destinations are separate inserts with no shared transaction, and the
+harness states that rather than hiding it:
+
+* `split`: canonical committed (1 row) and the serving destination failed
+  (`insert_failures{destination="serving"}=1`, `partial_write_batches=1`) with
+  retries disabled, leaving one canonical row and no serving row.
+* `split-retry`: with retries enabled, the same split write was attempted seven
+  times, producing seven canonical rows for one producer event and no serving
+  row; the canonical row count tracked the recorded serving attempts.
+* The bounded repair derives a *minimal* serving row from the retained canonical
+  payload (routing identity, timestamps, kind, payload checksum) and landed one
+  row per canonical row (1/1 and 7/7, recorded in
+  `results/split-*-repair-result.txt`). Rebuilding the full typed serving
+  representation from canonical data is not implemented as a service here; the
+  semantics phase verifies those reconstruction rules against the fixture
+  instead, and the RFD's reconstruction checklist item stays open.
+
+=== Stock-path probe (27 checks)
+
+The probe measured the pinned stock exporter against the same fixture in the same
+binary: stored log attributes are one string `Map`, there are no typed or payload
+columns, the fixed INSERT lists are present in the pinned module source, a stock
+transform can create typed int/double attributes and can guard a statement per
+key, `stringify_all` collapses int/double/string `1` into one string, and the
+per-key type-name expression fails configuration load.
+
+== Interpretation
+
+* The approved combined layout is writable through a real OTLP -> Collector path
+  by one small owned exporter that reuses `exporterhelper`; the stock processor
+  path cannot supply it because the pinned exporter's INSERT lists are fixed, not
+  because stock transformations cannot produce typed data.
+* The Experiment 019/020 representation surface survives that path for logs and
+  spans, including span scope and the canonical-only types, with the same
+  query-layer and mapping-layer obligations those experiments recorded. This is
+  representation conformance through the real component. It is not an
+  acceptance-contract pass and not a query-layer enforcement proof: the harness
+  checks are assertions over stored rows, and the query-layer rules (type
+  filtering, aggregate errors, integer overflow, union/type expressions for
+  unknown-key work) remain obligations on the future query path.
+* Canonical-first, non-atomic writes are chosen deliberately: a retried or
+  ambiguous write duplicates the canonical row while the serving row stays
+  single, and a serving failure leaves a canonical row without a serving row.
+  Both outcomes were measured, and both are recoverable from the retained
+  canonical payload. Exporter fan-out is not atomic and the harness does not
+  pretend otherwise.
+* Deduplication is unselected: identical producer retries and ambiguous-insert
+  retries duplicate rows, and the recorded write identity is content-derived and
+  stable, so a future dedup decision has a stable key to use.
+* The layout is provisional for this PoC trial and is not retained-scale
+  qualified: it inherits the 019/020 micro-evidence for the encodings and adds
+  real-path correctness and failure behavior, not storage, cost, or latency
+  qualification. No production latency claim is made from this corpus.
+
+== Not measured / open
+
+* Object-store failover, notification-driven catch-up, and object replay are
+  untouched here; Experiment 018's manual replay evidence stands and S3/SQS
+  notification validation remains open.
+* Dynamic key rotation/revocation, key-derived (as opposed to statically bound)
+  workspace resolution, dataset routing rejection for unknown datasets, and
+  broader authorization guarantees are out of scope; only two synthetic
+  credentials bound statically to two workspaces were exercised.
+* Node loss, multi-consumer queue behavior, sustained ingestion, and
+  cross-workspace isolation across a shared batch downstream of the write were
+  not tested (the mixed batch is measured as *contents*; whether any downstream
+  consumer keeps those rows isolated is a query-layer question).
+* OTLP partial success was not produced: the receiver does not validate records
+  individually and the component's rejections happen after queue admission, so no
+  producer-visible per-record rejection was claimed.
+* Rebuilding a full serving layout from canonical data, backup/restore, and
+  deduplication remain open decisions.
+
+== Follow-ups
+
+* Decide whether the owned exporter remains the acceptance-path component or
+  whether a narrower component (for example a mapping processor plus a stock
+  exporter that can be configured with additional columns) should be evaluated;
+  this experiment measured the write-path constraint, not the long-term
+  component boundary.
+* Decide the deduplication mechanism and whether canonical duplicates are
+  tolerated, aggregated, or removed, using the content-derived identity measured
+  here.
+* Decide whether the minimal-bookkeeping `record_other` kind map is acceptable
+  for canonical-only types once the query-layer rules for unsupported operations
+  are specified.
+* Schedule the failover/object-store catch-up and retained-scale checks in
+  link:../acceptance-and-replay-impl.adoc[the acceptance and replay plan] and
+  link:../experiments-impl.adoc[the experiment plan]; this slice does not
+  complete them.
