@@ -215,24 +215,60 @@ ClickHouse rather than from the component:
   measurement; the acknowledgement/visibility boundary is the result.)
 * *Whole-request validation before the first write* (`mixed-validation`): one
   request carrying a valid record followed by a duplicate-key record was
-  acknowledged (200) in 6.10 ms, with the valid row visible only after 3.06 s, and
-  it wrote the valid record to both destinations while excluding the invalid one.
-  The component's own
-  batch summary for that export recorded `records: 1, rejected: 1`, the rejection
-  was counted per record and not as an insert failure, and the batch-level
-  `all_records_rejected` counter stayed at `1` — the second request, which
-  contained only the invalid record, wrote nothing to either destination, was not
-  retried, and produced one permanent validation error in the log. The producer
-  saw 200 for both requests and never saw the rejection. The policy is *per-record
-  exclusion after whole-request validation*, not whole-batch rejection: only a
-  request with nothing surviving validation, or one missing its gateway-injected
-  scope, is rejected as a whole. Because `all_records_rejected` increments only
-  when no row survives, it cannot conceal a partial drop, and the batch summary
-  reports written and rejected counts for the same export. Inspection of the
-  mapping code also shows the remaining limitation of this counter set: for a
-  whole-batch invalidation (`missing_trusted_scope`) the reason is counted but the
-  number of otherwise-valid records dropped with it is not, so the batch counter,
-  not a per-record count, is the authority for that path.
+  acknowledged (200) in 6.10 ms, with the valid row visible only after 3.06 s
+  (queue enabled, batch window 4 records / 3 s). `pushLogs`
+  (`harness/component/lighthouseexporter/exporter.go`) validates and canonicalizes
+  the complete request first, then excludes the invalid record from both
+  destinations, writes the surviving record to canonical and then serving, and
+  returns `nil`; the producer-visible result is an ordinary successful export.
+  The only non-nil returns on this path are the two permanent errors (nothing
+  survived validation, or the request is missing its gateway-injected scope) and
+  the retryable insert failures. The excluded record is absent from *both*
+  destinations (`mixed.invalid_record_excluded` asserts no serving row and no
+  canonical row), the batch summary recorded `records: 1, rejected: 1`, the
+  rejection was counted per record and not as an insert failure, and the
+  batch-level `all_records_rejected` counter stayed at `1`.
+* *Drop after queue admission, and the whole-batch contrast* (`mixed-validation`,
+  `no-trust`): the invalid-only request (one record, nothing surviving validation)
+  was also acknowledged with 200, then produced one permanent error and one
+  "Exporting failed. Dropping data." line with `dropped_items: 1`; source
+  inspection of the pinned helper (`exporterhelper@v0.161.0/internal/retry_sender.go`
+  treats permanent errors as immediately non-retryable) and the absence of any
+  further attempt in the log/drop line show there was no retry. The drop happens
+  *after* queue admission: the receiver accepted the request and the producer
+  already had its 200, so this is neither a whole-request rejection at the OTLP
+  boundary nor an OTLP partial-success response (`response_body` is the normal
+  empty body, and no `partial success` field appears). The contrast is the
+  missing-scope path: `pushLogs` calls `batchInvalidated` and returns
+  `consumererror.NewPermanent(errMissingTrustedScope)` *before* any insert, so
+  that request is rejected as a whole. In `no-trust`, the mixed untrusted request
+  (one forged-scope group plus one group without scope) was acknowledged 200 in
+  5.91 ms and produced `dropped_items: 2` in a single drop line with no retry
+  attempt, writing nothing at all, with
+  `rejected_batches{missing_trusted_scope}=1` and
+  `rejected_records{missing_trusted_scope,resource}=2`. All three requests in that
+  phase were acknowledged 200 (6.22 ms, 10.36 ms, 5.91 ms), so this contrast is
+  also post-admission and never producer-visible.
+* *Counter conflation in the stock helper* (`mixed-validation`): the pinned
+  helper reads the item count before the send and credits every item to `sent`
+  when the export returns nil
+  (`exporterhelper@v0.161.0/internal/obs_report_sender.go`), so
+  `otelcol_exporter_sent_log_records{exporter="lighthouse"}=2` for the mixed
+  export even though only one row reached either destination; the component's own
+  `lighthouse_exporter_records{destination=canonical|serving}=1` counters are the
+  write-side authority, and the rejected-record/batch counters carry the drop.
+  Inspection of the mapping code also shows the remaining limitation of that
+  counter set: for a whole-batch invalidation (`missing_trusted_scope`) the reason
+  is counted but the number of otherwise-valid records dropped with it is not, so
+  the batch counter, not a per-record count, is the authority for that path.
+  Because `all_records_rejected` increments only when no row survives, it cannot
+  conceal a partial drop, and the batch summary reports written and rejected
+  counts for the same export.
+* *Accepted policy?* Whether per-record exclusion with a silent drop (after
+  admission, invisible to the producer) is the right product behavior for invalid
+  records is *not* decided by this experiment; it is recorded as measured
+  semantics and remains open. The mixed-validation phase ran only with the queue
+  enabled, so a queue-disabled variant is untested.
 * *Transient outage* (`outage`): ClickHouse was stopped, the producer still
   received 200, an insert failure was counted, and after restart the queued
   request landed exactly once in both destinations with a shared identity.
@@ -265,13 +301,18 @@ ClickHouse rather than from the component:
   records two finished serving inserts. Measured on this path, neither
   destination "stays single" when the retry happens.
 * *Producer retry and identical legitimate events* (`retry-duplicate`): the same
-  request sent twice was accepted twice, producing two serving rows and two
-  canonical rows with one stored identity and identical payloads. The twin
-  control — two legitimately distinct events whose wire content is byte-identical,
-  plus one retransmission of that request — stored four serving rows and four
-  canonical rows under a single content-derived identity. The identity therefore
-  cannot distinguish identical legitimate events from a retransmission, so it is
-  a fixture-correlation key and not a deduplication key; nothing was deduplicated.
+  single-record request sent twice was accepted twice, producing two serving rows
+  and two canonical rows with one stored identity and identical payloads. The twin
+  control sends a *two-record* request carrying the two legitimately distinct
+  events whose wire content is byte-identical, and sends that same two-record
+  request twice; the log shows two exports of `records: 2`, each listing the same
+  two event identities (`lh1-158ad6…` twice), so four records were stored: four
+  serving rows and four canonical rows under that single content-derived identity.
+  The identity therefore cannot distinguish identical legitimate events from a
+  retransmission, so it is a fixture-correlation key and not a deduplication key;
+  nothing was deduplicated (the two legitimate records are themselves
+  byte-identical, so even the "duplicate" count cannot separate them from a
+  resend of one record).
 * *Fail-closed probe without the trusted scope* (`no-trust`): the trusted
   database stayed untouched; in the untrusted probe pipeline a request without
   the injected scope was rejected whole (record counter `missing_trusted_scope`,
@@ -326,6 +367,16 @@ per-key type-name expression fails configuration load.
   checks are assertions over stored rows, and the query-layer rules (type
   filtering, aggregate errors, integer overflow, union/type expressions for
   unknown-key work) remain obligations on the future query path.
+* Validation is a post-admission, exporter-side policy: the receiver admits the
+  request, the exporter validates and canonicalizes the whole request before its
+  first write, excludes invalid records per record (they are absent from both
+  destinations), writes the survivors, and returns success — so a clean producer
+  acknowledgement does not mean every record in the request was stored, and the
+  drop is not visible as an OTLP partial-success response. Only a request with
+  nothing surviving validation, or one missing its trusted scope, is rejected as a
+  whole with a permanent (non-retryable) error. Whether silent per-record
+  exclusion is the right product behavior is not decided here; the measured
+  semantics are recorded and the policy decision stays open.
 * Canonical-first, non-atomic writes are chosen deliberately, and the measured
   duplicate shape is injection-specific: producer retry and serving-response-loss
   duplicate both destinations (2/2), while canonical-response-loss duplicates the
@@ -376,7 +427,9 @@ per-key type-name expression fails configuration load.
   individually and the component's rejections happen after queue admission, so no
   producer-visible per-record rejection was claimed. What the mixed-validation
   phase measures is the component's own policy and counters, not what the
-  producer can observe.
+  producer can observe, and that phase ran with the queue enabled only (a
+  queue-disabled variant is untested). Whether a silent, post-admission drop of
+  invalid records is acceptable product behavior remains an open decision.
 * The content-derived write identity is not a deduplication key (identical
   legitimate events share it with retransmissions) and no deduplication mechanism
   was selected or implemented.
@@ -398,6 +451,12 @@ per-key type-name expression fails configuration load.
   correlates fixture rows but cannot separate two legitimate identical events from
   a retransmission, so the decision needs an identity/deduplication design rather
   than only a duplicate-tolerance policy.
+* Decide the product semantics of invalid records: this slice measures silent
+  per-record exclusion after queue admission (invalid records absent from both
+  destinations, producer still acknowledged), with whole-request rejection limited
+  to nothing-surviving and missing-trusted-scope batches. Whether records should
+  instead be rejected before admission or surfaced through OTLP partial success
+  was not decided and was not tested with the queue disabled.
 * Decide whether the minimal-bookkeeping `record_other` kind map is acceptable
   for canonical-only types once the query-layer rules for unsupported operations
   are specified.

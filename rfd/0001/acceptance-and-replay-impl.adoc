@@ -122,12 +122,14 @@ disk and drained both destinations exactly once after restart with unchanged
 identity. Because the component validates and canonicalizes the whole export
 request before its first insert, a valid record followed by an invalid one in
 the same request cannot half-write: the valid record was written to both
-destinations and the invalid record was excluded per record (the batch summary
-reported `records: 1, rejected: 1`). The policy is per-record exclusion, not
-whole-batch rejection: only a request with nothing surviving validation, or one
-missing its gateway-injected trusted scope, is rejected as a whole. Per-record
-rejection after queue admission is still not producer visible. Node loss and
-multi-consumer queues remain open. See
+destinations, the invalid record is absent from both destinations, and `pushLogs`
+returns success (the batch summary reported `records: 1, rejected: 1`). The policy
+is per-record exclusion after queue admission, not whole-batch rejection and not
+OTLP partial success: only a request with nothing surviving validation, or one
+missing its gateway-injected trusted scope, is rejected as a whole (permanent,
+non-retryable), and the producer still sees 200 either way. A queue-disabled
+variant of that phase was not run. Node loss and multi-consumer queues remain
+open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Exercise OTLP partial success, permanent/retryable errors, full queues, retry expiry, and simultaneous destination failure; verify rejection/drop counters and producer-visible behavior rather than assuming all-or-nothing acceptance.
@@ -169,10 +171,10 @@ both inserts and produced two canonical rows and two serving rows sharing one
 identity and one payload hash (`query_log` shows two finished serving inserts),
 so the serving destination does duplicate on retry as well. A producer retry of
 an identical request produced two serving rows and two canonical rows with one
-stored identity, and the twin control (two legitimate events with byte-identical
-wire content plus a retransmission) stored four rows under a single
-content-derived identity: that identity correlates fixture rows but cannot
-separate identical legitimate events from a retransmission and is not a
+stored identity, and the twin control (a two-record request carrying two
+legitimate events with byte-identical wire content, sent twice) stored four rows
+under a single content-derived identity: that identity correlates fixture rows but
+cannot separate identical legitimate events from a retransmission and is not a
 deduplication key. Deduplication is unselected, so these duplicates are measured
 rather than suppressed; repeated object notifications and derived results remain
 open. See
@@ -215,7 +217,9 @@ a request whose rejection invalidates it (missing trusted scope) is counted unde
 that reason instead, and the component's batch summary reports the written and
 rejected records of the same export. The remaining gap is explicit: a whole-batch
 invalidation counts its reason but not the number of otherwise-valid records
-dropped with it. Overflow backlog and catch-up progress signals remain
+dropped with it, and the stock helper's `sent` counter credits records as
+received rather than rows written, so the component counters are the write-side
+authority. Overflow backlog and catch-up progress signals remain
 unimplemented in this slice. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
