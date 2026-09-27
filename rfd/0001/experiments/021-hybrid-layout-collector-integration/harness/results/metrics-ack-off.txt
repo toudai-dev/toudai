@@ -13,22 +13,22 @@ otelcol_exporter_in_flight_requests{data_type="logs",exporter="lighthouse"} 0
 otelcol_exporter_sent_log_records{exporter="lighthouse"} 1
 # HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
 # TYPE otelcol_process_cpu_seconds counter
-otelcol_process_cpu_seconds 0.06
+otelcol_process_cpu_seconds 0.05
 # HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
 # TYPE otelcol_process_memory_rss gauge
-otelcol_process_memory_rss 4.4822528e+07
+otelcol_process_memory_rss 4.3405312e+07
 # HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
 # TYPE otelcol_process_runtime_heap_alloc_bytes gauge
-otelcol_process_runtime_heap_alloc_bytes 3.6674e+06
+otelcol_process_runtime_heap_alloc_bytes 3.661976e+06
 # HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
 # TYPE otelcol_process_runtime_total_alloc_bytes counter
-otelcol_process_runtime_total_alloc_bytes 1.0861616e+07
+otelcol_process_runtime_total_alloc_bytes 1.0857464e+07
 # HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
 # TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
-otelcol_process_runtime_total_sys_memory_bytes 1.8454792e+07
+otelcol_process_runtime_total_sys_memory_bytes 1.3998344e+07
 # HELP otelcol_process_uptime Uptime of the process [Alpha]
 # TYPE otelcol_process_uptime counter
-otelcol_process_uptime 1.877118089
+otelcol_process_uptime 1.748190433
 # HELP otelcol_processor_incoming_items Number of items passed to the processor. [Alpha]
 # TYPE otelcol_processor_incoming_items counter
 otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-a"} 1
@@ -50,4 +50,4 @@ promhttp_metric_handler_errors_total{cause="encoding"} 0
 promhttp_metric_handler_errors_total{cause="gathering"} 0
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_instance_id="728c62b2-0f63-4d12-88e9-b1e93881409c",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1
+target_info{service_instance_id="9dd2b2a8-5b94-4f43-8157-e6088f5d1998",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1

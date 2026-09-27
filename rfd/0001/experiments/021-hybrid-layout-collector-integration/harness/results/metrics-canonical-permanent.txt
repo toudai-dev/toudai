@@ -1,9 +1,9 @@
 # HELP lighthouse_exporter_batches Exported batches, by signal and whether the batch carried more than one workspace.
 # TYPE lighthouse_exporter_batches counter
-lighthouse_exporter_batches{cross_workspace="false",signal="logs"} 6
+lighthouse_exporter_batches{cross_workspace="false",signal="logs"} 5
 # HELP lighthouse_exporter_insert_failures Failed inserts, by signal and destination.
 # TYPE lighthouse_exporter_insert_failures counter
-lighthouse_exporter_insert_failures{destination="canonical",signal="logs"} 6
+lighthouse_exporter_insert_failures{destination="canonical",signal="logs"} 5
 # HELP otelcol_exporter_in_flight_requests Number of export requests currently in-flight (including retry backoff). [Development]
 # TYPE otelcol_exporter_in_flight_requests gauge
 otelcol_exporter_in_flight_requests{data_type="logs",exporter="lighthouse"} 0
@@ -23,22 +23,22 @@ otelcol_exporter_send_failed_log_records{exporter="lighthouse"} 1
 otelcol_exporter_sent_log_records{exporter="lighthouse"} 0
 # HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
 # TYPE otelcol_process_cpu_seconds counter
-otelcol_process_cpu_seconds 0.08
+otelcol_process_cpu_seconds 0.1
 # HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
 # TYPE otelcol_process_memory_rss gauge
-otelcol_process_memory_rss 4.3134976e+07
+otelcol_process_memory_rss 4.4326912e+07
 # HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
 # TYPE otelcol_process_runtime_heap_alloc_bytes gauge
-otelcol_process_runtime_heap_alloc_bytes 4.688496e+06
+otelcol_process_runtime_heap_alloc_bytes 4.472488e+06
 # HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
 # TYPE otelcol_process_runtime_total_alloc_bytes counter
-otelcol_process_runtime_total_alloc_bytes 1.2105136e+07
+otelcol_process_runtime_total_alloc_bytes 1.1908672e+07
 # HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
 # TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
-otelcol_process_runtime_total_sys_memory_bytes 1.4260488e+07
+otelcol_process_runtime_total_sys_memory_bytes 1.8262296e+07
 # HELP otelcol_process_uptime Uptime of the process [Alpha]
 # TYPE otelcol_process_uptime counter
-otelcol_process_uptime 6.106494371
+otelcol_process_uptime 5.98151311
 # HELP otelcol_processor_incoming_items Number of items passed to the processor. [Alpha]
 # TYPE otelcol_processor_incoming_items counter
 otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-a"} 1
@@ -60,4 +60,4 @@ promhttp_metric_handler_errors_total{cause="encoding"} 0
 promhttp_metric_handler_errors_total{cause="gathering"} 0
 # HELP target_info Target metadata
 # TYPE target_info gauge
-target_info{service_instance_id="54048eb5-be7d-4507-80be-5dc0fd05afe2",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1
+target_info{service_instance_id="f12cadaa-0a93-47a2-a00e-104b6712ffd2",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1

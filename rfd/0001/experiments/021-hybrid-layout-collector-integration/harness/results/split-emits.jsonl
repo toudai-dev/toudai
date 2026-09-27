@@ -1,1 +1,1 @@
-{"signal":"logs","label":"fault-split","description":"fault-split logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":10.84,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T08:25:02.031242+00:00"}
+{"signal":"logs","label":"fault-split","description":"fault-split logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.66,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T08:39:18.061752+00:00"}

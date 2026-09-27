@@ -2586,7 +2586,7 @@
 {"phase": "semantics", "check": "canon.span-missing-time.0.identity_binding", "ok": true, "detail": "the canonical payload identity must match the stored row identity"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.workspace", "ok": true, "detail": "fixture='11111111-1111-4111-8111-111111111111' canonical-reconstruction='11111111-1111-4111-8111-111111111111'"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.dataset", "ok": true, "detail": "fixture='fixture' canonical-reconstruction='fixture'"}
-{"phase": "semantics", "check": "canon.span-missing-time.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'yes'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'yes'}, 'other': {}}"}
+{"phase": "semantics", "check": "canon.span-missing-time.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'both'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'both'}, 'other': {}}"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.ts_ns", "ok": true, "detail": "fixture=0 canonical-reconstruction=0"}
@@ -2599,60 +2599,238 @@
 {"phase": "semantics", "check": "canon.span-missing-time.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.duration_ns", "ok": true, "detail": "fixture=None canonical-reconstruction=None"}
 {"phase": "semantics", "check": "canon.span-missing-time.0.timing_status", "ok": true, "detail": "fixture='missing' canonical-reconstruction='missing'"}
-{"phase": "semantics", "check": "xdest.span-missing-time.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=b10e0153b62039228267950b8f6161ebb54e188299dc9627e7fe500262717091 matches no canonical row"}
+{"phase": "semantics", "check": "xdest.span-missing-time.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=b77e279ee185b9094b229f279e93fb1f3d2fba8110d6a349beee066f9addfc5b matches no canonical row"}
 {"phase": "semantics", "check": "xdest.span-missing-time.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
 {"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.dataset", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.ts", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.service_name", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_int.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_double.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_bool.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_string.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_string.span_missing", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_other.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.service_name", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.service_version", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_int64", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_bool", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_float", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_str_one", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_bytes", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_array", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_map", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_empty", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_empty_string", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.res_collide", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.Foo", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.foo", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource.lighthouse_dataset", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.service_name", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.service_version", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_int64", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_bool", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_float", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_str_one", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_bytes", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_array", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_map", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_empty", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_empty_string", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.res_collide", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.Foo", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.foo", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope.scope_attr", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope.scope_int", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope.scope_empty", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope_types.count", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope_types.scope_attr", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope_types.scope_int", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.stored.lh1-891b0e1bc260d0b7ab4d7a258674432c.span_scope_types.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_int.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_double.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_bool.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_string.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_string.span_missing", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_other.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope_types.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope_types.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-17507413446af76807165bf86666d146.span_scope_types.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.status_code", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.parent_span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.duration_null", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "query.span-missing-start.serving_present", "ok": true, "detail": "expected exactly one serving span for span-missing-start, got 1"}
+{"phase": "semantics", "check": "query.span-missing-start.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
+{"phase": "semantics", "check": "query.span-missing-start.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.sha256_matches_payload", "ok": true, "detail": "payload_sha256 must be the sha256 of the stored payload"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.schema_version", "ok": true, "detail": "lighthouse.canonical.event/1"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.signal", "ok": true, "detail": "spans"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.workspace", "ok": true, "detail": "expected 11111111-1111-4111-8111-111111111111, got 11111111-1111-4111-8111-111111111111"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.dataset", "ok": true, "detail": "fixture"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.event_id_links_selected", "ok": true, "detail": "the canonical row must carry the resolved stored write identity"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.identity_binding", "ok": true, "detail": "the canonical payload identity must match the stored row identity"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.workspace", "ok": true, "detail": "fixture='11111111-1111-4111-8111-111111111111' canonical-reconstruction='11111111-1111-4111-8111-111111111111'"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.dataset", "ok": true, "detail": "fixture='fixture' canonical-reconstruction='fixture'"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'start'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'start'}, 'other': {}}"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.ts_ns", "ok": true, "detail": "fixture=0 canonical-reconstruction=0"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.end_ns", "ok": true, "detail": "fixture=1788246000123457489 canonical-reconstruction=1788246000123457489"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.span_name", "ok": true, "detail": "fixture='span/missing-start' canonical-reconstruction='span/missing-start'"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.span_kind", "ok": true, "detail": "fixture='Server' canonical-reconstruction='Server'"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.duration_ns", "ok": true, "detail": "fixture=None canonical-reconstruction=None"}
+{"phase": "semantics", "check": "canon.span-missing-start.0.timing_status", "ok": true, "detail": "fixture='missing' canonical-reconstruction='missing'"}
+{"phase": "semantics", "check": "xdest.span-missing-start.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=adb16dd5045e8f39f7810db1fe33b34f906c94ac88a3e5597ffee4cfdeef8276 matches no canonical row"}
+{"phase": "semantics", "check": "xdest.span-missing-start.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
+{"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_int.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_double.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_bool.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_string.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_string.span_missing", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_other.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope_types.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope_types.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-23c1a56706f7e5c643704de8dec84436.span_scope_types.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.status_code", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.parent_span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.trace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.span_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.kind", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.end_ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.timing_status", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.duration_null", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "query.span-missing-end.serving_present", "ok": true, "detail": "expected exactly one serving span for span-missing-end, got 1"}
+{"phase": "semantics", "check": "query.span-missing-end.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
+{"phase": "semantics", "check": "query.span-missing-end.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.sha256_matches_payload", "ok": true, "detail": "payload_sha256 must be the sha256 of the stored payload"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.schema_version", "ok": true, "detail": "lighthouse.canonical.event/1"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.signal", "ok": true, "detail": "spans"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.workspace", "ok": true, "detail": "expected 11111111-1111-4111-8111-111111111111, got 11111111-1111-4111-8111-111111111111"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.dataset", "ok": true, "detail": "fixture"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.event_id_links_selected", "ok": true, "detail": "the canonical row must carry the resolved stored write identity"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.identity_binding", "ok": true, "detail": "the canonical payload identity must match the stored row identity"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.workspace", "ok": true, "detail": "fixture='11111111-1111-4111-8111-111111111111' canonical-reconstruction='11111111-1111-4111-8111-111111111111'"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.dataset", "ok": true, "detail": "fixture='fixture' canonical-reconstruction='fixture'"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.record", "ok": true, "detail": "fixture={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'end'}, 'other': {}} canonical-reconstruction={'int': {}, 'double': {}, 'bool': {}, 'string': {'span.missing': 'end'}, 'other': {}}"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.resource", "ok": true, "detail": "fixture={'service.name': 'fixture-log-service', 'service.version': '1.0.0', 'res.int64': '9007199254740993', 'res.bool': 'true', 'res.float': '1', 'res.str_one': '1', 'res.bytes': 'AAH+/w==', 'res.array': '[\"a\",1,true]', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.empty': '', 'res.empty_string': '', 'res.collide': 'resource-value', 'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'lighthouse.dataset': 'fixture'} canonical-reconstruction={'Foo': 'resource-upper', 'foo': 'resource-lower', 'lighthouse.dataset': 'fixture', 'lighthouse.workspace_id': '11111111-1111-4111-8111-111111111111', 'res.array': '[\"a\",1,true]', 'res.bool': 'true', 'res.bytes': 'AAH+/w==', 'res.collide': 'resource-value', 'res.empty': '', 'res.empty_string': '', 'res.float': '1', 'res.int64': '9007199254740993', 'res.map': '{\"nested.bool\":false,\"nested.int\":2}', 'res.str_one': '1', 'service.name': 'fixture-log-service', 'service.version': '1.0.0'}"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.resource_types", "ok": true, "detail": "fixture={'service.name': 'string', 'service.version': 'string', 'res.int64': 'int', 'res.bool': 'bool', 'res.float': 'double', 'res.str_one': 'string', 'res.bytes': 'bytes', 'res.array': 'array', 'res.map': 'map', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.collide': 'string', 'Foo': 'string', 'foo': 'string', 'lighthouse.workspace_id': 'string', 'lighthouse.dataset': 'string'} canonical-reconstruction={'Foo': 'string', 'foo': 'string', 'lighthouse.dataset': 'string', 'lighthouse.workspace_id': 'string', 'res.array': 'array', 'res.bool': 'bool', 'res.bytes': 'bytes', 'res.collide': 'string', 'res.empty': 'empty', 'res.empty_string': 'string', 'res.float': 'double', 'res.int64': 'int', 'res.map': 'map', 'res.str_one': 'string', 'service.name': 'string', 'service.version': 'string'}"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.ts_ns", "ok": true, "detail": "fixture=1788246000123456789 canonical-reconstruction=1788246000123456789"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.end_ns", "ok": true, "detail": "fixture=0 canonical-reconstruction=0"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.span_scope", "ok": true, "detail": "fixture={'scope.attr': 'scope-value', 'scope.int': '7', 'scope.empty': ''} canonical-reconstruction={'scope.attr': 'scope-value', 'scope.empty': '', 'scope.int': '7'}"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.span_scope_types", "ok": true, "detail": "fixture={'scope.attr': 'string', 'scope.int': 'int', 'scope.empty': 'empty'} canonical-reconstruction={'scope.attr': 'string', 'scope.empty': 'empty', 'scope.int': 'int'}"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.span_name", "ok": true, "detail": "fixture='span/missing-end' canonical-reconstruction='span/missing-end'"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.span_kind", "ok": true, "detail": "fixture='Server' canonical-reconstruction='Server'"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.status_code", "ok": true, "detail": "fixture=1 canonical-reconstruction=1"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.parent_span_id", "ok": true, "detail": "fixture='00f067aa0ba90200' canonical-reconstruction='00f067aa0ba90200'"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.duration_ns", "ok": true, "detail": "fixture=None canonical-reconstruction=None"}
+{"phase": "semantics", "check": "canon.span-missing-end.0.timing_status", "ok": true, "detail": "fixture='missing' canonical-reconstruction='missing'"}
+{"phase": "semantics", "check": "xdest.span-missing-end.payload_sha256_links_canonical", "ok": true, "detail": "serving payload_sha256=0d87e384cb2e973b0bdd71f07f54e884fdbcc08e0219261b479ce92532b40c0c matches no canonical row"}
+{"phase": "semantics", "check": "xdest.span-missing-end.serving_identity", "ok": true, "detail": "serving row identity 11111111-1111-4111-8111-111111111111/fixture"}
+{"phase": "semantics", "check": "rep.row.workspace", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.ts", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.row.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_int.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_double.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_bool.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_string.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_string.span_missing", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_other.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.service_name", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.service_version", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_int64", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_bool", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_float", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_str_one", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_bytes", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_array", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_map", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_empty_string", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.res_collide", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.Foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.foo", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.lighthouse_workspace_id", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.resource_types.lighthouse_dataset", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope.scope_empty", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope_types.count", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope_types.scope_attr", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope_types.scope_int", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.stored.lh1-0d7329742d4c4483336b2984d32ed6e2.span_scope_types.scope_empty", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.span_name", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.span_kind", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.row.status_code", "ok": true, "detail": ""}
@@ -2935,25 +3113,40 @@
 {"phase": "semantics", "check": "rep.span.span_scope_int_projected", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.span_scope_not_record", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "query.span-missing-time.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-missing-time via body/span name in lh021, got 1"}
+{"phase": "semantics", "check": "query.span-missing-start.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-missing-start via body/span name in lh021, got 1"}
+{"phase": "semantics", "check": "query.span-missing-end.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-missing-end via body/span name in lh021, got 1"}
 {"phase": "semantics", "check": "query.span-negative.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-negative via body/span name in lh021, got 1"}
 {"phase": "semantics", "check": "query.span-zero.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity span-zero via body/span name in lh021, got 1"}
 {"phase": "semantics", "check": "rep.span.missing_timing_status", "ok": true, "detail": "missing-timing status = 'missing'"}
+{"phase": "semantics", "check": "rep.span.missing_start_status", "ok": true, "detail": "missing-start status = 'missing'"}
+{"phase": "semantics", "check": "rep.span.missing_end_status", "ok": true, "detail": "missing-end status = 'missing'"}
 {"phase": "semantics", "check": "rep.span.reversed_timing_status", "ok": true, "detail": "reversed-timing status = 'end_before_start'"}
 {"phase": "semantics", "check": "rep.span.zero_timing_status", "ok": true, "detail": "zero-duration status = 'ok'"}
-{"phase": "semantics", "check": "rep.span.timing_statuses_distinct", "ok": true, "detail": "timing diagnostics are not distinct: {'missing_status': 'missing', 'reversed_status': 'end_before_start', 'zero_status': 'ok'}"}
+{"phase": "semantics", "check": "rep.span.timing_statuses_distinct", "ok": true, "detail": "timing diagnostics are not distinct: {'missing_status': 'missing', 'missing_start_status': 'missing', 'missing_end_status': 'missing', 'reversed_status': 'end_before_start', 'zero_status': 'ok'}"}
+{"phase": "semantics", "check": "rep.span.missing_start_not_epoch_duration", "ok": true, "detail": "missing-start status = 'missing', reversed = 'end_before_start'"}
+{"phase": "semantics", "check": "rep.span.missing_end_not_reversed", "ok": true, "detail": "missing-end status = 'missing', reversed = 'end_before_start'"}
 {"phase": "semantics", "check": "rep.span.missing_timing_is_null_not_underflow", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.missing_timing_keeps_zero_start", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.missing_timing_keeps_zero_end", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.missing_timing_diagnostic", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_start_duration_unavailable", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_start_keeps_raw_start", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_start_keeps_raw_end", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_start_diagnostic", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_end_duration_unavailable", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_end_keeps_raw_end", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_end_keeps_raw_start", "ok": true, "detail": ""}
+{"phase": "semantics", "check": "rep.span.missing_end_diagnostic", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.reversed_duration_unavailable", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.reversed_keeps_original_timestamps", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.reversed_span_preserved", "ok": true, "detail": ""}
 {"phase": "semantics", "check": "rep.span.reversed_diagnostic", "ok": true, "detail": ""}
-{"phase": "semantics", "check": "rep.span.aggregate_total", "ok": true, "detail": "fixture has 7 spans, stored total = 7"}
+{"phase": "semantics", "check": "rep.span.aggregate_total", "ok": true, "detail": "fixture has 9 spans, stored total = 9"}
+{"phase": "semantics", "check": "rep.span.aggregate_denominator_spans_only", "ok": true, "detail": "denominator = 9 serving_spans rows for workspace 11111111-1111-4111-8111-111111111111 / dataset fixture; the 29 log rows for the same workspace are in serving_logs and are not counted in a span count"}
 {"phase": "semantics", "check": "rep.span.aggregate_contributing", "ok": true, "detail": "fixture expects 4 contributing spans, stored = 4"}
-{"phase": "semantics", "check": "rep.span.aggregate_excluded", "ok": true, "detail": "fixture expects 3 excluded spans, stored = 3"}
+{"phase": "semantics", "check": "rep.span.aggregate_excluded", "ok": true, "detail": "fixture expects 5 excluded spans, stored = 5"}
 {"phase": "semantics", "check": "rep.span.aggregate_errors", "ok": true, "detail": "fixture expects 2 reversed-timing spans, stored = 2"}
-{"phase": "semantics", "check": "rep.span.aggregate_missing", "ok": true, "detail": "fixture expects 1 missing-timing spans, stored = 1"}
+{"phase": "semantics", "check": "rep.span.aggregate_missing", "ok": true, "detail": "fixture expects 3 missing-timing spans, stored = 3"}
 {"phase": "semantics", "check": "rep.span.aggregate_distinct_statuses", "ok": true, "detail": "stored distinct statuses = 3"}
 {"phase": "semantics", "check": "query.identity-ws-a.serving_present", "ok": true, "detail": "expected exactly one serving row for identity-ws-a, got 1"}
 {"phase": "semantics", "check": "query.identity-ws-a.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}

@@ -1,2 +1,2 @@
-repaired_minimal_serving_rows	8
-canonical_rows	8
+repaired_minimal_serving_rows	7
+canonical_rows	7

@@ -4,7 +4,7 @@
 {"phase": "mixed-validation", "check": "mixed.per_record_rejection_counted", "ok": true, "detail": "one rejected record from the mixed request plus one from the all-invalid request"}
 {"phase": "mixed-validation", "check": "mixed.only_all_invalid_batch_rejected_whole", "ok": true, "detail": "only the batch with nothing surviving validation may be rejected as a whole; the mixed batch wrote its surviving record instead"}
 {"phase": "mixed-validation", "check": "mixed.rejection_is_not_an_insert_failure", "ok": true, "detail": "per-record rejection must not be classified as an insert failure or retry"}
-{"phase": "mixed-validation", "check": "mixed.ack_precedes_visibility", "ok": true, "detail": "queue-enabled mixed request: visible_at_ack=False (ack 9.19 ms, visible after 3.01 s)"}
+{"phase": "mixed-validation", "check": "mixed.ack_precedes_visibility", "ok": true, "detail": "queue-enabled mixed request: visible_at_ack=False (ack 5.97 ms, visible after 2.94 s)"}
 {"phase": "mixed-validation", "check": "mixed.rejection_not_producer_visible", "ok": true, "detail": "the producer response must not report the per-record rejection"}
 {"phase": "mixed-validation", "check": "mixed.all_invalid_producer_ack", "ok": true, "detail": "the all-invalid request is acknowledged like any other (rejection is not producer visible)"}
 {"phase": "mixed-validation", "check": "mixed.all_invalid_writes_nothing", "ok": true, "detail": "a batch with nothing surviving validation must write to neither destination"}

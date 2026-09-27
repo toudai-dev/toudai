@@ -1,7 +1,7 @@
 experiment: 021-hybrid-layout-collector-integration
-generated: 2026-09-27T08:24:09Z
+generated: 2026-09-27T08:38:27Z
 collector: lighthouse-collector-021 version 0.1.0-exp021
-collector_bin_sha256: 12acde0b62a1de0710210370463f6b4d438704893438d8e36f78781c36639bd8
+collector_bin_sha256: f7b7e5387e417761857250a83c3d89ecccc5e3d33643eed71696fff43422c668
 collector_source_pin: otelcol-contrib v0.161.0 (release tarball, see setup.sh)
 collector_build_inputs: 778c689efa681ff6e4722ce9f66b9b7f57c3ba009ab2e2b43dc2e0315862c731  /home/user/lh021/bin/otelcol-contrib.tar.gz
 go: go version go1.26.8 linux/amd64

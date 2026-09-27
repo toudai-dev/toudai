@@ -1,2 +1,2 @@
-{"signal":"logs","label":"fault-crash-1","description":"fault-crash-1 logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":11.26,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T08:25:53.538943+00:00"}
-{"signal":"logs","label":"fault-crash-2","description":"fault-crash-2 logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":10.26,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T08:25:54.903185+00:00"}
+{"signal":"logs","label":"fault-crash-1","description":"fault-crash-1 logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.56,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T08:40:08.161858+00:00"}
+{"signal":"logs","label":"fault-crash-2","description":"fault-crash-2 logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.17,"response_body":"\n","request_bytes":635,"sent_at":"2026-09-27T08:40:09.417340+00:00"}

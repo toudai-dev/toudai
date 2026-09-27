@@ -5,6 +5,6 @@
 {"phase": "outage", "check": "fail.outage.no_duplicates", "ok": true, "detail": "recovery duplicated rows"}
 {"phase": "outage", "check": "fail.outage.destinations_share_identity", "ok": true, "detail": "the recovered canonical and serving rows must share one write identity"}
 {"phase": "outage", "check": "fail.outage.destination_was_down", "ok": true, "detail": "no evidence file recorded the destination outage window"}
-{"phase": "outage", "check": "fail.outage.down_window_measured", "ok": true, "detail": "unexpected outage evidence: destination outage window: 2026-09-27T08:24:48Z\ncurl: (7) Failed to connect to 127.0.0.1 port 18224 after 0 ms: Couldn't connect to server\nclickhouse endpoint refused while stopped\n"}
+{"phase": "outage", "check": "fail.outage.down_window_measured", "ok": true, "detail": "unexpected outage evidence: destination outage window: 2026-09-27T08:39:04Z\ncurl: (7) Failed to connect to 127.0.0.1 port 18224 after 0 ms: Couldn't connect to server\nclickhouse endpoint refused while stopped\n"}
 {"phase": "outage", "check": "comp.insert_failure_recorded_during_outage", "ok": true, "detail": "no insert failure recorded during the outage"}
 {"phase": "outage", "check": "files.outage.log", "ok": true, "detail": "collector-outage.log missing"}

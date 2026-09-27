@@ -29,7 +29,9 @@ no-service-name	lh1-46d5ff848117a2506f0f823a81104bc3	log
 span-1	lh1-40e9d8de56309b05b087ac677b974732	span
 span-scope	lh1-504fb5706a43784fbc31c29263a45dd4	span
 span-negative	lh1-b189e3517b315812131a9e7224505f3e	span
-span-missing-time	lh1-891b0e1bc260d0b7ab4d7a258674432c	span
+span-missing-time	lh1-17507413446af76807165bf86666d146	span
+span-missing-start	lh1-23c1a56706f7e5c643704de8dec84436	span
+span-missing-end	lh1-0d7329742d4c4483336b2984d32ed6e2	span
 span-zero	lh1-a9e2ac513b9cb228d9866e646c17d271	span
 timing-mixed-valid	lh1-2a6344e5d85fe269d729979dcb2d9360	span
 timing-mixed-reversed	lh1-b87650b112f4bd311afd959bfa734dbd	span

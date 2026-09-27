@@ -25,8 +25,8 @@
 {"phase": "files", "check": "meta.build_manifest_pins_clickhouse", "ok": true, "detail": "build manifest does not record the ClickHouse pin"}
 {"phase": "files", "check": "meta.phase_preflight_recorded", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/phase-preflight.tsv missing or empty"}
 {"phase": "files", "check": "meta.no_stale_fixture_state_before_phases", "ok": true, "detail": "phases started with pre-existing fixture rows: []"}
-{"phase": "files", "check": "files.span_timing_snapshot_rows", "ok": true, "detail": "snapshot has 7 rows, fixture has 7 spans"}
-{"phase": "files", "check": "files.span_timing_snapshot_statuses", "ok": true, "detail": "snapshot statuses = ['end_before_start', 'end_before_start', 'missing', 'ok', 'ok', 'ok', 'ok']"}
+{"phase": "files", "check": "files.span_timing_snapshot_rows", "ok": true, "detail": "snapshot has 9 rows, fixture has 9 spans"}
+{"phase": "files", "check": "files.span_timing_snapshot_statuses", "ok": true, "detail": "snapshot statuses = ['end_before_start', 'end_before_start', 'missing', 'missing', 'missing', 'ok', 'ok', 'ok', 'ok']"}
 {"phase": "files", "check": "files.span_timing_snapshot_durations", "ok": true, "detail": "a stored duration must be present exactly when the timing is observable"}
 {"phase": "files", "check": "files.span_timing_snapshot_reversed_timestamps", "ok": true, "detail": "a reversed span must keep its original end < start timestamps"}
 {"phase": "files", "check": "files.ambiguous_serving_injection_targeted", "ok": true, "detail": "the serving-response-loss injection must be targeted at the serving insert"}
@@ -37,4 +37,4 @@
 {"phase": "files", "check": "files.split-retry.repair_sql", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/split-retry-repair.sql missing or without a repair statement"}
 {"phase": "files", "check": "fail.split-retry.repair_derives_identity_from_canonical", "ok": true, "detail": "the recorded repair must derive the serving identity from the canonical payload"}
 {"phase": "files", "check": "files.split-retry.repair_result", "ok": true, "detail": "/home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/results/split-retry-repair-result.txt missing"}
-{"phase": "files", "check": "fail.split-retry.repair_landed_one_minimal_row_per_canonical_row", "ok": true, "detail": "repair landed 8 minimal serving rows for 8 canonical rows"}
+{"phase": "files", "check": "fail.split-retry.repair_landed_one_minimal_row_per_canonical_row", "ok": true, "detail": "repair landed 7 minimal serving rows for 7 canonical rows"}
