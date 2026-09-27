@@ -206,10 +206,10 @@ func TestPrepareLogsDropsProducerReservedKeys(t *testing.T) {
 	}
 }
 
-// A reversed span (end < start) is accepted and preserved: both supplied
-// timestamps are stored, the derived duration is unavailable, and the timing
-// diagnostic distinguishes missing timing from a reversed span and from a valid
-// zero duration.
+// A span whose timing is missing or reversed is accepted and preserved: both
+// supplied timestamps are stored, the derived duration is unavailable, and the
+// timing diagnostic distinguishes missing timing (either timestamp unset, which
+// OTLP encodes as 0) from a reversed span and from a valid zero duration.
 func TestSpanTimingStatusAndPreservedTimestamps(t *testing.T) {
 	build := func(start, end uint64) preparedSpans {
 		td := ptrace.NewTraces()
@@ -234,6 +234,12 @@ func TestSpanTimingStatusAndPreservedTimestamps(t *testing.T) {
 		{"positive duration", 10, 20, spanTimingOK, ptr(int64(10))},
 		{"zero duration", 10, 10, spanTimingOK, ptr(int64(0))},
 		{"missing timing", 0, 0, spanTimingMissing, nil},
+		// An unset timestamp is 0 in OTLP and either side being unset makes the
+		// duration unobservable; missing timing takes precedence over the
+		// reversed classification, so a missing start is not a duration from
+		// epoch 0 and a missing end is not read as end < start.
+		{"missing start", 0, 20, spanTimingMissing, nil},
+		{"missing end", 10, 0, spanTimingMissing, nil},
 		{"reversed timing", 20, 10, spanTimingEndBeforeStart, nil},
 	}
 	for _, tc := range tests {

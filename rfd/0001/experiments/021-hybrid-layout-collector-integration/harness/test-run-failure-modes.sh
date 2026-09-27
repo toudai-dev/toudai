@@ -248,6 +248,8 @@ import fixture021
 spans = {e["event_id"]: e for e in fixture021.ALL_SPAN_EVENTS}
 statuses = {i: verify.span_timing_status(e) for i, e in spans.items()}
 assert statuses["span-missing-time"] == "missing", statuses
+assert statuses["span-missing-start"] == "missing", statuses
+assert statuses["span-missing-end"] == "missing", statuses
 assert statuses["span-negative"] == "end_before_start", statuses
 assert statuses["span-zero"] == "ok", statuses
 assert statuses["timing-mixed-valid"] == "ok", statuses
@@ -255,6 +257,20 @@ assert statuses["timing-mixed-reversed"] == "end_before_start", statuses
 assert verify.span_duration_ns(spans["span-zero"]) == 0, "a zero duration stays observable"
 assert verify.span_duration_ns(spans["span-negative"]) is None, "a reversed duration is unavailable"
 assert verify.span_duration_ns(spans["span-missing-time"]) is None, "a missing duration is unavailable"
+assert verify.span_duration_ns(spans["span-missing-start"]) is None, "a missing start must not fabricate a duration"
+assert verify.span_duration_ns(spans["span-missing-end"]) is None, "a missing end must not fabricate a duration"
+# Missing-timestamp precedence: an unset end is not reversed, and an unset start
+# is not an epoch-0 duration.
+assert statuses["span-missing-end"] != statuses["span-negative"], statuses
+assert statuses["span-missing-start"] != statuses["span-negative"], statuses
+# The emitted OTLP bytes must really carry the two discriminating shapes.
+data, _ = fixture021.build_spans("typed")
+req = fixture021.trace_service_pb2.ExportTraceServiceRequest()
+req.ParseFromString(data)
+wire = {(s.name): (s.start_time_unix_nano, s.end_time_unix_nano)
+        for rl in req.resource_spans for sl in rl.scope_spans for s in sl.spans}
+assert wire["span/missing-start"][0] == 0 and wire["span/missing-start"][1] > 0, wire["span/missing-start"]
+assert wire["span/missing-end"][1] == 0 and wire["span/missing-end"][0] > 0, wire["span/missing-end"]
 data, _ = fixture021.build_spans("timing-mixed")
 req = fixture021.trace_service_pb2.ExportTraceServiceRequest()
 req.ParseFromString(data)

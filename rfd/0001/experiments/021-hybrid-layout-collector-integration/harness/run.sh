@@ -551,7 +551,7 @@ phase_semantics() {
   emit semantics "$url" logs batch-b "Authorization: Bearer lh021-ws-b-key"
   wait_rows "$DB" "SELECT count() FROM serving_logs WHERE dataset = 'fixture'" 31 40 ||
     log "serving logs row count short"
-  wait_rows "$DB" "SELECT count() FROM serving_spans" 7 40 || log "serving spans row count short"
+  wait_rows "$DB" "SELECT count() FROM serving_spans" 9 40 || log "serving spans row count short"
   sleep 1
   scrape_metrics metrics-semantics.txt 8891
   "$PY" - <<PYEOF >"$RESULTS/semantics-schema.jsonl"

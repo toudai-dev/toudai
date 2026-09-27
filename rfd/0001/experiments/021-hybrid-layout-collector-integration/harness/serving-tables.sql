@@ -72,16 +72,19 @@ CREATE TABLE {{DB}}.serving_spans (
     span_name String,
     span_kind LowCardinality(String),
     status_code Int32,
-    -- Derived duration, NULL whenever it is not observable: missing timing
-    -- (OTLP 0/0) or a reversed span (end < start). A valid zero duration stays
-    -- 0. Never a zero substitute and never an unsigned underflow (Experiment
-    -- 018 measured 18446744073709550616 for a span whose end precedes its
-    -- start).
+    -- Derived duration, NULL whenever it is not observable: an unset OTLP
+    -- timestamp (0; proto3 fixed64 has no presence, so an explicit 0 is
+    -- indistinguishable) on either side, or a reversed span (both set, end <
+    -- start). Missing timing takes precedence over the reversed classification:
+    -- a missing start must not fabricate a duration from epoch 0 and a missing
+    -- end must not be read as end < start. A valid zero duration stays 0. Never
+    -- a zero substitute and never an unsigned underflow (Experiment 018
+    -- measured 18446744073709550616 for a span whose end precedes its start).
     duration_ns Nullable(Int64),
     -- Machine-readable timing diagnostic: 'ok' (observable duration, including
-    -- a valid zero), 'missing' (0/0), or 'end_before_start' (data error; the
-    -- span is preserved with an unavailable duration). These are distinct
-    -- values so the three cases cannot be conflated.
+    -- a valid zero), 'missing' (start or end unset), or 'end_before_start'
+    -- (data error; the span is preserved with an unavailable duration). These
+    -- are distinct values so the three cases cannot be conflated.
     span_timing_status LowCardinality(String),
     resource Map(LowCardinality(String), String),
     resource_types Map(LowCardinality(String), LowCardinality(String)),

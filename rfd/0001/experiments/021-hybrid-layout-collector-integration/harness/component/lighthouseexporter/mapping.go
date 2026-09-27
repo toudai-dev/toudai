@@ -30,16 +30,22 @@ const (
 
 const canonicalSchema = "lighthouse.canonical.event/1"
 
-// Span timing diagnostics stored in serving_spans.span_timing_status. A span
-// whose end precedes its start is preserved and searchable: the supplied
-// timestamps stay as received and the derived duration is unavailable with an
-// explicit diagnostic, never discarded, never substituted with zero, and never
-// converted by unsigned underflow into a huge duration (Experiment 018 measured
-// 18446744073709550616 for a reversed span).
+// Span timing diagnostics stored in serving_spans.span_timing_status. OTLP has
+// no presence for a span timestamp: start_time_unix_nano and end_time_unix_nano
+// are proto3 fixed64 fields whose unset value is 0 (the pinned pdata v1.67.0
+// generated proto also omits a zero timestamp from its JSON form), so 0 is the
+// only available "unset" signal and an explicit 0 is indistinguishable from it.
+// An unset start or end therefore means missing timing and takes precedence over
+// the reversed-timing classification: a missing start must not fabricate a
+// duration from epoch 0, and a missing end must not be read as end < start. The
+// raw timestamps are always preserved; the derived duration is unavailable with
+// an explicit diagnostic, never discarded, never substituted with zero, and
+// never converted by unsigned underflow into a huge duration (Experiment 018
+// measured 18446744073709550616 for a reversed span).
 const (
 	spanTimingOK             = "ok"               // duration is observable, including a valid zero
-	spanTimingMissing        = "missing"          // OTLP carries no timing (0/0)
-	spanTimingEndBeforeStart = "end_before_start" // data error: end < start
+	spanTimingMissing        = "missing"          // start or end unset (0)
+	spanTimingEndBeforeStart = "end_before_start" // data error: both set and end < start
 )
 
 // valueKind is the OTLP AnyValue kind the exporter preserves.
@@ -637,9 +643,13 @@ func prepareSpans(td ptrace.Traces) preparedSpans {
 				var duration *int64
 				timing := spanTimingOK
 				switch {
-				case start == 0 && end == 0:
-					// Missing timing is not a zero-duration span; it stays NULL
-					// and is diagnosed separately from a reversed span.
+				case start == 0 || end == 0:
+					// An unset OTLP timestamp is 0 and cannot be distinguished
+					// from an explicit 0, so either side being unset means the
+					// duration is not observable. Missing timing takes precedence
+					// over the reversed classification: a missing start must not
+					// fabricate a duration from epoch 0, and a missing end must
+					// not be read as end < start.
 					timing = spanTimingMissing
 				case end < start:
 					// Reversed timing is accepted and preserved: the supplied

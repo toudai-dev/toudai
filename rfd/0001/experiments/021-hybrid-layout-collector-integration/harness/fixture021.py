@@ -81,13 +81,26 @@ def source_hashes() -> dict:
 # Local fixture additions
 # ---------------------------------------------------------------------------
 
-# Experiment 019's span set plus the missing-timing span: OTLP encodes missing
-# timing as 0/0, which the contract requires to stay distinct from a
-# zero-duration span, and a reversed span (end < start), which the approved
-# policy preserves with an unavailable duration and a timing diagnostic.
+# Experiment 019's span set plus the missing-timing spans: OTLP encodes an unset
+# timestamp as 0 (proto3 fixed64 has no presence), which the contract requires to
+# stay distinct from a zero-duration span, and a reversed span (end < start),
+# which the approved policy preserves with an unavailable duration and a timing
+# diagnostic. The missing-start and missing-end cases discriminate the precedence
+# rule: either side unset means missing timing, so a missing start never
+# fabricates a duration from epoch 0 and a missing end is not read as reversed.
 SPAN_MISSING_TIME = fixture019._event(
-    "span-missing-time", [("span.missing", "string", "yes")], kind="span",
+    "span-missing-time", [("span.missing", "string", "both")], kind="span",
     span_name="span/missing-timing", start_ns=0, end_ns=0,
+    trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID)
+
+SPAN_MISSING_START = fixture019._event(
+    "span-missing-start", [("span.missing", "string", "start")], kind="span",
+    span_name="span/missing-start", start_ns=0, end_ns=TS + 700,
+    trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID)
+
+SPAN_MISSING_END = fixture019._event(
+    "span-missing-end", [("span.missing", "string", "end")], kind="span",
+    span_name="span/missing-end", start_ns=TS, end_ns=0,
     trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID)
 
 SPAN_ZERO = fixture019._event(
@@ -95,7 +108,8 @@ SPAN_ZERO = fixture019._event(
     span_name="span/zero-duration", start_ns=TS, end_ns=TS,
     trace_id=fixture019.TRACE_ID, span_id=fixture019.SPAN_ID)
 
-SPAN_EVENTS = list(fixture019.SPAN_EVENTS) + [SPAN_MISSING_TIME, SPAN_ZERO]
+SPAN_EVENTS = list(fixture019.SPAN_EVENTS) + [SPAN_MISSING_TIME, SPAN_MISSING_START,
+                                              SPAN_MISSING_END, SPAN_ZERO]
 
 # One export request carrying a valid span and a reversed span together: the
 # mixed batch is what proves the policy does not depend on the request being
