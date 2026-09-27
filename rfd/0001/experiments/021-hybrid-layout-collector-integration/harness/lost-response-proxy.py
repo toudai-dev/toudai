@@ -9,6 +9,10 @@ Two uses:
   native-protocol INSERT so the client sees a failure for a write that committed.
   That is the ambiguous insert: the destination committed, the client timed out,
   and the exporter helper retried a write that had already happened.
+* ``--match SUBSTRING`` restricts the withholding to an INSERT statement whose
+  text contains ``SUBSTRING`` (for example ``serving_logs``), so the injection can
+  be aimed at the second of the two ordered inserts. Without it the first INSERT
+  statement is claimed.
 
 The earlier revision of this relay closed both sockets as soon as the first
 server bytes arrived after an INSERT. That was measured to abort the insert
@@ -48,9 +52,10 @@ def log(line: str) -> None:
 
 
 class Injection:
-    def __init__(self, drops: int, grace_ms: int):
+    def __init__(self, drops: int, grace_ms: int, match: str | None = None):
         self.drops_left = drops
         self.grace = grace_ms / 1000.0
+        self.match = match
         self.lock = threading.Lock()
         self.dropped = 0
 
@@ -64,6 +69,12 @@ class Injection:
             return
         if INSERT_MARKER in data:
             log(f"saw INSERT statement ({len(data)} bytes)")
+
+    def targets(self, data: bytes) -> bool:
+        """Whether this INSERT statement is the injection target."""
+        if self.match is None:
+            return True
+        return self.match.encode() in data
 
     def claim(self) -> bool:
         """Claim the single withheld response at INSERT time.
@@ -135,7 +146,7 @@ def handle(conn: socket.socket, addr, target, injection: Injection, counter: int
         injection.note_client_chunk(data)
         if state["withhold_response"]:
             state["client_data_after_claim"] = True
-        elif INSERT_MARKER in data and injection.claim():
+        elif INSERT_MARKER in data and injection.targets(data) and injection.claim():
             state["withhold_response"] = True
             log(f"connection {counter}: claimed the INSERT response for withholding")
 
@@ -168,18 +179,20 @@ def main() -> int:
     parser.add_argument("--target", required=True, help="host:port")
     parser.add_argument("--drop-insert-responses", type=int, default=0)
     parser.add_argument("--grace-ms", type=int, default=300)
+    parser.add_argument("--match", default=None,
+                        help="only withhold an INSERT statement containing this substring")
     args = parser.parse_args()
 
     host, _, port = args.target.partition(":")
     target = (host, int(port))
-    injection = Injection(args.drop_insert_responses, args.grace_ms)
+    injection = Injection(args.drop_insert_responses, args.grace_ms, args.match)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", args.listen))
     server.listen(16)
     log(f"listening on 127.0.0.1:{args.listen} -> {host}:{port} "
-        f"(drop_insert_responses={args.drop_insert_responses})")
+        f"(drop_insert_responses={args.drop_insert_responses}, match={args.match})")
 
     counter = 0
     try:

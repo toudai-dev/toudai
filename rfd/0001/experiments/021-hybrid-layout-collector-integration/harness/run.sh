@@ -35,8 +35,8 @@ export PYTHONPATH="$HERE"
 GW_PORT=4338           # gateway OTLP/HTTP (bearertokenauth + routing)
 UNTRUSTED_PORT=4339    # pipeline with no trusted-scope processor
 STOCK_PORT=4337        # stock write-path probe
-STALL_PORT=19102       # stalled ClickHouse endpoint / crash drain relay
-LOST_PORT=19103        # lost-response proxy for the ambiguous insert
+STALL_PORT="${LH021_STALL_PORT:-19102}"   # stalled ClickHouse endpoint / crash drain relay
+LOST_PORT="${LH021_LOST_PORT:-19103}"     # lost-response proxy for the ambiguous insert
 CH_PORT=19101
 # Trusted workspace used by the single-credential phase fixtures.
 WS_A="11111111-1111-4111-8111-111111111111"
@@ -45,7 +45,7 @@ HARNESS_FAILED=0
 PHASE_STATUS="$RESULTS/phase-status.tsv"
 PHASE_TIMES="$RESULTS/phase-times.tsv"
 RUN_MARKER="$RESULTS/run-start.txt"
-ALL_PHASES="stock-probe semantics ack outage split split-retry canonical-permanent queue-full crash ambiguous retry-duplicate no-trust files"
+ALL_PHASES="stock-probe semantics ack mixed-validation outage split split-retry canonical-permanent queue-full crash ambiguous ambiguous-serving retry-duplicate no-trust files"
 
 log() { printf '[021] %s\n' "$*"; }
 
@@ -55,6 +55,10 @@ log() { printf '[021] %s\n' "$*"; }
 
 start_bg() { # start_bg NAME CMD...
   local name="$1"; shift
+  # Never overwrite a live predecessor's pid file: doing so loses the only handle
+  # the harness has on that process (observed with a leftover lost-response
+  # proxy that kept 19103 bound and could no longer be reaped by name).
+  stop_bg "$name" >/dev/null 2>&1 || true
   "$@" >"$LOGS/$name.log" 2>&1 &
   echo $! >"$RUN/$name.pid"
 }
@@ -171,11 +175,63 @@ wait_rows() { # wait_rows DB SQL MIN TIMEOUT_S
 start_collector() { # start_collector NAME CONFIG WAIT_PORT [ENV_ASSIGNMENTS...]
   local name="$1" config="$2" wait="${3:-$GW_PORT}"; shift 3
   local env_args=("$@")
+  # If the port is still held, the previous collector has not finished draining
+  # (or a foreign process owns it). Waiting briefly covers the normal sequential
+  # case; a port that stays held fails the phase instead of letting it verify a
+  # stale process.
+  if port_open "$wait"; then
+    wait_port_closed "$wait" 20 ||
+      { log "FAIL: $name cannot start: $wait is already in use"; HARNESS_FAILED=1; exit 1; }
+  fi
   local daemon_env=(LH021_RESULTS="$RESULTS")
   daemon_env+=("${env_args[@]}")
   start_bg "$name" env "${daemon_env[@]}" "$COLLECTOR" --config "$HERE/$config"
   wait_port "$wait" 60 || { log "$name did not open $wait"; tail -40 "$LOGS/$name.log" || true; exit 1; }
   sleep 0.3
+}
+
+start_injector() { # start_injector NAME PORT CMD...
+  # Harness-only injectors (stalled listener, lost-response proxy) must be the
+  # process that answers the phase's traffic. A stale injector from an earlier
+  # run is worse than a missing one: it would serve the phase with a spent
+  # injection budget, so a held port is reaped only when the holder is provably
+  # this harness's own injector, and otherwise fails the phase.
+  local name="$1" port="$2"; shift 2
+  if port_open "$port"; then
+    if ! stop_own_injector "$port"; then
+      log "FAIL: $name cannot start: $port is already in use by another process"
+      HARNESS_FAILED=1
+      exit 1
+    fi
+  fi
+  start_bg "$name" "$@"
+  sleep 0.5
+  local pid
+  pid="$(cat "$RUN/$name.pid" 2>/dev/null || true)"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    log "FAIL: $name exited during startup; see $LOGS/$name.log"
+    HARNESS_FAILED=1
+    exit 1
+  fi
+  wait_port "$port" 15 || { log "FAIL: $name did not open $port"; HARNESS_FAILED=1; exit 1; }
+}
+
+stop_own_injector() { # stop_own_injector PORT -> 0 when a harness injector was reaped
+  # Identified by the process command line, so a listener that merely happens to
+  # hold the port is never killed by the harness.
+  local port="$1" pid cmd
+  command -v ss >/dev/null 2>&1 || return 1
+  pid="$(ss -ltnp "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
+  [[ -n "$pid" ]] || return 1
+  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  case "$cmd" in
+    *"$HERE/lost-response-proxy.py"*|*"$HERE/stalled-listener.py"*) ;;
+    *) return 1 ;;
+  esac
+  log "reaping stale harness injector on port $port (pid $pid)"
+  kill "$pid" 2>/dev/null || true
+  wait_port_closed "$port" 10 || true
+  return 0
 }
 
 # Graceful stop: the collector drains exporter queues during shutdown, so
@@ -345,6 +401,7 @@ PYEOF
 
 reset_state() {
   start_clickhouse
+  reap_stale
   log "resetting disposable databases"
   ch_sql default "DROP DATABASE IF EXISTS $DB; DROP DATABASE IF EXISTS $DB_UNTRUSTED; DROP DATABASE IF EXISTS $DB_STOCK;"
   ch_sql default "CREATE DATABASE IF NOT EXISTS $DB; CREATE DATABASE IF NOT EXISTS $DB_UNTRUSTED; CREATE DATABASE IF NOT EXISTS $DB_STOCK;"
@@ -382,14 +439,24 @@ write_build_manifest() {
 }
 
 DONE_PHASES=""
-cleanup() {
-  log "cleaning up harness processes"
-  for name in lighthouse-gateway lighthouse-ack lighthouse-outage lighthouse-split \
-              lighthouse-split-retry lighthouse-canonical lighthouse-queue-full \
-              lighthouse-crash lighthouse-ambiguous lighthouse-no-trust \
-              lighthouse-stock lighthouse-transform-types stall-19102 proxy-19102 proxy-19103; do
+reap_stale() {
+  # A process left behind by an interrupted run keeps its harness port bound, and
+  # the next phase would then talk to that stale process instead of the one it
+  # just started: an earlier `Address already in use` in the proxy log let the
+  # ambiguous-serving phase silently run against a spent injector. Reaping before
+  # every phase (and in `reset`) keeps that from happening; `start_injector`
+  # additionally refuses to start on a port that is still held.
+  for name in lighthouse-gateway lighthouse-ack lighthouse-mixed lighthouse-outage \
+              lighthouse-split lighthouse-split-retry lighthouse-canonical \
+              lighthouse-queue-full lighthouse-crash lighthouse-ambiguous \
+              lighthouse-ambiguous-serving lighthouse-no-trust lighthouse-stock \
+              lighthouse-transform-types stall-19102 proxy-19102 proxy-19103; do
     stop_bg "$name" >/dev/null 2>&1 || true
   done
+}
+cleanup() {
+  log "cleaning up harness processes"
+  reap_stale
 }
 trap cleanup EXIT
 
@@ -397,11 +464,16 @@ trap cleanup EXIT
 # phases
 # ---------------------------------------------------------------------------
 
-guard_fresh() { # guard_fresh PHASE LABEL...
+guard_fresh() { # guard_fresh PHASE MATCH...
   # Each phase asserts exact row counts for its own fixtures, so pre-existing
   # rows for the same labels make those assertions meaningless (or silently
   # weakens them). Detect stale state fail-closed instead of re-running a phase
   # on top of a previous run; `run.sh reset` clears the disposable databases.
+  #
+  # MATCH is the stored body text (or span name prefix), not the fixture's
+  # shorthand label: the guard's `body LIKE` is what makes it effective, so a
+  # label whose body differs from the label (`identity-a` stores
+  # `identity-ws-a`) must be passed as the stored text.
   local phase="$1" label count db="${GUARD_DB:-$DB}"
   shift
   for label in "$@"; do
@@ -448,7 +520,7 @@ phase_stock_probe() {
 phase_semantics() {
   log "phase semantics: typed representation through the gateway pipeline"
   phase_start semantics
-  guard_fresh semantics typed identity-a identity-b batch-a batch-b
+  guard_fresh semantics typed identity-ws-a identity-ws-b batch-a batch-b
   # The four single-record requests below (identity-a, identity-b, batch-a,
   # batch-b) are admitted roughly 230ms apart, so the queue's min_size of four
   # items is what makes them one downstream export. The flush window is the
@@ -513,6 +585,32 @@ phase_ack() {
   copy_log lighthouse-ack collector-ack.log
   phase_end ack
   verify ack ack
+}
+
+phase_mixed_validation() {
+  log "phase mixed-validation: whole-request validation with an invalid record"
+  phase_start mixed-validation
+  guard_fresh mixed-validation mixed-valid-1 invalid-only-1
+  # A four-item batch window keeps the acknowledgement clearly ahead of
+  # visibility for the mixed request; the invalid-only request is sent after the
+  # mixed batch has been exported so the two requests stay separate batches.
+  start_collector lighthouse-mixed collector-gateway.yaml "$GW_PORT" \
+    LH021_OTLP_PORT="$GW_PORT" LH021_METRICS_PORT=8891 \
+    LH021_BATCH_MIN=4 LH021_BATCH_FLUSH=3s
+  local url="http://127.0.0.1:$GW_PORT"
+  # One request with a valid record followed by a duplicate-key record: the
+  # component validates the complete request before its first insert, then
+  # excludes the invalid record and writes the valid one.
+  emit_with_visibility mixed-validation "$url" logs mixed 10 "Authorization: Bearer lh021-ws-a-key"
+  # The same invalid record alone: nothing survives validation, so the batch is
+  # dropped as a whole with a permanent error instead of being retried.
+  emit mixed-validation "$url" logs invalid-only "Authorization: Bearer lh021-ws-a-key"
+  sleep 4
+  scrape_metrics metrics-mixed-validation.txt 8891
+  stop_collector lighthouse-mixed
+  copy_log lighthouse-mixed collector-mixed-validation.log
+  phase_end mixed-validation
+  verify mixed-validation mixed-validation
 }
 
 phase_outage() {
@@ -656,7 +754,7 @@ phase_queue_full() {
   log "phase queue-full: bounded queue, stalled destination"
   phase_start queue-full
   guard_fresh queue-full fault-queue-1 fault-queue-2
-  start_bg stall-19102 "$PY" "$HERE/stalled-listener.py" --listen "$STALL_PORT"
+  start_injector stall-19102 "$STALL_PORT" "$PY" "$HERE/stalled-listener.py" --listen "$STALL_PORT"
   # The queue is bounded to two items, the consumer blocks on the stalled
   # destination, and batching is immediate so each request holds one slot.
   start_collector lighthouse-queue-full collector-gateway.yaml "$GW_PORT" \
@@ -681,7 +779,7 @@ phase_crash() {
   guard_fresh crash fault-crash-1 fault-crash-2
   rm -rf "$RUN/queue-crash"
   mkdir -p "$RUN/queue-crash"
-  start_bg stall-19102 "$PY" "$HERE/stalled-listener.py" --listen "$STALL_PORT"
+  start_injector stall-19102 "$STALL_PORT" "$PY" "$HERE/stalled-listener.py" --listen "$STALL_PORT"
   start_collector lighthouse-crash collector-crash.yaml "$GW_PORT" \
     LH021_OTLP_PORT="$GW_PORT" LH021_METRICS_PORT=8894 \
     LH021_ENDPOINT="127.0.0.1:$STALL_PORT" LH021_QUEUE_DIR="$RUN/queue-crash"
@@ -696,9 +794,8 @@ phase_crash() {
   stop_bg stall-19102
   # The queued batches were admitted against 19102; a relay now forwards that
   # port to the real destination so the restart can drain them.
-  start_bg proxy-19102 "$PY" "$HERE/lost-response-proxy.py" --listen "$STALL_PORT" \
+  start_injector proxy-19102 "$STALL_PORT" "$PY" "$HERE/lost-response-proxy.py" --listen "$STALL_PORT" \
     --target "127.0.0.1:$CH_PORT"
-  sleep 0.5
   start_collector lighthouse-crash collector-crash.yaml "$GW_PORT" \
     LH021_OTLP_PORT="$GW_PORT" LH021_METRICS_PORT=8894 \
     LH021_ENDPOINT="127.0.0.1:$STALL_PORT" LH021_QUEUE_DIR="$RUN/queue-crash"
@@ -722,9 +819,8 @@ phase_ambiguous() {
   log "phase ambiguous: insert committed, response lost, exporter retries"
   phase_start ambiguous
   guard_fresh ambiguous ambiguous-a
-  start_bg proxy-19103 "$PY" "$HERE/lost-response-proxy.py" --listen "$LOST_PORT" \
+  start_injector proxy-19103 "$LOST_PORT" "$PY" "$HERE/lost-response-proxy.py" --listen "$LOST_PORT" \
     --target "127.0.0.1:$CH_PORT" --drop-insert-responses 1 --grace-ms 400
-  sleep 0.5
   start_collector lighthouse-ambiguous collector-gateway.yaml "$GW_PORT" \
     LH021_OTLP_PORT="$GW_PORT" LH021_METRICS_PORT=8891 \
     LH021_ENDPOINT="127.0.0.1:$LOST_PORT" LH021_TIMEOUT=5s \
@@ -743,10 +839,36 @@ phase_ambiguous() {
   verify ambiguous ambiguous
 }
 
+phase_ambiguous_serving() {
+  log "phase ambiguous-serving: serving insert committed, response lost, exporter retries"
+  phase_start ambiguous-serving
+  guard_fresh ambiguous-serving ambiguous-serving-1
+  # --match aims the withholding at the serving insert: the canonical insert is
+  # answered normally, then the serving insert commits and its response never
+  # reaches the exporter, which retries the whole export.
+  start_injector proxy-19103 "$LOST_PORT" "$PY" "$HERE/lost-response-proxy.py" --listen "$LOST_PORT" \
+    --target "127.0.0.1:$CH_PORT" --drop-insert-responses 1 --match serving_logs --grace-ms 400
+  start_collector lighthouse-ambiguous-serving collector-gateway.yaml "$GW_PORT" \
+    LH021_OTLP_PORT="$GW_PORT" LH021_METRICS_PORT=8891 \
+    LH021_ENDPOINT="127.0.0.1:$LOST_PORT" LH021_TIMEOUT=5s \
+    LH021_BATCH_MIN=0 LH021_BATCH_FLUSH=10ms
+  emit ambiguous-serving "http://127.0.0.1:$GW_PORT" logs ambiguous-serving-a \
+    "Authorization: Bearer lh021-ws-a-key"
+  wait_rows "$DB" "SELECT count() FROM serving_logs WHERE body = 'ambiguous-serving-1'" 2 30 ||
+    log "the serving-response-loss retry did not produce a second serving row"
+  sleep 1
+  scrape_metrics metrics-ambiguous-serving.txt 8891
+  stop_collector lighthouse-ambiguous-serving
+  copy_log lighthouse-ambiguous-serving collector-ambiguous-serving.log
+  cp "$LOGS/proxy-19103.log" "$RESULTS/proxy-ambiguous-serving.log" 2>/dev/null || true
+  phase_end ambiguous-serving
+  verify ambiguous-serving ambiguous-serving
+}
+
 phase_retry_duplicate() {
-  log "phase retry-duplicate: producer retry of an identical request"
+  log "phase retry-duplicate: producer retry, and the identical-events ambiguity"
   phase_start retry-duplicate
-  guard_fresh retry-duplicate retry-a
+  guard_fresh retry-duplicate retry-a legitimate-twin
   start_collector lighthouse-gateway collector-gateway.yaml "$GW_PORT" \
     LH021_OTLP_PORT="$GW_PORT" LH021_METRICS_PORT=8891
   local url="http://127.0.0.1:$GW_PORT"
@@ -755,6 +877,15 @@ phase_retry_duplicate() {
   emit retry-duplicate "$url" logs retry-a "Authorization: Bearer lh021-ws-a-key"
   wait_rows "$DB" "SELECT count() FROM serving_logs WHERE body = 'retry-a-1'" 2 20 ||
     log "duplicate rows did not appear"
+  # The twin control: two legitimately distinct events with identical wire
+  # content, then the same request again. The content-derived identity is shared
+  # by both legitimate events, so it cannot tell them apart from a retransmission;
+  # deduplication remains unselected.
+  emit retry-duplicate "$url" logs twins "Authorization: Bearer lh021-ws-a-key"
+  sleep 0.5
+  emit retry-duplicate "$url" logs twins "Authorization: Bearer lh021-ws-a-key"
+  wait_rows "$DB" "SELECT count() FROM serving_logs WHERE body = 'legitimate-twin'" 4 20 ||
+    log "twin rows did not appear"
   sleep 0.5
   scrape_metrics metrics-retry-duplicate.txt 8891
   stop_collector lighthouse-gateway
@@ -766,12 +897,16 @@ phase_retry_duplicate() {
 phase_no_trust() {
   log "phase no-trust: pipeline without the trusted-scope processor fails closed"
   phase_start no-trust
-  GUARD_DB="$DB_UNTRUSTED" guard_fresh no-trust no-trust no-trust-forged
+  GUARD_DB="$DB_UNTRUSTED" guard_fresh no-trust no-trust no-trust-forged no-trust-mixed
   start_collector lighthouse-no-trust collector-no-trust.yaml "$UNTRUSTED_PORT" \
     LH021_OTLP_PORT="$UNTRUSTED_PORT" LH021_METRICS_PORT=8892 LH021_DATABASE="$DB_UNTRUSTED"
   local url="http://127.0.0.1:$UNTRUSTED_PORT"
   emit no-trust "$url" logs no-trust
   emit no-trust "$url" logs no-trust-forged
+  # One request with a forged group and a group without the marker: the missing
+  # scope must invalidate the whole request, so even the group that passed the
+  # marker check must not be written.
+  emit no-trust "$url" logs no-trust-mixed
   sleep 4
   scrape_metrics metrics-no-trust.txt 8892
   stop_collector lighthouse-no-trust
@@ -792,10 +927,12 @@ phase_files() {
 # ---------------------------------------------------------------------------
 
 run_phase() {
+  reap_stale
   case "$1" in
     stock-probe) phase_stock_probe ;;
     semantics) phase_semantics ;;
     ack) phase_ack ;;
+    mixed-validation) phase_mixed_validation ;;
     outage) phase_outage ;;
     split) phase_split ;;
     split-retry) phase_split_retry ;;
@@ -803,6 +940,7 @@ run_phase() {
     queue-full) phase_queue_full ;;
     crash) phase_crash ;;
     ambiguous) phase_ambiguous ;;
+    ambiguous-serving) phase_ambiguous_serving ;;
     retry-duplicate) phase_retry_duplicate ;;
     no-trust) phase_no_trust ;;
     files) phase_files ;;
@@ -828,12 +966,12 @@ case "${1:-all}" in
     shift
     summarize "${*:-$ALL_PHASES}"
     ;;
-  files|stock-probe|transform-probe|semantics|ack|outage|split|split-retry|canonical-permanent|\
-queue-full|crash|ambiguous|retry-duplicate|no-trust)
+  files|stock-probe|transform-probe|semantics|ack|mixed-validation|outage|split|split-retry|canonical-permanent|\
+queue-full|crash|ambiguous|ambiguous-serving|retry-duplicate|no-trust)
     run_phase "$1"
     ;;
   *)
-    echo "usage: $0 [all|reset|summarize|check-results|stock-probe|semantics|ack|outage|split|split-retry|canonical-permanent|queue-full|crash|ambiguous|retry-duplicate|no-trust|files]" >&2
+    echo "usage: $0 [all|reset|summarize|check-results|stock-probe|semantics|ack|mixed-validation|outage|split|split-retry|canonical-permanent|queue-full|crash|ambiguous|ambiguous-serving|retry-duplicate|no-trust|files]" >&2
     exit 2
     ;;
 esac

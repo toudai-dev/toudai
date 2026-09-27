@@ -12,7 +12,9 @@
 # file, a nonzero phase exit status, a failed check line, a missing status entry,
 # and a stale checks file. It also proves the fail-closed probe configuration
 # cannot inject a trusted scope, that the verifier reports failures (not passes)
-# against an empty database, and that an unknown phase is rejected.
+# against an empty database, that an unknown phase is rejected, that the
+# trusted-scope configuration scan sees every workspace pipeline, and that a
+# stale injector holding a phase port fails the phase instead of being reused.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,6 +166,66 @@ if (( rc != 0 )); then
   ok "unknown phase rejected (exit $rc)"
 else
   no "unknown phase returned 0"
+fi
+
+# 11. The trusted-scope configuration scan must see every pipeline that reaches
+#     the owned exporter. A leading `\n` in the scan pattern once skipped the
+#     pipelines whose body ended where the next pipeline began, and that was
+#     only visible inside a full run; this phase needs no services so the fast
+#     self-test catches the regression directly.
+mkdir -p "$WORK/trust-config"
+rc=0
+set +e
+"$PY" "$HERE/verify.py" --phase trust-config --results "$WORK/trust-config" \
+  --out checks-trust-config.jsonl >"$WORK/trust-config/out.log" 2>&1
+rc=$?
+set -e
+if (( rc == 0 )); then
+  ok "trusted-scope configuration scan passes (all four workspace pipelines)"
+else
+  no "trusted-scope configuration scan failed (exit $rc)"
+  sed 's/^/    /' "$WORK/trust-config/out.log" | tail -5
+fi
+
+# 12. A stale injector holding the phase's port must fail the phase rather than
+#     let it run against that process. A real full run once reused a leftover
+#     lost-response proxy: the new proxy died with `Address already in use`, the
+#     stale one had already spent its injection budget, and the phase produced
+#     five false failures instead of failing closed at startup. The holder here
+#     is deliberately a foreign process, not a harness injector, so the guard
+#     must refuse to reap it.
+TEST_INJ_PORT=$((19200 + $$ % 500))
+mkdir -p "$WORK/root"
+[[ -e "$WORK/root/venv" ]] || ln -s "$ROOT/venv" "$WORK/root/venv"
+"$PY" -c "
+import socket, sys, time
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(('127.0.0.1', int(sys.argv[2])))
+sock.listen(1)
+open(sys.argv[1], 'w').write('ready')
+time.sleep(120)
+" "$WORK/port-held" "$TEST_INJ_PORT" &
+holder=$!
+for _ in $(seq 1 40); do
+  if [[ -s "$WORK/port-held" ]]; then break; fi
+  sleep 0.1
+done
+mkdir -p "$WORK/injector-guard-results"
+rc=0
+set +e
+LH021_ROOT="$WORK/root" LH021_RESULTS="$WORK/injector-guard-results" \
+  LH021_LOST_PORT="$TEST_INJ_PORT" \
+  "$HERE/run.sh" ambiguous-serving >"$WORK/injector-guard.log" 2>&1
+rc=$?
+set -e
+kill "$holder" 2>/dev/null || true
+wait "$holder" 2>/dev/null || true
+if (( rc != 0 )) && grep -q "already in use" "$WORK/injector-guard.log"; then
+  ok "held injector port fails the phase instead of reusing the injector (exit $rc)"
+else
+  no "held injector port did not fail closed (exit $rc)"
+  sed 's/^/    /' "$WORK/injector-guard.log" | tail -5
 fi
 
 if [[ "$MODE" == full ]]; then

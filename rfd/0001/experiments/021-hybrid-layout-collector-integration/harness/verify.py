@@ -906,7 +906,61 @@ def phase_stock_probe(c: Checks) -> None:
         c.check("stock.stored.rows_present", False, "no stock log row with str.one found")
 
 
+def check_gateway_trust_config(c: Checks) -> None:
+    """Configuration-shape assertions for the trusted-scope path.
+
+    The exporter's marker check is configuration-dependent: it proves the
+    configured stamping pipeline ran before the exporter, not that the producer
+    is authenticated or that the resource attributes are authentic. These
+    assertions record what makes the tested configuration safe and cannot by
+    themselves prove the deployment: the stamping processors upsert the reserved
+    keys (so producer-supplied values are overwritten before batching), and the
+    owned exporter is referenced only from pipelines that include a stamping
+    processor. The exported endpoint must be reachable only through those
+    pipelines; that is an operational control this harness cannot assert.
+    """
+    path = HERE / "collector-gateway.yaml"
+    text = path.read_text(encoding="utf-8")
+    upserts = text.count("action: upsert")
+    c.check("trust.stamping_upserts_reserved_keys", upserts == 6,
+            f"both workspace processors must upsert workspace, dataset, and marker; "
+            f"found {upserts} upsert actions")
+    # Anchor on line starts: with a leading `\n` in the pattern, a pipeline whose
+    # body ended exactly where the next pipeline's line began was skipped, so the
+    # scan silently inspected only half of the pipelines (found in a full run).
+    service = text.split("\nservice:\n", 1)[1] if "\nservice:\n" in text else ""
+    owned: list[tuple[str, str]] = []
+    for match in re.finditer(r"^    ([a-z]+/[a-z-]+):\n((?:      .*\n)+)", service, re.M):
+        name, body = match.group(1), match.group(2)
+        if re.search(r"exporters: \[[^\]]*\blighthouse\b", body):
+            owned.append((name, body))
+    c.check("trust.owned_exporter_only_workspace_pipelines",
+            sorted(name for name, _ in owned) == ["logs/ws-a", "logs/ws-b", "traces/ws-a", "traces/ws-b"],
+            f"pipelines exporting to the owned exporter: {sorted(name for name, _ in owned)}")
+    unstamped = [name for name, body in owned
+                 if not re.search(r"processors: \[resource/ws-[ab]\]", body)]
+    c.check("trust.owned_exporter_pipelines_are_stamped", not unstamped,
+            f"pipelines reaching the owned exporter without a stamping processor: {unstamped}")
+    # The fail-closed probe must stay without stamping, so the missing-scope
+    # rejection path is genuinely exercised.
+    probe = (HERE / "collector-no-trust.yaml").read_text(encoding="utf-8")
+    c.check("trust.fail_closed_probe_has_no_stamping",
+            "resource/ws" not in probe and "lighthouse.workspace_id" not in probe,
+            "the fail-closed probe configuration injects trusted scope")
+
+
+def phase_trust_config(c: Checks) -> None:
+    """Configuration-shape checks only, with no services or stored rows.
+
+    The fast self-test runs this phase so a degraded trusted-scope scan (which
+    would otherwise be hidden behind heavyweight row checks in `semantics`) fails
+    the harness self-test directly.
+    """
+    check_gateway_trust_config(c)
+
+
 def phase_semantics(c: Checks) -> None:
+    check_gateway_trust_config(c)
     metrics = read_metrics("metrics-semantics.txt")
     log_path = RESULTS / "collector-semantics.log"
     for event in fixture021.TYPED_LOGS:
@@ -1163,6 +1217,80 @@ def phase_ack(c: Checks) -> None:
             "the queue-enabled write did not count a serving record")
 
 
+def phase_mixed_validation(c: Checks) -> None:
+    """Whole-request validation: a valid record followed by an invalid one.
+
+    The component prepares (validates and canonicalizes) every record of the
+    received request before its first insert, then excludes invalid records per
+    record. The batch is rejected as a whole only when the trusted scope is
+    missing or when nothing survives validation. This phase measures that policy,
+    the error/retry classification, and the producer acknowledgement timing; it
+    also checks the component's own batch summary, which reports written and
+    rejected records for the same export so a partial drop cannot hide behind the
+    rejected-batch counter.
+    """
+    metrics = read_metrics("metrics-mixed-validation.txt")
+    mixed = emitted(c, "mixed-validation", "mixed")
+    invalid_only = emitted(c, "mixed-validation", "invalid-only")
+    valid_rows = serving_rows_for_fixture(fixture_event("mixed-valid-1"), WS_A, DATASET)
+    invalid_rows = serving_rows_for_fixture(fixture_event("mixed-invalid-1"), WS_A, DATASET)
+    valid_canon = canonical_rows_for_fixture("mixed-valid-1", WS_A)
+    invalid_canon = canonical_rows_for_fixture("mixed-invalid-1", WS_A)
+    c.check("mixed.producer_ack", mixed is not None and mixed["status"] == 200,
+            f"producer saw {mixed and mixed['status']}")
+    c.check("mixed.valid_record_written_after_prevalidation",
+            len(valid_rows) == 1 and len(valid_canon) == 1,
+            f"the valid record should be written to both destinations, got "
+            f"serving={len(valid_rows)} canonical={len(valid_canon)}")
+    c.check("mixed.invalid_record_excluded",
+            not invalid_rows and not invalid_canon,
+            "the duplicate-key record must be excluded from both destinations")
+    c.check("mixed.per_record_rejection_counted",
+            metric_sum(metrics, "lighthouse_exporter_rejected_records",
+                       reason="duplicate_or_invalid_record_attributes", namespace="record") == 2,
+            "one rejected record from the mixed request plus one from the all-invalid request")
+    c.check("mixed.only_all_invalid_batch_rejected_whole",
+            metric_sum(metrics, "lighthouse_exporter_rejected_batches",
+                       reason="all_records_rejected") == 1,
+            "only the batch with nothing surviving validation may be rejected as a whole; the "
+            "mixed batch wrote its surviving record instead")
+    c.check("mixed.rejection_is_not_an_insert_failure",
+            metric_sum(metrics, "lighthouse_exporter_insert_failures") == 0,
+            "per-record rejection must not be classified as an insert failure or retry")
+    if mixed is not None:
+        c.check("mixed.ack_precedes_visibility",
+                mixed.get("visible_at_ack") is False and mixed.get("visible_within_s") is not None,
+                f"queue-enabled mixed request: visible_at_ack={mixed.get('visible_at_ack')} "
+                f"(ack {mixed.get('elapsed_ms')} ms, visible after {mixed.get('visible_within_s')} s)")
+        c.check("mixed.rejection_not_producer_visible",
+                "partial success" not in (mixed.get("response_body") or "").lower(),
+                "the producer response must not report the per-record rejection")
+    c.check("mixed.all_invalid_producer_ack",
+            invalid_only is not None and invalid_only["status"] == 200,
+            "the all-invalid request is acknowledged like any other (rejection is not producer visible)")
+    c.check("mixed.all_invalid_writes_nothing",
+            not serving_rows_for_fixture(fixture_event("invalid-only-1"), WS_A, DATASET)
+            and not canonical_rows_for_fixture("invalid-only-1", WS_A),
+            "a batch with nothing surviving validation must write to neither destination")
+    c.check("mixed.all_invalid_no_insert_attempt",
+            metric_sum(metrics, "lighthouse_exporter_insert_failures") == 0,
+            "the all-invalid batch is permanent: no insert was attempted and nothing was retried")
+    log = RESULTS / "collector-mixed-validation.log"
+    if log.exists():
+        text = log.read_text(encoding="utf-8", errors="replace")
+        summaries = [line for line in text.splitlines()
+                     if "lighthouse exporter batch" in line
+                     and '"records": 1' in line and '"rejected": 1' in line]
+        c.check("comp.mixed_batch_summary_one_export", len(summaries) == 1,
+                f"expected one batch summary with records=1 and rejected=1 for the mixed "
+                f"request, got {len(summaries)}")
+        c.check("comp.all_invalid_permanent_error_logged",
+                "logs batch rejected: 1 records failed validation" in text,
+                "the all-invalid batch should be dropped with a permanent validation error")
+    else:
+        c.check("files.collector_mixed_validation_log", False, f"{log} missing")
+
+
 def phase_outage(c: Checks) -> None:
     label = "fault-outage-1"
     emit_ok(c, "outage", "fault-outage")
@@ -1366,6 +1494,59 @@ def phase_ambiguous(c: Checks) -> None:
         c.check("files.phase_times_window", False, "no phase window recorded for the ambiguous phase")
 
 
+def phase_ambiguous_serving(c: Checks) -> None:
+    """Serving-response-loss injection: the retry duplicates both destinations.
+
+    The counterpart of the canonical-response-loss case. Here the canonical
+    insert is answered normally, the serving insert commits, and only its
+    response is withheld; the retry re-attempts both inserts, so both
+    destinations end up with two identical rows. This is why the
+    canonical-response-loss result (two canonical rows, one serving row) must not
+    be generalized to "the serving row stays single" on retry.
+    """
+    label = "ambiguous-serving-1"
+    emit_ok(c, "ambiguous-serving", "ambiguous-serving-a")
+    rows = resolve_stored(c, label, want=2)
+    canon = canonical_rows(rows[0]["event_id"]) if rows else canonical_rows_for_fixture(label, WS_A)
+    c.check("fail.ambiguous_serving.serving_duplicate_from_retry", len(rows) == 2,
+            f"expected two serving rows (commit + retry after the lost response), got {len(rows)}")
+    c.check("fail.ambiguous_serving.canonical_duplicate_from_retry", len(canon) == 2,
+            f"expected two canonical rows (the retry re-attempts both inserts), got {len(canon)}")
+    if rows:
+        identities = {r["event_id"] for r in rows}
+        payloads = {r["payload_sha256"] for r in rows}
+        c.check("xdest.ambiguous_serving.same_identity_and_payload",
+                len(identities) == 1 and len(payloads) == 1,
+                f"the duplicated serving rows must share identity and payload hash: "
+                f"identities={sorted(identities)} payloads={sorted(payloads)}")
+        c.check("xdest.ambiguous_serving.no_missing_rows",
+                len(rows) == 2 and len(canon) == 2,
+                "the lost serving response committed, so the retry duplicated rows rather "
+                "than repairing a missing one")
+        record_identity(label, rows[0]["event_id"], "log")
+    proxy_log = RESULTS / "proxy-ambiguous-serving.log"
+    if proxy_log.exists():
+        text = proxy_log.read_text(encoding="utf-8", errors="replace")
+        c.check("fail.ambiguous_serving.proxy_withheld_serving_response",
+                "withholding the INSERT response" in text and "match=serving_logs" in text,
+                "the proxy log must show a withheld serving insert response aimed at "
+                "serving_logs")
+    else:
+        c.check("files.proxy_ambiguous_serving_log", False, f"{proxy_log} missing")
+    window = phase_window("ambiguous-serving")
+    if window:
+        rows_q = ch("SELECT count() AS c FROM system.query_log WHERE type = 'QueryFinish' "
+                    "AND query_kind = 'Insert' AND query LIKE '%serving_logs%' "
+                    "AND event_time >= toDateTime64({start:String}, 3) "
+                    "AND event_time <= toDateTime64({stop:String}, 3)",
+                    {"start": window[0], "stop": window[1]})
+        c.check("fail.ambiguous_serving.destination_committed_twice",
+                bool(rows_q) and int(rows_q[0]["c"]) >= 2,
+                f"query_log shows {rows_q[0]['c'] if rows_q else 'no'} finished serving inserts")
+    else:
+        c.check("files.phase_times_window", False, "no phase window recorded for the ambiguous-serving phase")
+
+
 def phase_retry_duplicate(c: Checks) -> None:
     label = "retry-a-1"
     emits = [r for r in read_emits("retry-duplicate") if r.get("label") == "retry-a"]
@@ -1392,6 +1573,36 @@ def phase_retry_duplicate(c: Checks) -> None:
         record_identity(label, rows[0]["event_id"], "log")
     c.check("fail.retry.no_producer_visible_dedup", True,
             "both identical requests were accepted; deduplication remains unselected")
+    # The twin control: two legitimately distinct events with byte-identical wire
+    # content (one request), then the same request again. The content-derived
+    # identity is shared by both legitimate events, so identity alone cannot tell
+    # them apart from a retransmission. This is why the stored identity is a
+    # fixture-correlation key, not a deduplication key.
+    twins = [r for r in read_emits("retry-duplicate") if r.get("label") == "twins"]
+    c.check("twin.requests_sent_twice",
+            len(twins) == 2 and all(r["status"] == 200 for r in twins),
+            f"expected two accepted twin requests, got {[r.get('status') for r in twins]}")
+    twin_rows = serving_rows_for_fixture(fixture_event("twin-1"), WS_A, DATASET)
+    identities = {r["event_id"] for r in twin_rows}
+    payloads = {r["payload_sha256"] for r in twin_rows}
+    c.check("twin.serving_rows_stored", len(twin_rows) == 4,
+            f"two legitimate identical events plus one retransmission should store 4 serving "
+            f"rows, got {len(twin_rows)}")
+    c.check("twin.one_shared_identity", len(identities) == 1,
+            f"two legitimate identical events share one content-derived identity: {sorted(identities)}")
+    c.check("twin.one_shared_payload", len(payloads) == 1,
+            f"identical content produces one payload hash: {sorted(payloads)}")
+    if identities:
+        stored = sorted(identities)[0]
+        canon_twins = canonical_rows(stored)
+        c.check("twin.canonical_rows_stored", len(canon_twins) == 4,
+                f"expected 4 canonical rows for the shared identity, got {len(canon_twins)}")
+        record_identity("twin-1", stored, "log")
+    c.check("twin.identity_ambiguous_by_design", len(twin_rows) == 4 and len(identities) == 1,
+            "one identity resolves to two legitimate events plus a retransmission: the "
+            "identity cannot distinguish them, so it is not a deduplication key")
+    c.check("twin.dedup_unselected", True,
+            "nothing was deduplicated: both legitimate events and the repeated request are stored")
 
 
 def phase_no_trust(c: Checks) -> None:
@@ -1411,15 +1622,15 @@ def phase_no_trust(c: Checks) -> None:
     c.check("comp.no_trust.rejected_record_counter",
             metric_sum(metrics, "lighthouse_exporter_rejected_records",
                        reason="missing_trusted_scope", namespace="resource") >= 1,
-            "no rejected-record counter with reason=missing_trusted_scope")
+            "expected a rejected-record counter with reason=missing_trusted_scope")
     c.check("comp.no_trust.rejected_batch_counter",
             metric_sum(metrics, "lighthouse_exporter_rejected_batches",
                        reason="all_records_rejected") >= 1,
-            "the all-rejected batch was not counted")
+            "expected the all-rejected plain request to be counted as a batch rejection")
     received = RESULTS / "no-trust-received.jsonl"
     c.check("fail.no_trust.receiver_accepted_request",
             received.exists() and received.read_text(encoding="utf-8").strip() != "",
-            "the receiver file copy is missing: cannot show the request was admitted then rejected")
+            "expected the receiver file copy to show the request was admitted then rejected")
     forged = "no-trust-forged-1"
     c.check("fail.no_trust.forged_marker_not_in_trusted_db",
             not serving_rows_for_fixture(fixture_event(forged)),
@@ -1433,6 +1644,41 @@ def phase_no_trust(c: Checks) -> None:
             c.check("fail.no_trust.forged_marker_gap_is_producer_scope",
                     rows[0]["workspace_id"] == WS_FORGED,
                     f"stored workspace {rows[0]['workspace_id']}")
+    # One request whose two resource groups have different trust provenance: the
+    # forged group passes the marker check and the plain group is rejected with
+    # missing_trusted_scope. The invalidating rejection must cover the whole
+    # request, so the forged group must not be written either, and the batch must
+    # be counted as missing_trusted_scope rather than all_records_rejected.
+    if db_exists(DB_UNTRUSTED):
+        mixed_forged = serving_rows_for_fixture(fixture_event("no-trust-mixed-forged"),
+                                                db=DB_UNTRUSTED)
+        mixed_plain = serving_rows_for_fixture(fixture_event("no-trust-mixed-plain"),
+                                               db=DB_UNTRUSTED)
+        c.check("fail.no_trust.mixed_request_wrote_nothing",
+                not mixed_forged and not mixed_plain,
+                f"a missing-scope group must invalidate the whole request, got "
+                f"forged={len(mixed_forged)} plain={len(mixed_plain)} rows in {DB_UNTRUSTED}")
+    c.check("fail.no_trust.mixed_request_absent_from_trusted_db",
+            not serving_rows_for_fixture(fixture_event("no-trust-mixed-forged"))
+            and not serving_rows_for_fixture(fixture_event("no-trust-mixed-plain")),
+            "the mixed untrusted request must never reach the trusted database")
+    # Counters map one-to-one to the three requests of this phase: the plain
+    # request rejects its only record and counts all_records_rejected; the
+    # mixed request rejects one record and counts a missing_trusted_scope batch
+    # rejection; the forged-only request is the documented gap and counts nothing.
+    c.check("comp.no_trust.two_records_rejected_for_missing_scope",
+            metric_sum(metrics, "lighthouse_exporter_rejected_records",
+                       reason="missing_trusted_scope", namespace="resource") == 2,
+            "expected the plain request's record and the mixed request's plain group to both count")
+    c.check("comp.no_trust.mixed_batch_rejected_missing_scope",
+            metric_sum(metrics, "lighthouse_exporter_rejected_batches",
+                       reason="missing_trusted_scope") == 1,
+            "the mixed request should be counted as a missing_trusted_scope batch rejection")
+    c.check("comp.no_trust.all_rejected_counter_not_concealing_mixed_batch",
+            metric_sum(metrics, "lighthouse_exporter_rejected_batches",
+                       reason="all_records_rejected") == 1,
+            "only the all-invalid plain request may count as all_records_rejected; a mixed "
+            "request with surviving rows must be counted by its invalidating reason instead")
 
 
 def phase_files(c: Checks) -> None:
@@ -1440,6 +1686,9 @@ def phase_files(c: Checks) -> None:
         "build-manifest.txt", "go-modules.txt", "run-start.txt", "phase-status.tsv",
         "phase-times.tsv", "fixture019-sha256.txt", "metrics-semantics.txt",
         "semantics-emits.jsonl", "semantics-schema.jsonl",
+        "metrics-mixed-validation.txt", "mixed-validation-emits.jsonl",
+        "metrics-ambiguous-serving.txt", "ambiguous-serving-emits.jsonl",
+        "proxy-ambiguous-serving.log",
     ]
     for name in required:
         path = RESULTS / name
@@ -1493,6 +1742,13 @@ def phase_files(c: Checks) -> None:
                  if len(line.split("\t")) == 3 and line.split("\t")[2].strip() != "0"]
         c.check("meta.no_stale_fixture_state_before_phases", not stale,
                 f"phases started with pre-existing fixture rows: {stale[:5]}")
+    # The serving-response-loss injection must be aimed at the serving insert, so
+    # that phase cannot pass on a withheld canonical response.
+    proxy = RESULTS / "proxy-ambiguous-serving.log"
+    if proxy.exists():
+        c.check("files.ambiguous_serving_injection_targeted",
+                "match=serving_logs" in proxy.read_text(encoding="utf-8", errors="replace"),
+                "the serving-response-loss injection must be targeted at the serving insert")
     # The bounded repair runs after the split phases are verified; it is checked
     # here because these files exist only once the split phases have finished.
     for suffix, label in (("split", "fault-split-1"), ("split-retry", "fault-split-retry-1")):
@@ -1524,6 +1780,7 @@ PHASES = {
     "stock-probe": phase_stock_probe,
     "semantics": phase_semantics,
     "ack": phase_ack,
+    "mixed-validation": phase_mixed_validation,
     "outage": phase_outage,
     "split": lambda c: phase_split(c, retry=False),
     "split-retry": lambda c: phase_split(c, retry=True),
@@ -1531,9 +1788,11 @@ PHASES = {
     "queue-full": phase_queue_full,
     "crash": phase_crash,
     "ambiguous": phase_ambiguous,
+    "ambiguous-serving": phase_ambiguous_serving,
     "retry-duplicate": phase_retry_duplicate,
     "no-trust": phase_no_trust,
     "files": phase_files,
+    "trust-config": phase_trust_config,
 }
 
 

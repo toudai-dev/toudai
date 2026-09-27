@@ -16,8 +16,13 @@ This module adds the records the integration slice needs:
 * one-record requests for the two credentials that share the exporter's queue, so
   a single downstream batch can be shown to carry both workspaces;
 * small fault requests for the split-write, outage, and duplicate phases;
+* a twin pair of legitimately identical events for the identity-ambiguity
+  control, and a mixed valid/invalid request for the whole-request validation
+  policy;
 * a request for a pipeline that has no trusted-scope processor (fail-closed
-  probe);
+  probe) plus one request whose two resource groups have different trust
+  provenance, so the effect of an invalidating rejection on a mixed request is
+  measured;
 * a span with missing timing (0/0) next to Experiment 019's zero, positive, and
   negative-duration spans.
 
@@ -127,6 +132,41 @@ RETRY_A = [fixture019._event("retry-a-1", [("retry.attr", "string", "same")],
                              body=("string", "retry-a-1"))]
 
 
+def _twin_event(event_id):
+    """One of two legitimately distinct events with identical wire content.
+
+    OTLP carries no record identity: these two records have the same body,
+    timestamp, resource, and attributes, so they are byte-identical on the wire.
+    The component's write identity is content-derived, which means these two
+    legitimate events share one stored identity. That is the ambiguity control:
+    the identity cannot distinguish them from a retransmission of a single event,
+    so it is useful for fixture correlation only and is not a deduplication key.
+    """
+    return fixture019._event(event_id, [("twin.attr", "string", "same")],
+                             body=("string", "legitimate-twin"))
+
+
+TWINS = [_twin_event("twin-1"), _twin_event("twin-2")]
+
+# One request with a valid record followed by an invalid one (duplicate attribute
+# key). The component validates the complete request before its first insert and
+# then excludes the invalid record: the valid record must be written, the invalid
+# one must not, and the batch must not be treated as a failure.
+MIXED_VALIDATION = [
+    fixture019._event("mixed-valid-1", [("mixed.attr", "string", "valid")],
+                      body=("string", "mixed-valid-1")),
+    fixture019._event("mixed-invalid-1", [("mixed.attr", "string", "invalid")],
+                      body=("string", "mixed-invalid-1"),
+                      duplicate=[("mixed.attr", "string", "duplicate")]),
+]
+
+# The same invalid record alone: nothing survives validation, so the batch is
+# rejected as a whole with a permanent error instead of being retried.
+INVALID_ONLY = [fixture019._event("invalid-only-1", [("mixed.attr", "string", "invalid")],
+                                  body=("string", "invalid-only-1"),
+                                  duplicate=[("mixed.attr", "string", "duplicate")])]
+
+
 def _phase_event(event_id):
     """One dedicated event per phase.
 
@@ -147,6 +187,10 @@ FAULT_QUEUE_2 = _phase_event("fault-queue-2")
 FAULT_CRASH_1 = _phase_event("fault-crash-1")
 FAULT_CRASH_2 = _phase_event("fault-crash-2")
 AMBIGUOUS_A = _phase_event("ambiguous-a-1")
+# The serving-response-loss counterpart: the canonical insert is answered
+# normally and the response to the *serving* insert is withheld after the
+# destination committed it.
+AMBIGUOUS_SERVING = _phase_event("ambiguous-serving-1")
 ACK_ON = _phase_event("ack-on-1")
 ACK_OFF = _phase_event("ack-off-1")
 
@@ -166,6 +210,25 @@ NO_TRUST_FORGED = [fixture019._event(
               ("service.name", "string", "probe")],
     scope=FORGED_SCOPE, body=("string", "no-trust-forged-1"))]
 
+# One request with two resource groups: the first carries the producer's forged
+# workspace, dataset, and marker; the second carries none. On a pipeline without
+# the stamping processor the second group is rejected with missing_trusted_scope,
+# which must invalidate the whole request instead of writing the forged group.
+NO_TRUST_MIXED_FORGED = fixture019._event(
+    "no-trust-mixed-forged", [("mixed.trust", "string", "forged")],
+    resource=[("lighthouse.workspace_id", "string", WS_FORGED),
+              ("lighthouse.dataset", "string", FORGED_DATASET),
+              ("lighthouse.scope_source", "string", "gateway"),
+              ("service.name", "string", "probe")],
+    body=("string", "no-trust-mixed-forged"))
+
+NO_TRUST_MIXED_PLAIN = fixture019._event(
+    "no-trust-mixed-plain", [("mixed.trust", "string", "plain")],
+    resource=[("service.name", "string", "probe")],
+    body=("string", "no-trust-mixed-plain"))
+
+NO_TRUST_MIXED = [NO_TRUST_MIXED_FORGED, NO_TRUST_MIXED_PLAIN]
+
 # The typed corpus: Experiment 019's 28 events (one of which carries duplicate
 # attribute keys and is rejected by the mapping component).
 TYPED_LOGS = list(fixture019.EVENTS)
@@ -179,8 +242,12 @@ LOG_LABELS = {
     "fault-a-1": FAULT_A_1,
     "fault-a-2": FAULT_A_2,
     "retry-a": RETRY_A,
+    "twins": TWINS,
+    "mixed": MIXED_VALIDATION,
+    "invalid-only": INVALID_ONLY,
     "no-trust": NO_TRUST,
     "no-trust-forged": NO_TRUST_FORGED,
+    "no-trust-mixed": NO_TRUST_MIXED,
     # One dedicated event per failure injection (see _fault_event).
     "fault-split": FAULT_SPLIT,
     "fault-split-retry": FAULT_SPLIT_RETRY,
@@ -191,9 +258,33 @@ LOG_LABELS = {
     "fault-crash-1": FAULT_CRASH_1,
     "fault-crash-2": FAULT_CRASH_2,
     "ambiguous-a": AMBIGUOUS_A,
+    "ambiguous-serving-a": AMBIGUOUS_SERVING,
     "ack-on": ACK_ON,
     "ack-off": ACK_OFF,
 }
+
+
+def _mixed_trust_request():
+    """One request whose two resource groups have different trust provenance.
+
+    The first group carries the producer's forged workspace, dataset, and marker
+    (this is the documented forged-marker gap: the component cannot tell a forged
+    marker from an injected one). The second group carries no reserved keys, so a
+    pipeline without the stamping processor rejects it with
+    ``missing_trusted_scope``. Both groups travel in one export request so the
+    harness can assert that the invalidating rejection writes nothing at all,
+    including the group that passed the marker check.
+    """
+    req = logs_service_pb2.ExportLogsServiceRequest()
+    req.resource_logs.extend([
+        fixture019._resource_logs(
+            NO_TRUST_MIXED_FORGED["resource"], fixture019._scope(),
+            [fixture019._log_record(NO_TRUST_MIXED_FORGED)]),
+        fixture019._resource_logs(
+            NO_TRUST_MIXED_PLAIN["resource"], fixture019._scope("lighthouse.fixture.untrusted"),
+            [fixture019._log_record(NO_TRUST_MIXED_PLAIN)], schema_url=""),
+    ])
+    return req.SerializeToString(), "no-trust-mixed logs: 2 records (forged + plain)"
 
 
 def _logs_request(events):
@@ -218,6 +309,8 @@ def _logs_request(events):
 def build_logs(label):
     if label not in LOG_LABELS:
         raise SystemExit(f"unknown logs fixture label: {label}")
+    if label == "no-trust-mixed":
+        return _mixed_trust_request()
     events = LOG_LABELS[label]
     return _logs_request(events), f"{label} logs: {len(events)} records"
 
