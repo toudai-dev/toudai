@@ -364,7 +364,9 @@ write_build_manifest() {
   {
     echo "experiment: 021-hybrid-layout-collector-integration"
     echo "generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "collector: $("$COLLECTOR" --version 2>&1 | head -2 | tr '\n' ' ')"
+    # "--version" output ends in a newline and a trailing space; strip trailing
+    # whitespace so the generated manifest stays clean under `git diff --check`.
+    echo "collector: $("$COLLECTOR" --version 2>&1 | head -2 | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     echo "collector_bin_sha256: $(sha256sum "$COLLECTOR" | cut -d' ' -f1)"
     echo "collector_source_pin: otelcol-contrib v0.161.0 (release tarball, see setup.sh)"
     echo "collector_build_inputs: $(cat "$ROOT/bin/otelcol-contrib.tar.gz.sha256" 2>/dev/null || echo "otelcol-contrib.tar.gz sha256 not recorded")"
