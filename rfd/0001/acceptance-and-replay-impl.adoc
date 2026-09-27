@@ -31,10 +31,13 @@ Experiment 021 measured one real cross-workspace downstream batch from the owned
 exporter: a single logged export carried both synthetic workspaces and the four
 stored event identities of its records, so batching across workspaces is observed
 on batch contents rather than inferred from two requests sharing a queue. The
-stored write identity is content-derived and stable across producer retries,
-crash recovery, and ambiguous-insert retries; no notification-driven or
-proprietary batch ID is involved. Cross-workspace query isolation and the
-final application-event encoding remain open. See
+stored write identity is content-derived and survives producer retries, crash
+recovery, and ambiguous-insert retries, which makes it usable for fixture
+correlation; it is not a deduplication key, because two legitimate events with
+identical content share it with a retransmission of the same request (the
+`retry-duplicate` twin control stored four rows under one identity). No
+notification-driven or proprietary batch ID is involved. Cross-workspace query
+isolation and the final application-event encoding remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
@@ -111,14 +114,20 @@ a `file_storage` queue recovered and drained the same batches after restart.
 Node loss was not tested.
 +
 Experiment 021 re-measured the boundary on the two-destination hybrid write:
-queue disabled meant the row was visible at acknowledgement (131.88 ms) while
-queue enabled acknowledged in 5.87 ms with the row visible only at 0.41 s, and a
+queue disabled meant the row was visible at acknowledgement (138.62 ms on the
+committed run) while queue enabled acknowledged in 6.39 ms with the row visible
+only at 0.36 s, and a
 SIGKILL with a file-backed queue left `exporter_lighthouse__logs`/`__traces` on
 disk and drained both destinations exactly once after restart with unchanged
-identity. Because the component validates the whole export request before its
-first insert, an invalid later record rejects the batch rather than half-writing
-it; per-record rejection after queue admission is still not producer visible.
-Node loss and multi-consumer queues remain open. See
+identity. Because the component validates and canonicalizes the whole export
+request before its first insert, a valid record followed by an invalid one in
+the same request cannot half-write: the valid record was written to both
+destinations and the invalid record was excluded per record (the batch summary
+reported `records: 1, rejected: 1`). The policy is per-record exclusion, not
+whole-batch rejection: only a request with nothing surviving validation, or one
+missing its gateway-injected trusted scope, is rejected as a whole. Per-record
+rejection after queue admission is still not producer visible. Node loss and
+multi-consumer queues remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Exercise OTLP partial success, permanent/retryable errors, full queues, retry expiry, and simultaneous destination failure; verify rejection/drop counters and producer-visible behavior rather than assuming all-or-nothing acceptance.
@@ -132,7 +141,8 @@ failure remains open.
 +
 Experiment 021 repeated the permanent-error, full-queue, and retry-expiry cases
 on the hybrid write: a permanently broken canonical destination left both
-destinations empty after five attempts, logged the component error, dropped the
+destinations empty after five recorded attempts on the committed run, logged the
+component error, dropped the
 batch after the retry budget, and still returned 200 to the producer with no
 per-record rejection; a bounded queue with a stalled destination returned
 `200, 200, 503, 503, 503, 503`, and the requests admitted to the stalled queue
@@ -148,15 +158,24 @@ counts 4/3/1/1 per fixture body) and confirmed that nothing deduplicates them.
 An ambiguous successful insert (ClickHouse commits but the response is lost) and
 real repeated S3 notifications were not injected.
 +
-Experiment 021 injected the ambiguous successful insert on the hybrid write: the
-destination committed the canonical row while the response was withheld from the
-client, the client failed at its 5 s timeout, the exporter retried, and the result
-was two canonical rows with the same identity and payload hash plus exactly one
-serving row, with `query_log` showing two finished canonical inserts. A producer
-retry of an identical request produced two serving rows and two canonical rows
-with one stored identity. Deduplication is unselected, so these duplicates are
-measured rather than suppressed; repeated object notifications and derived
-results remain open. See
+Experiment 021 injected the ambiguous successful insert on the hybrid write from
+both directions. With the *canonical* response lost, the destination committed
+the canonical row while the response was withheld, the client failed at its 5 s
+timeout, the exporter retried, and the result was two canonical rows with the
+same identity and payload hash plus exactly one serving row, with `query_log`
+showing two finished canonical inserts; that 2/1 shape is specific to this
+injection direction. With the *serving* response lost, the retry re-attempted
+both inserts and produced two canonical rows and two serving rows sharing one
+identity and one payload hash (`query_log` shows two finished serving inserts),
+so the serving destination does duplicate on retry as well. A producer retry of
+an identical request produced two serving rows and two canonical rows with one
+stored identity, and the twin control (two legitimate events with byte-identical
+wire content plus a retransmission) stored four rows under a single
+content-derived identity: that identity correlates fixture rows but cannot
+separate identical legitimate events from a retransmission and is not a
+deduplication key. Deduplication is unselected, so these duplicates are measured
+rather than suppressed; repeated object notifications and derived results remain
+open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 * [ ] Stop ClickHouse, verify overflow object contents, restore it, and drain catch-up; test failed inserts and missing/expired notifications, then verify recovery and object-cleanup safety.
 +
@@ -189,8 +208,15 @@ Experiment 021 added per-destination instrumentation in the owned component
 records by namespace and reason, rejected batches, and cross-workspace batch
 counts) and verified it during the outage, full-queue, permanent-failure, and
 split-write phases; the outage phase also recorded that the destination endpoint
-was actually refusing connections while the counters were scraped. Overflow
-backlog and catch-up progress signals remain unimplemented in this slice. See
+was actually refusing connections while the counters were scraped. The
+rejected-batch counter cannot conceal a partial drop from the mixed-validation
+phase: `all_records_rejected` increments only when no record survives validation,
+a request whose rejection invalidates it (missing trusted scope) is counted under
+that reason instead, and the component's batch summary reports the written and
+rejected records of the same export. The remaining gap is explicit: a whole-batch
+invalidation counts its reason but not the number of otherwise-valid records
+dropped with it. Overflow backlog and catch-up progress signals remain
+unimplemented in this slice. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 == PoC-required: reconstruction and recovery decision

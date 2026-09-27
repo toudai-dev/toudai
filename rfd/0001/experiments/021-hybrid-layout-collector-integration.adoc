@@ -3,11 +3,11 @@
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
 - *Status:* Completed (bounded slice); failover and object-store catch-up left open
-- *Run:* 2026-09-27T02:12:33Z-02:14:22Z (committed run, `./run.sh all`, exit 0)
+- *Run:* 2026-09-27T02:50:55Z-02:53:09Z (committed run, `./run.sh all`, exit 0)
 - *Source mutation:* None; disposable local ClickHouse service, synthetic fixtures, loopback only
 - *Branch/base:* `exp-021-hybrid-layout` on `5f01e039aea29604b4dad992819ea8006b0155cf` (PR #15 merge, verified `origin/main`)
 - *Harness:* `021-hybrid-layout-collector-integration/harness/`; layout and evidence files are described in link:021-hybrid-layout-collector-integration/README.adoc[the evidence README]
-- *Result:* 3082 recorded checks passed, 0 failed, across all thirteen phases (`results/phase-status.tsv`); the run exits nonzero on a missing, crashed, stale, or failing phase, so the passing summary cannot omit a phase. The committed run is the third consecutive passing `./run.sh all` after the shared-batch flush window was widened (a 700 ms window once expired ~40 ms before the fourth single-record request, stranding `batch-b`; the check had passed on a previous run, so the margin was measured, not assumed). `test-run-failure-modes.sh fast` passed 12/12 (coverage, empty phase, nonzero exit, failed check line, missing/stale status, verifier failures against an empty database, unknown phase) and `full` passed 16/16 including an injected verifier crash failing `run.sh all` and a normal full run.
+- *Result:* 3125 recorded checks passed, 0 failed, across all fifteen phases (`results/phase-status.tsv`); the run exits nonzero on a missing, crashed, stale, or failing phase, so the passing summary cannot omit a phase. The committed evidence is the normal run of `test-run-failure-modes.sh full` (18/18), whose injected-verifier-crash run also fails the harness as intended. Re-running the added phases exposed two harness defects, both fixed and now covered by the fast self-test (14/14): a leftover lost-response proxy kept port 19103 bound while the new proxy died on bind, so the `ambiguous-serving` phase silently exercised the spent injector (the harness now reaps a stale injector it can identify, fails closed on a foreign holder, and no longer overwrites a live predecessor's pid file); and the trusted-scope configuration scan skipped the pipelines that followed another pipeline body (the scan is line-anchored now, and the service-free `trust-config` phase checks it in the self-test). The shared-batch flush window is still the measured margin from the first run: a 700 ms window once expired ~40 ms before the fourth single-record request, stranding `batch-b`, so the 300 ms window is not assumed.
 
 == Question
 
@@ -42,9 +42,11 @@ Written before the run:
 * A stock `transform` *can* put typed values into a record's attributes, so any
   claim that no stock processor can produce typed data is wrong; the blocker is
   the write path, not the transformation.
-* Canonical-first, non-atomic writes will produce measurable duplicates on retry
-  and an ambiguous insert will duplicate the canonical row, while leaving exactly
-  one serving row; that is a property of the design, not a defect to hide.
+* Canonical-first, non-atomic writes will produce measurable duplicates on retry,
+  and the destination that duplicates depends on the injection: withholding the
+  canonical response duplicates the canonical row while the retry's serving write
+  lands once, and withholding the serving response duplicates both destinations.
+  That is a property of the design, not a defect to hide.
 * The Experiment 019/020 typed surface should survive when the mapping component
   supplies the types, with the caveat that unsupported operations remain
   query-layer obligations.
@@ -117,18 +119,26 @@ The fixture is Experiment 021's own emitter over the imported Experiment 019
 typed inventory: 27 typed log records covering the semantic surface, 3 spans
 (including one with a scope namespace and one with missing timing), 4 identity
 records for two synthetic credentials, a duplicate-attribute-key record, a
-negative-duration span, and two authentication probes. Expectations come from the
-typed inventory and literals authored from it; the verifier never reads the
-component's mapping code. The two credentials bound statically to workspaces
+negative-duration span, and two authentication probes. The failure phases add
+their own single-event fixtures: two byte-identical legitimate "twin" events for
+the identity-ambiguity control, a valid record followed by a duplicate-key record
+in one request for whole-request validation, an invalid-only request, one
+canonical-response-loss and one serving-response-loss event, and a request mixing
+a forged-scope group with a group that has no trusted scope. Expectations come
+from the typed inventory and literals authored from it; the verifier never reads
+the component's mapping code. The two credentials bound statically to workspaces
 `1111...` and `2222...` each carry a forged workspace/dataset/marker attempt.
 
 == Method
 
-`./run.sh all` resets the disposable databases, then runs thirteen phases:
+`./run.sh all` resets the disposable databases, then runs fifteen phases:
 `stock-probe` (source-verified stock write path and tested transforms),
 `semantics` (typed corpus, namespaces, forged attributes, mixed-workspace batch),
-`ack`, `outage`, `split`, `split-retry`, `canonical-permanent`, `queue-full`,
-`crash`, `ambiguous`, `retry-duplicate`, `no-trust`, and `files`. Each phase runs
+`ack`, `mixed-validation` (whole-request validation with a valid record followed
+by an invalid one), `outage`, `split`, `split-retry`, `canonical-permanent`,
+`queue-full`, `crash`, `ambiguous` (canonical response lost), `ambiguous-serving`
+(serving response lost), `retry-duplicate` (producer retry plus the
+identical-legitimate-events control), `no-trust`, and `files`. Each phase runs
 its own Collector configuration, records its exit status, and is verified by
 `verify.py`; `files` verifies the evidence set, the module pins, the repair
 results, and the stale-state preflight. The phases that assert exact row counts
@@ -141,16 +151,16 @@ first prove the fixture labels had no pre-existing rows.
 cd rfd/0001/experiments/021-hybrid-layout-collector-integration/harness
 ./setup.sh
 amp orb service start clickhouse-021 --command "$PWD/start-clickhouse.sh"
-./run.sh all                      # exit 0 on the committed run; 3082 checks
+./run.sh all                      # exit 0 on the committed run; 3125 checks
 ./run.sh split                    # single phase (per-phase runs are supported)
-./test-run-failure-modes.sh fast  # 12/12; no services needed
-./test-run-failure-modes.sh full  # 16/16; adds an injected verifier crash and a normal full run
+./test-run-failure-modes.sh fast  # 14/14; no services needed
+./test-run-failure-modes.sh full  # 18/18; adds an injected verifier crash and a normal full run
 cd component && go test ./... && go vet ./... && gofmt -l .
 ----
 
 == Results
 
-=== Semantics through the real path (2931 checks)
+=== Semantics through the real path (2935 checks)
 
 34 fixture records (31 log rows, 3 span rows) landed with 34 canonical payloads;
 every canonical `payload_sha256` matched the stored payload, and canonical and
@@ -198,18 +208,40 @@ ClickHouse rather than from the component:
 === Failure, acknowledgement, and duplicate behavior
 
 * *Ack versus visibility* (`ack`): with the queue disabled the row was visible at
-  acknowledgement (131.88 ms); with the queue enabled the producer saw 200 in
-  5.87 ms while the row became visible only at 0.41 s. Both requests were
-  accepted, so OTLP success is queue admission, not storage confirmation.
+  acknowledgement (138.62 ms); with the queue enabled the producer saw 200 in
+  6.39 ms while the row became visible only at 0.36 s. Both requests were
+  accepted, so OTLP success is queue admission, not storage confirmation. (These
+  are single-request wall-clock observations on this sandbox, not a latency
+  measurement; the acknowledgement/visibility boundary is the result.)
+* *Whole-request validation before the first write* (`mixed-validation`): one
+  request carrying a valid record followed by a duplicate-key record was
+  acknowledged (200) in 6.10 ms, with the valid row visible only after 3.06 s, and
+  it wrote the valid record to both destinations while excluding the invalid one.
+  The component's own
+  batch summary for that export recorded `records: 1, rejected: 1`, the rejection
+  was counted per record and not as an insert failure, and the batch-level
+  `all_records_rejected` counter stayed at `1` — the second request, which
+  contained only the invalid record, wrote nothing to either destination, was not
+  retried, and produced one permanent validation error in the log. The producer
+  saw 200 for both requests and never saw the rejection. The policy is *per-record
+  exclusion after whole-request validation*, not whole-batch rejection: only a
+  request with nothing surviving validation, or one missing its gateway-injected
+  scope, is rejected as a whole. Because `all_records_rejected` increments only
+  when no row survives, it cannot conceal a partial drop, and the batch summary
+  reports written and rejected counts for the same export. Inspection of the
+  mapping code also shows the remaining limitation of this counter set: for a
+  whole-batch invalidation (`missing_trusted_scope`) the reason is counted but the
+  number of otherwise-valid records dropped with it is not, so the batch counter,
+  not a per-record count, is the authority for that path.
 * *Transient outage* (`outage`): ClickHouse was stopped, the producer still
   received 200, an insert failure was counted, and after restart the queued
   request landed exactly once in both destinations with a shared identity.
 * *Permanent schema failure* (`canonical-permanent`): with the canonical
-  destination broken, the batch was attempted five times, no serving row was
-  written (the canonical insert is first), the component logged the schema error,
-  the helper dropped the batch after its retry budget, and the producer still saw
-  200 with no per-record rejection. Exporter validation and failures are not
-  producer-visible events on this path.
+  destination broken, the batch was attempted five times on the committed run, no
+  serving row was written (the canonical insert is first), the component logged
+  the schema error, the helper dropped the batch after its retry budget, and the
+  producer still saw 200 with no per-record rejection. Exporter validation and
+  failures are not producer-visible events on this path.
 * *Full queue* (`queue-full`): with a bounded queue and a stalled destination the
   producer saw `200, 200, 503, 503, 503, 503`; the 503s are queue-admission
   failures, admission happened before the queue filled, and the requests admitted
@@ -218,16 +250,28 @@ ClickHouse rather than from the component:
   file-backed queue held `exporter_lighthouse__logs`/`__traces` on disk when the
   process was SIGKILLed, and after restart the recovered batches drained into
   both destinations exactly once with unchanged write identity.
-* *Ambiguous insert* (`ambiguous`): the destination committed the canonical
-  insert while the response was withheld from the client (`query_log` records a
-  finished canonical insert during the withheld window and the row is present);
-  the client failed with a timeout at 5 s, the helper retried, and the result was
-  two canonical rows with the same identity and payload hash and exactly one
-  serving row. Deduplication is unselected: the duplicate canonical row is the
-  measured cost of the ambiguous acknowledgement, not a deduplicated no-op.
-* *Producer retry* (`retry-duplicate`): the same request sent twice was accepted
-  twice, producing two serving rows and two canonical rows with one stored
-  identity and identical payloads.
+* *Ambiguous insert, canonical response lost* (`ambiguous`): the destination
+  committed the canonical insert while the response was withheld from the client
+  (`query_log` records a finished canonical insert during the withheld window and
+  the row is present); the client failed with a timeout at 5 s, the helper
+  retried, and the result was two canonical rows with the same identity and
+  payload hash and exactly one serving row. The `2/1` shape is specific to this
+  injection direction: the retry's canonical insert duplicates a committed row
+  that the client never saw acknowledged.
+* *Ambiguous insert, serving response lost* (`ambiguous-serving`): the canonical
+  insert was answered normally, the serving insert committed, and only its
+  response was withheld; the retry re-attempted both inserts, so both destinations
+  ended with two rows sharing one identity and one payload hash, and `query_log`
+  records two finished serving inserts. Measured on this path, neither
+  destination "stays single" when the retry happens.
+* *Producer retry and identical legitimate events* (`retry-duplicate`): the same
+  request sent twice was accepted twice, producing two serving rows and two
+  canonical rows with one stored identity and identical payloads. The twin
+  control — two legitimately distinct events whose wire content is byte-identical,
+  plus one retransmission of that request — stored four serving rows and four
+  canonical rows under a single content-derived identity. The identity therefore
+  cannot distinguish identical legitimate events from a retransmission, so it is
+  a fixture-correlation key and not a deduplication key; nothing was deduplicated.
 * *Fail-closed probe without the trusted scope* (`no-trust`): the trusted
   database stayed untouched; in the untrusted probe pipeline a request without
   the injected scope was rejected whole (record counter `missing_trusted_scope`,
@@ -235,7 +279,10 @@ ClickHouse rather than from the component:
   workspace and the marker is indistinguishable from injected scope for this
   component and landed one row in the *untrusted probe database only*; that is a
   documented limitation of trusting a marker attribute, and it is why the gateway
-  phases are the authority for scope.
+  phases are the authority for scope. One request mixing a forged-scope group
+  with a group that had no trusted scope wrote nothing at all: an invalidating
+  rejection covers the whole request and is counted under its reason
+  (`missing_trusted_scope`), not as `all_records_rejected`.
 
 === Non-atomic split writes and the bounded repair
 
@@ -279,15 +326,30 @@ per-key type-name expression fails configuration load.
   checks are assertions over stored rows, and the query-layer rules (type
   filtering, aggregate errors, integer overflow, union/type expressions for
   unknown-key work) remain obligations on the future query path.
-* Canonical-first, non-atomic writes are chosen deliberately: a retried or
-  ambiguous write duplicates the canonical row while the serving row stays
-  single, and a serving failure leaves a canonical row without a serving row.
-  Both outcomes were measured, and both are recoverable from the retained
-  canonical payload. Exporter fan-out is not atomic and the harness does not
-  pretend otherwise.
-* Deduplication is unselected: identical producer retries and ambiguous-insert
-  retries duplicate rows, and the recorded write identity is content-derived and
-  stable, so a future dedup decision has a stable key to use.
+* Canonical-first, non-atomic writes are chosen deliberately, and the measured
+  duplicate shape is injection-specific: producer retry and serving-response-loss
+  duplicate both destinations (2/2), while canonical-response-loss duplicates the
+  canonical row while the retry's serving write lands once (2/1). Recoverability
+  is claimed only in the bounded sense recorded here — the retained canonical
+  payload supports the minimal serving-row repair — and full reconstruction of the
+  typed serving representation stays an open checklist item. Exporter fan-out is
+  not atomic and the harness does not pretend otherwise.
+* Trusted scope is configuration-dependent, not provenance. The configuration
+  assertions show both workspace processors upsert the reserved workspace,
+  dataset, and marker keys, that the owned exporter is referenced only by the
+  stamped `logs/ws-a`, `logs/ws-b`, `traces/ws-a`, and `traces/ws-b` pipelines,
+  and that the fail-closed probe has no stamping processor. That is evidence about
+  the tested configuration, not about the producer: the exported ClickHouse
+  endpoint must be unreachable except through those pipelines, which is an
+  operational control the harness cannot assert, and catch-up provenance (a
+  replayed object arriving through a different path) is not tested here.
+* Deduplication remains unselected, and the measured identity is not a suitable
+  key for it: two legitimately distinct events with byte-identical content share
+  the content-derived identity with a retransmission of the same request. The
+  identity correlates fixture rows across canonical and serving destinations,
+  producer retries, crash recovery, and ambiguous-insert retries; choosing a
+  deduplication mechanism, and an identity that can separate those cases, remains
+  an open decision.
 * The layout is provisional for this PoC trial and is not retained-scale
   qualified: it inherits the 019/020 micro-evidence for the encodings and adds
   real-path correctness and failure behavior, not storage, cost, or latency
@@ -296,32 +358,46 @@ per-key type-name expression fails configuration load.
 == Not measured / open
 
 * Object-store failover, notification-driven catch-up, and object replay are
-  untouched here; Experiment 018's manual replay evidence stands and S3/SQS
-  notification validation remains open.
+  untouched here; Experiment 018's manual replay evidence stands, manual replay is
+  not S3/SQS notification validation, and catch-up provenance (whether a replayed
+  object passes the same stamping and trusted-scope checks) remains untested.
 * Dynamic key rotation/revocation, key-derived (as opposed to statically bound)
   workspace resolution, dataset routing rejection for unknown datasets, and
   broader authorization guarantees are out of scope; only two synthetic
-  credentials bound statically to two workspaces were exercised.
+  credentials bound statically to two workspaces were exercised. The marker check
+  is a pipeline-composition guard, not an authentication step: the harness does
+  not prove that the exporter is unreachable except through the stamping
+  pipelines.
 * Node loss, multi-consumer queue behavior, sustained ingestion, and
   cross-workspace isolation across a shared batch downstream of the write were
   not tested (the mixed batch is measured as *contents*; whether any downstream
   consumer keeps those rows isolated is a query-layer question).
 * OTLP partial success was not produced: the receiver does not validate records
   individually and the component's rejections happen after queue admission, so no
-  producer-visible per-record rejection was claimed.
-* Rebuilding a full serving layout from canonical data, backup/restore, and
-  deduplication remain open decisions.
+  producer-visible per-record rejection was claimed. What the mixed-validation
+  phase measures is the component's own policy and counters, not what the
+  producer can observe.
+* The content-derived write identity is not a deduplication key (identical
+  legitimate events share it with retransmissions) and no deduplication mechanism
+  was selected or implemented.
+* Rebuilding a full serving layout from canonical data, backup/restore, and the
+  deduplication decision remain open.
 
 == Follow-ups
 
 * Decide whether the owned exporter remains the acceptance-path component or
-  whether a narrower component (for example a mapping processor plus a stock
-  exporter that can be configured with additional columns) should be evaluated;
-  this experiment measured the write-path constraint, not the long-term
-  component boundary.
-* Decide the deduplication mechanism and whether canonical duplicates are
-  tolerated, aggregated, or removed, using the content-derived identity measured
-  here.
+  whether a narrower component should be evaluated. One shape to consider is a
+  hypothetical upstream enhancement of the stock exporter that adds configurable
+  extra columns; the pinned v0.161.0 exporter has no such option (its INSERT
+  lists are embedded and `config.go` offers no extra-column or payload-column
+  setting), so this is not an available alternative today and would still not by
+  itself carry the typed-Map and canonical-payload semantics. This experiment
+  measured the write-path constraint, not the long-term component boundary.
+* Decide the duplicate-handling mechanism and whether canonical duplicates are
+  tolerated, aggregated, or removed. The content-derived identity measured here
+  correlates fixture rows but cannot separate two legitimate identical events from
+  a retransmission, so the decision needs an identity/deduplication design rather
+  than only a duplicate-tolerance policy.
 * Decide whether the minimal-bookkeeping `record_other` kind map is acceptable
   for canonical-only types once the query-layer rules for unsupported operations
   are specified.
