@@ -1,10 +1,12 @@
 semantics	typed	0
-semantics	identity-a	0
-semantics	identity-b	0
+semantics	identity-ws-a	0
+semantics	identity-ws-b	0
 semantics	batch-a	0
 semantics	batch-b	0
 ack	ack-off	0
 ack	ack-on	0
+mixed-validation	mixed-valid-1	0
+mixed-validation	invalid-only-1	0
 outage	fault-outage	0
 split	fault-split	0
 split-retry	fault-split-retry	0
@@ -14,6 +16,9 @@ queue-full	fault-queue-2	0
 crash	fault-crash-1	0
 crash	fault-crash-2	0
 ambiguous	ambiguous-a	0
+ambiguous-serving	ambiguous-serving-1	0
 retry-duplicate	retry-a	0
+retry-duplicate	legitimate-twin	0
 no-trust	no-trust	0
 no-trust	no-trust-forged	0
+no-trust	no-trust-mixed	0

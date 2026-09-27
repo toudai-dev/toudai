@@ -1,3 +1,7 @@
+{"phase": "semantics", "check": "trust.stamping_upserts_reserved_keys", "ok": true, "detail": "both workspace processors must upsert workspace, dataset, and marker; found 6 upsert actions"}
+{"phase": "semantics", "check": "trust.owned_exporter_only_workspace_pipelines", "ok": true, "detail": "pipelines exporting to the owned exporter: ['logs/ws-a', 'logs/ws-b', 'traces/ws-a', 'traces/ws-b']"}
+{"phase": "semantics", "check": "trust.owned_exporter_pipelines_are_stamped", "ok": true, "detail": "pipelines reaching the owned exporter without a stamping processor: []"}
+{"phase": "semantics", "check": "trust.fail_closed_probe_has_no_stamping", "ok": true, "detail": "the fail-closed probe configuration injects trusted scope"}
 {"phase": "semantics", "check": "query.typed-1.serving_present", "ok": true, "detail": "expected exactly one serving row for fixture identity typed-1, got 1"}
 {"phase": "semantics", "check": "query.typed-1.canonical_count", "ok": true, "detail": "expected 1 canonical rows, got 1"}
 {"phase": "semantics", "check": "query.typed-1.serving_count", "ok": true, "detail": "expected 1 serving rows, got 1"}

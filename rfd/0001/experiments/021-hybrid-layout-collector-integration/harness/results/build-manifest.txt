@@ -1,5 +1,5 @@
 experiment: 021-hybrid-layout-collector-integration
-generated: 2026-09-27T02:12:33Z
+generated: 2026-09-27T02:50:55Z
 collector: lighthouse-collector-021 version 0.1.0-exp021
 collector_bin_sha256: fdc29e4833e3739320a7a799e5801d21f910932dde1a4d2f33a7a0c3eb2c74a4
 collector_source_pin: otelcol-contrib v0.161.0 (release tarball, see setup.sh)

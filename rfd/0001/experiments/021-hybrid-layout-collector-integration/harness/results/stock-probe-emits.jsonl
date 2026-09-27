@@ -1,2 +1,2 @@
-{"signal":"logs","label":"typed","description":"typed logs: 28 records","url":"http://127.0.0.1:4337/v1/logs","status":200,"elapsed_ms":9.15,"response_body":"\n","request_bytes":4164,"sent_at":"2026-09-27T02:12:35.353262+00:00"}
-{"signal":"traces","label":"typed","description":"typed spans: 4 spans","url":"http://127.0.0.1:4337/v1/traces","status":200,"elapsed_ms":7.28,"response_body":"\n","request_bytes":2748,"sent_at":"2026-09-27T02:12:35.579505+00:00"}
+{"signal":"logs","label":"typed","description":"typed logs: 28 records","url":"http://127.0.0.1:4337/v1/logs","status":200,"elapsed_ms":9.23,"response_body":"\n","request_bytes":4164,"sent_at":"2026-09-27T02:50:57.285519+00:00"}
+{"signal":"traces","label":"typed","description":"typed spans: 4 spans","url":"http://127.0.0.1:4337/v1/traces","status":200,"elapsed_ms":6.56,"response_body":"\n","request_bytes":2748,"sent_at":"2026-09-27T02:50:57.515977+00:00"}

@@ -37,4 +37,6 @@ ack-on-1	lh1-81ef8a66f7347767e215c07942c5b846	log
 ack-off-1	lh1-68bc0982b5387ee4a065869dd714a706	log
 fault-split-1	lh1-9306003f3e9e7e77892db929ab66d704	log
 fault-split-retry-1	lh1-c0a5ee0546911b5a7dc125281c1c2d2c	log
+ambiguous-serving-1	lh1-10a51afc31657fb48775530673e9d5da	log
 retry-a-1	lh1-b45f2534dcfec3df9e2805fd9c0f7f7d	log
+twin-1	lh1-158ad664abd3d2b228f8dee33caff7b7	log
