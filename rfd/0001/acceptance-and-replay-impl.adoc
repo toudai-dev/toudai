@@ -75,8 +75,11 @@ reusing `exporterhelper` for queue/retry/timeout) and wrote the canonical payloa
 plus the hybrid serving tables through a real OTLP path; typed attributes,
 resource/scope namespaces, span scope, and lossless canonical retrieval were
 verified against independent fixture expectations for logs and spans, with native
-metrics outside the slice. Long-term component boundary, dataset routing, and
-retained-scale qualification remain open. See
+metrics outside the slice. Span timestamps were verified under the accepted
+preserve-and-flag policy for reversed timing (both supplied timestamps kept, NULL
+duration, explicit diagnostic) alongside missing and valid zero durations.
+Long-term component boundary, dataset routing, and retained-scale qualification
+remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 * [ ] Integrate authenticated tenant policy before both exports; demonstrate normal-path ingestion and exact-event retrieval against independent fixture expectations.
 +

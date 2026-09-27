@@ -320,8 +320,14 @@ number precision. Casts and mixed integer/float aggregation are deferred.
 Keep timestamp and duration units explicit and preserve received nanosecond
 precision where present. A missing duration is not a zero-duration span; malformed
 span timing must be rejected or explicitly flagged, never converted by unsigned
-underflow into a huge duration. Metric values retain their separate OTel signal
-semantics; this scalar event contract does not redefine native metrics.
+underflow into a huge duration. The accepted policy for a span whose end precedes
+its start is to preserve the span and both supplied timestamps, keep the derived
+duration unavailable rather than zero, and carry an explicit machine-readable
+timing diagnostic (Experiment 021). Missing timing, reversed timing, and a valid
+zero duration stay distinct, and how an unavailable duration is presented to a
+user is a rendering decision rather than a reason to discard or fabricate the
+span. Metric values retain their separate OTel signal semantics; this scalar event
+contract does not redefine native metrics.
 
 == Open Questions
 

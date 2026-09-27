@@ -68,7 +68,15 @@ separation, and canonical round-trip all held for logs and spans, and known-type
 readback used direct map guards on the matching typed Map rather than scanning
 five Maps. This is real-path representation conformance on a tiny corpus: it adds
 no storage, cost, or latency evidence, does not select DDL, and leaves the
-query-layer error, overflow, and unknown-key union obligations open. See
+query-layer error, overflow, and unknown-key union obligations open. The
+experiment also fixes the span-duration count contract for a future aggregate: a
+span with missing or reversed timing stores an unavailable (NULL) duration and is
+excluded from contributing-value counts, a reversed span is still preserved,
+searchable by its supplied timestamps, and counted in an explicit timing-error
+count, and a valid zero duration contributes with value 0 (the fixture-derived
+expectation is 4 contributing / 3 excluded / 2 timing errors of 7 spans). No
+duration aggregate was implemented and presentation of an unavailable duration is
+open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.

@@ -54,5 +54,16 @@ inventory. That is representation conformance for logs and spans through the
 component; the operator workflow, metrics, and the query layer's unsupported-
 operation errors remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
++
+Span timing through the same path follows the accepted preserve-and-flag policy:
+a span whose end precedes its start is preserved with both supplied timestamps and
+an unavailable (NULL) duration plus an explicit `end_before_start` diagnostic;
+missing timing and a valid zero duration stay distinct (`missing` with NULL versus
+`ok` with zero). The canonical payload keeps the supplied timestamps and omits the
+unavailable duration, and the fixture-derived contributing/excluded/error counts
+(4/3/2 of 7 spans) are recorded as the count contract for future duration
+aggregates. How an unavailable duration is presented and counted in a waterfall or
+dashboard remains open, and the earlier rejection behavior measured before the
+policy change is superseded in that experiment's report.
 
 * [ ] Provide a minimal operator-facing client and record an operator completing time comparison, grouping, heatmap/percentile inspection, outlier identification, and exact-event drill-down against the fixture; verify results against its known events.

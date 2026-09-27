@@ -3,11 +3,11 @@
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
 - *Status:* Completed (bounded slice); failover and object-store catch-up left open
-- *Run:* 2026-09-27T02:50:55Z-02:53:09Z (committed run, `./run.sh all`, exit 0)
+- *Run:* 2026-09-27T08:24:09Z-08:26:28Z (committed run, `./run.sh all`, exit 0)
 - *Source mutation:* None; disposable local ClickHouse service, synthetic fixtures, loopback only
 - *Branch/base:* `exp-021-hybrid-layout` on `5f01e039aea29604b4dad992819ea8006b0155cf` (PR #15 merge, verified `origin/main`)
 - *Harness:* `021-hybrid-layout-collector-integration/harness/`; layout and evidence files are described in link:021-hybrid-layout-collector-integration/README.adoc[the evidence README]
-- *Result:* 3125 recorded checks passed, 0 failed, across all fifteen phases (`results/phase-status.tsv`); the run exits nonzero on a missing, crashed, stale, or failing phase, so the passing summary cannot omit a phase. The committed evidence is the normal run of `test-run-failure-modes.sh full` (18/18), whose injected-verifier-crash run also fails the harness as intended. Re-running the added phases exposed two harness defects, both fixed and now covered by the fast self-test (14/14): a leftover lost-response proxy kept port 19103 bound while the new proxy died on bind, so the `ambiguous-serving` phase silently exercised the spent injector (the harness now reaps a stale injector it can identify, fails closed on a foreign holder, and no longer overwrites a live predecessor's pid file); and the trusted-scope configuration scan skipped the pipelines that followed another pipeline body (the scan is line-anchored now, and the service-free `trust-config` phase checks it in the self-test). The shared-batch flush window is still the measured margin from the first run: a 700 ms window once expired ~40 ms before the fourth single-record request, stranding `batch-b`, so the 300 ms window is not assumed.
+- *Result:* 3518 recorded checks passed, 0 failed, across all fifteen phases (`results/phase-status.tsv`); the run exits nonzero on a missing, crashed, stale, or failing phase, so the passing summary cannot omit a phase. The committed evidence is the normal run of `test-run-failure-modes.sh full` (19/19), whose injected-verifier-crash run also fails the harness as intended. The fast self-test (15/15) includes the span-timing fixture regression: missing timing, reversed timing, and a valid zero duration must stay distinct, and the mixed request must really carry one valid and one reversed span. Re-running the added phases exposed two harness defects, both fixed and now covered by the fast self-test: a leftover lost-response proxy kept port 19103 bound while the new proxy died on bind, so the `ambiguous-serving` phase silently exercised the spent injector (the harness now reaps a stale injector it can identify, fails closed on a foreign holder, and no longer overwrites a live predecessor's pid file); and the trusted-scope configuration scan skipped the pipelines that followed another pipeline body (the scan is line-anchored now, and the service-free `trust-config` phase checks it in the self-test). The shared-batch flush window is still the measured margin from the first run: a 700 ms window once expired ~40 ms before the fourth single-record request, stranding `batch-b`, so the 300 ms window is not assumed.
 
 == Question
 
@@ -27,6 +27,10 @@ layout through a real OTLP -> Collector path. This experiment asks:
 . Does the representation keep the Experiment 018/019/020 semantic surface
   (strict type separation, presence versus empty, extreme and non-finite values,
   bytes/nested identity, namespaces, span scope) through that path?
+. How does the real path carry a span whose end precedes its start once the
+  approved policy preserves it: are both supplied timestamps kept, is the derived
+  duration unavailable rather than rejected or zero-substituted, and do missing
+  timing, reversed timing, and a valid zero duration stay distinct?
 
 This is a bounded integration trial: no automatic schema promotion, dynamic
 authorization service, production query planner, cloud capacity test, or
@@ -50,6 +54,12 @@ Written before the run:
 * The Experiment 019/020 typed surface should survive when the mapping component
   supplies the types, with the caveat that unsupported operations remain
   query-layer obligations.
+
+The span-timing policy was revised after the first run: the approved behavior
+preserves a span whose end precedes its start with both supplied timestamps, an
+unavailable derived duration, and an explicit diagnostic instead of rejecting it.
+The pre-policy hypothesis and the first run's measurement are therefore superseded
+for that case only; the revised behavior is measured in the results below.
 
 == Component boundary and scope note
 
@@ -116,24 +126,27 @@ this corpus.
 == Dataset and fixture
 
 The fixture is Experiment 021's own emitter over the imported Experiment 019
-typed inventory: 27 typed log records covering the semantic surface, 3 spans
-(including one with a scope namespace and one with missing timing), 4 identity
-records for two synthetic credentials, a duplicate-attribute-key record, a
-negative-duration span, and two authentication probes. The failure phases add
-their own single-event fixtures: two byte-identical legitimate "twin" events for
-the identity-ambiguity control, a valid record followed by a duplicate-key record
-in one request for whole-request validation, an invalid-only request, one
-canonical-response-loss and one serving-response-loss event, and a request mixing
-a forged-scope group with a group that has no trusted scope. Expectations come
-from the typed inventory and literals authored from it; the verifier never reads
-the component's mapping code. The two credentials bound statically to workspaces
-`1111...` and `2222...` each carry a forged workspace/dataset/marker attempt.
+typed inventory: 27 typed log records covering the semantic surface, 5 spans
+(one with a scope namespace, one with missing timing, one with a valid zero
+duration, and one with reversed timing), 4 identity records for two synthetic
+credentials, a duplicate-attribute-key record, and two authentication probes.
+The failure phases add their own single-event fixtures: two byte-identical
+legitimate "twin" events for the identity-ambiguity control, a valid record
+followed by a duplicate-key record in one request for whole-request validation,
+an invalid-only request, one canonical-response-loss and one serving-response-loss
+event, a request mixing a forged-scope group with a group that has no trusted
+scope, and a one-request mixed batch carrying one valid span and one reversed
+span. Expectations come from the typed inventory and literals authored from it;
+the verifier never reads the component's mapping code. The two credentials bound
+statically to workspaces `1111...` and `2222...` each carry a forged
+workspace/dataset/marker attempt.
 
 == Method
 
 `./run.sh all` resets the disposable databases, then runs fifteen phases:
 `stock-probe` (source-verified stock write path and tested transforms),
-`semantics` (typed corpus, namespaces, forged attributes, mixed-workspace batch),
+`semantics` (typed corpus, namespaces, forged attributes, mixed-workspace batch,
+and the mixed valid+reversed timing request),
 `ack`, `mixed-validation` (whole-request validation with a valid record followed
 by an invalid one), `outage`, `split`, `split-retry`, `canonical-permanent`,
 `queue-full`, `crash`, `ambiguous` (canonical response lost), `ambiguous-serving`
@@ -151,18 +164,18 @@ first prove the fixture labels had no pre-existing rows.
 cd rfd/0001/experiments/021-hybrid-layout-collector-integration/harness
 ./setup.sh
 amp orb service start clickhouse-021 --command "$PWD/start-clickhouse.sh"
-./run.sh all                      # exit 0 on the committed run; 3125 checks
+./run.sh all                      # exit 0 on the committed run; 3518 checks
 ./run.sh split                    # single phase (per-phase runs are supported)
-./test-run-failure-modes.sh fast  # 14/14; no services needed
-./test-run-failure-modes.sh full  # 18/18; adds an injected verifier crash and a normal full run
+./test-run-failure-modes.sh fast  # 15/15; no services needed
+./test-run-failure-modes.sh full  # 19/19; adds an injected verifier crash and a normal full run
 cd component && go test ./... && go vet ./... && gofmt -l .
 ----
 
 == Results
 
-=== Semantics through the real path (2935 checks)
+=== Semantics through the real path (3322 checks)
 
-34 fixture records (31 log rows, 3 span rows) landed with 34 canonical payloads;
+38 fixture records (31 log rows, 7 span rows) landed with 38 canonical payloads;
 every canonical `payload_sha256` matched the stored payload, and canonical and
 serving rows shared one content-derived write identity per fixture
 (`results/identity-map.tsv`). Measured representation facts, all read back from
@@ -200,22 +213,66 @@ ClickHouse rather than from the component:
   not inferred from two requests sharing a queue.
 * Credential validation is real and in the custom distribution: a request with no
   token and one with a wrong token received HTTP 401 and produced no rows.
-* A record with duplicate attribute keys and a span whose end precedes its start
-  were rejected whole (no canonical row, no serving row, recorded rejection
-  counters), and a span with missing timing stored a NULL duration instead of an
-  unsigned underflow.
+* A record with duplicate attribute keys was rejected per record (no canonical
+  row, no serving row, recorded rejection counter). The span-timing policy is
+  measured separately below: the first run's whole-span rejection of a reversed
+  span is superseded by the approved preserve-and-flag behavior.
+
+=== Span timing through the real path (reversed spans preserved)
+
+The approved policy for a span whose end precedes its start is preserve-and-flag,
+and the run measures it in both destinations. The first run (pre-policy) measured
+the opposite: the reversed span was rejected whole, with no serving row, no
+canonical row, and a `negative_span_duration` rejection counter. That measurement
+is superseded; this run's checks assert the revised behavior, and the component
+counter check now asserts that no `negative_span_duration` rejection occurs.
+
+* Both supplied timestamps are stored exactly as received: the reversed fixture
+  keeps `ts = 1788246000123456789` and `end_ts = 1788246000123455789`
+  (`end < start`), and the missing-timing fixture keeps `0/0`. The row is
+  searchable by its real timestamps and by its span name.
+* The derived duration is unavailable, not substituted: `duration_ns` is NULL for
+  the reversed span and for the missing-timing span, and stays `0` for the valid
+  zero-duration span.
+* Three distinct machine-readable diagnostics are stored in
+  `span_timing_status`: `ok` (observable duration, including zero), `missing`
+  (OTLP 0/0), and `end_before_start` (data error). The stored rows are in
+  `results/semantics-span-timing.jsonl`; a check asserts the three values are
+  pairwise distinct for the fixture's missing, reversed, and zero spans.
+* The canonical payload keeps the supplied `start_ns`/`end_ns` and carries no
+  derived `duration_ns` when the duration is unavailable, so the serving
+  diagnostic and the unavailable duration are reconstructable from the retained
+  payload by the documented rule (the verifier rebuilds them from the canonical
+  start/end and compares against the fixture-derived expectation).
+* The mixed request is one export item: one batch summary line names both stored
+  identities of the valid+reversed request, and both spans landed in both
+  destinations, so the policy does not depend on the request being all-valid or
+  all-reversed.
+* Independent aggregate expectations, derived from the fixture inventory rather
+  than from the stored rows: 7 spans total, 4 contributing (observable duration,
+  the zero-duration span included), 3 excluded (1 missing + 2 reversed), 2 timing
+  errors (the reversed subset), and 3 distinct diagnostics. This is the count
+  contract a future duration aggregate must honour; it is not a production
+  aggregate or a latency claim.
+* Presentation is future work: storing the unavailable duration with a
+  diagnostic is what this slice implements; how a waterfall or aggregate surface
+  renders an unavailable duration (and how it labels the data error) is not
+  implemented or decided here. The rationale for the policy came from an external
+  live observation that an OTLP HTTP intake accepted reversed spans while
+  deriving huge positive durations; that external report is not committed in this
+  repository.
 
 === Failure, acknowledgement, and duplicate behavior
 
 * *Ack versus visibility* (`ack`): with the queue disabled the row was visible at
-  acknowledgement (138.62 ms); with the queue enabled the producer saw 200 in
-  6.39 ms while the row became visible only at 0.36 s. Both requests were
+  acknowledgement (85.07 ms); with the queue enabled the producer saw 200 in
+  6.99 ms while the row became visible only at 0.36 s. Both requests were
   accepted, so OTLP success is queue admission, not storage confirmation. (These
   are single-request wall-clock observations on this sandbox, not a latency
   measurement; the acknowledgement/visibility boundary is the result.)
 * *Whole-request validation before the first write* (`mixed-validation`): one
   request carrying a valid record followed by a duplicate-key record was
-  acknowledged (200) in 6.10 ms, with the valid row visible only after 3.06 s
+  acknowledged (200) in 9.19 ms, with the valid row visible only after 3.01 s
   (queue enabled, batch window 4 records / 3 s). `pushLogs`
   (`harness/component/lighthouseexporter/exporter.go`) validates and canonicalizes
   the complete request first, then excludes the invalid record from both
@@ -243,11 +300,11 @@ ClickHouse rather than from the component:
   `consumererror.NewPermanent(errMissingTrustedScope)` *before* any insert, so
   that request is rejected as a whole. In `no-trust`, the mixed untrusted request
   (one forged-scope group plus one group without scope) was acknowledged 200 in
-  5.91 ms and produced `dropped_items: 2` in a single drop line with no retry
+  5.92 ms and produced `dropped_items: 2` in a single drop line with no retry
   attempt, writing nothing at all, with
   `rejected_batches{missing_trusted_scope}=1` and
   `rejected_records{missing_trusted_scope,resource}=2`. All three requests in that
-  phase were acknowledged 200 (6.22 ms, 10.36 ms, 5.91 ms), so this contrast is
+  phase were acknowledged 200 (6.54 ms, 6.98 ms, 5.92 ms), so this contrast is
   also post-admission and never producer-visible.
 * *Counter conflation in the stock helper* (`mixed-validation`): the pinned
   helper reads the item count before the send and credits every item to `sent`
@@ -273,7 +330,7 @@ ClickHouse rather than from the component:
   received 200, an insert failure was counted, and after restart the queued
   request landed exactly once in both destinations with a shared identity.
 * *Permanent schema failure* (`canonical-permanent`): with the canonical
-  destination broken, the batch was attempted five times on the committed run, no
+  destination broken, the batch was attempted six times on the committed run, no
   serving row was written (the canonical insert is first), the component logged
   the schema error, the helper dropped the batch after its retry budget, and the
   producer still saw 200 with no per-record rejection. Exporter validation and
@@ -333,12 +390,12 @@ harness states that rather than hiding it:
 * `split`: canonical committed (1 row) and the serving destination failed
   (`insert_failures{destination="serving"}=1`, `partial_write_batches=1`) with
   retries disabled, leaving one canonical row and no serving row.
-* `split-retry`: with retries enabled, the same split write was attempted seven
-  times, producing seven canonical rows for one producer event and no serving
+* `split-retry`: with retries enabled, the same split write was attempted eight
+  times, producing eight canonical rows for one producer event and no serving
   row; the canonical row count tracked the recorded serving attempts.
 * The bounded repair derives a *minimal* serving row from the retained canonical
   payload (routing identity, timestamps, kind, payload checksum) and landed one
-  row per canonical row (1/1 and 7/7, recorded in
+  row per canonical row (1/1 and 8/8, recorded in
   `results/split-*-repair-result.txt`). Rebuilding the full typed serving
   representation from canonical data is not implemented as a service here; the
   semantics phase verifies those reconstruction rules against the fixture
@@ -377,6 +434,17 @@ per-key type-name expression fails configuration load.
   whole with a permanent (non-retryable) error. Whether silent per-record
   exclusion is the right product behavior is not decided here; the measured
   semantics are recorded and the policy decision stays open.
+* Span timing follows the approved preserve-and-flag policy rather than the first
+  run's rejection policy. A span whose end precedes its start keeps both supplied
+  timestamps and stays searchable; its derived duration is unavailable (NULL in
+  serving, absent in the canonical payload) with an explicit `end_before_start`
+  diagnostic, never a zero substitute and never an unsigned underflow. Missing
+  timing (`missing`, NULL duration) and a valid zero duration (`ok`,
+  `duration_ns = 0`) stay distinct from it. Duration aggregates must exclude
+  unavailable durations from contributing counts and can report the reversed
+  subset as an explicit timing-error count; how an unavailable duration is
+  presented (for example in a waterfall) is presentation work and is not
+  implemented here.
 * Canonical-first, non-atomic writes are chosen deliberately, and the measured
   duplicate shape is injection-specific: producer retry and serving-response-loss
   duplicate both destinations (2/2), while canonical-response-loss duplicates the
@@ -435,6 +503,11 @@ per-key type-name expression fails configuration load.
   was selected or implemented.
 * Rebuilding a full serving layout from canonical data, backup/restore, and the
   deduplication decision remain open.
+* The span-timing diagnostic is stored and verified, but no query-layer or UI
+  presentation semantics are defined for an unavailable duration (for example a
+  waterfall placeholder or an explicit data-error label), and no duration
+  aggregate was implemented: the contributing/excluded/error counts are
+  fixture-derived expectations, not an accelerated or production aggregate.
 
 == Follow-ups
 
@@ -460,6 +533,11 @@ per-key type-name expression fails configuration load.
 * Decide whether the minimal-bookkeeping `record_other` kind map is acceptable
   for canonical-only types once the query-layer rules for unsupported operations
   are specified.
+* Decide how an unavailable duration is presented and counted: the stored
+  `span_timing_status` vocabulary (`ok`/`missing`/`end_before_start`) and the
+  NULL duration are implemented, but the waterfall/presentation semantics, the
+  aggregate contributing-count rule, and any user-facing data-error label remain
+  to be specified with the query and presentation plans.
 * Schedule the failover/object-store catch-up and retained-scale checks in
   link:../acceptance-and-replay-impl.adoc[the acceptance and replay plan] and
   link:../experiments-impl.adoc[the experiment plan]; this slice does not
