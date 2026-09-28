@@ -1,0 +1,15 @@
+{"phase": "split-retry", "check": "query.emit.split-retry.fault-split-retry.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
+{"phase": "split-retry", "check": "fail.split-retry.canonical_committed_first", "ok": true, "detail": "expected the canonical destination to have committed, got 7 rows"}
+{"phase": "split-retry", "check": "fail.split-retry.serving_missing", "ok": true, "detail": "expected no serving row while the serving destination is broken, got 0"}
+{"phase": "split-retry", "check": "fail.split-retry.partial_write_counter", "ok": true, "detail": "no partial-write counter for the split write"}
+{"phase": "split-retry", "check": "fail.split-retry.retried", "ok": true, "detail": "expected retries, saw 7.0 attempts"}
+{"phase": "split-retry", "check": "fail.split-retry.canonical_duplicates_track_attempts", "ok": true, "detail": "canonical rows=7 serving attempts=7.0: a retried split write duplicates the committed destination once per attempt"}
+{"phase": "split-retry", "check": "canon.split-retry.payload_intact", "ok": true, "detail": "canonical payload checksum mismatch"}
+{"phase": "split-retry", "check": "canon.split-retry.payload_intact", "ok": true, "detail": "canonical payload checksum mismatch"}
+{"phase": "split-retry", "check": "canon.split-retry.payload_intact", "ok": true, "detail": "canonical payload checksum mismatch"}
+{"phase": "split-retry", "check": "canon.split-retry.payload_intact", "ok": true, "detail": "canonical payload checksum mismatch"}
+{"phase": "split-retry", "check": "canon.split-retry.payload_intact", "ok": true, "detail": "canonical payload checksum mismatch"}
+{"phase": "split-retry", "check": "canon.split-retry.payload_intact", "ok": true, "detail": "canonical payload checksum mismatch"}
+{"phase": "split-retry", "check": "canon.split-retry.payload_intact", "ok": true, "detail": "canonical payload checksum mismatch"}
+{"phase": "split-retry", "check": "xdest.split-retry.canonical_without_serving_link", "ok": true, "detail": "a canonical-only row should have no serving row to correlate"}
+{"phase": "split-retry", "check": "fail.split-retry.no_repair_expected_yet", "ok": true, "detail": "the repair must run after verification so the split is observed, not masked"}

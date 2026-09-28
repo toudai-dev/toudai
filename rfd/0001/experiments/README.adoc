@@ -124,4 +124,8 @@ conditions. Add a new run or record and link the relationship.
 |Completed
 |link:020-native-typed-map-comparison.adoc[Native typed Map comparison]
 
+|021
+|Completed (bounded slice)
+|link:021-hybrid-layout-collector-integration.adoc[Provisional hybrid layout through a real Collector path]
+
 |===

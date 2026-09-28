@@ -1,0 +1,13 @@
+{"phase": "crash", "check": "query.emit.crash.fault-crash-1.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
+{"phase": "crash", "check": "query.emit.crash.fault-crash-2.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
+{"phase": "crash", "check": "fail.crash.fault-crash-1.at_most_once", "ok": true, "detail": "recovered rows must not duplicate: canonical=1 serving=1"}
+{"phase": "crash", "check": "fail.crash.fault-crash-1.destinations_agree", "ok": true, "detail": "canonical=1 serving=1"}
+{"phase": "crash", "check": "fail.crash.fault-crash-1.identity_stable_across_restart", "ok": true, "detail": "a write identity must survive a crash and queue drain unchanged"}
+{"phase": "crash", "check": "fail.crash.fault-crash-2.at_most_once", "ok": true, "detail": "recovered rows must not duplicate: canonical=1 serving=1"}
+{"phase": "crash", "check": "fail.crash.fault-crash-2.destinations_agree", "ok": true, "detail": "canonical=1 serving=1"}
+{"phase": "crash", "check": "fail.crash.fault-crash-2.identity_stable_across_restart", "ok": true, "detail": "a write identity must survive a crash and queue drain unchanged"}
+{"phase": "crash", "check": "fail.crash.queue_persistence_recovered_something", "ok": true, "detail": "no queued request survived the crash: {'fault-crash-1': (1, 1), 'fault-crash-2': (1, 1)}"}
+{"phase": "crash", "check": "files.crash.queue_storage_snapshot", "ok": true, "detail": "no snapshot of the file-backed queue directory was captured"}
+{"phase": "crash", "check": "fail.crash.queue_was_file_backed", "ok": true, "detail": "the queue storage directory was empty before the crash"}
+{"phase": "crash", "check": "fail.crash.drain_after_restart", "ok": true, "detail": "the restarted collector did not export the recovered queue contents"}
+{"phase": "crash", "check": "fail.crash.outcome_recorded", "ok": true, "detail": "landed=['fault-crash-1', 'fault-crash-2'] counts={'fault-crash-1': (1, 1), 'fault-crash-2': (1, 1)}"}

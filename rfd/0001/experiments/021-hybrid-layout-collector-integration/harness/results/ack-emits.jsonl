@@ -1,0 +1,2 @@
+{"signal":"logs","label":"ack-off","description":"ack-off logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":21.95,"response_body":"\n","request_bytes":627,"sent_at":"2026-09-27T08:38:42.102532+00:00","visible_at_ack":true,"visible_within_s":0.02}
+{"signal":"logs","label":"ack-on","description":"ack-on logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.4,"response_body":"\n","request_bytes":625,"sent_at":"2026-09-27T08:38:44.104589+00:00","visible_at_ack":false,"visible_within_s":0.3}

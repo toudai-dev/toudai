@@ -21,6 +21,29 @@ components key-derived resolution, dataset routing, and rotation/revocation
 behavior remain custom work; other stock authenticators were not evaluated.
 Cross-workspace isolation through a shared downstream batch was not exercised.
 See link:experiments/018-collector-compatibility.adoc[Experiment 018].
++
+Experiment 021 verified real credential validation inside the tested custom
+distribution (`bearertokenauth`; a request with no token or a wrong token
+received HTTP 401 with no stored rows) and a static synthetic
+credential-to-workspace binding on the hybrid layout, with the trusted scope
+injected before canonicalization so both the canonical identity and the serving
+row carry it. Producer attributes could not override the trusted workspace or
+dataset on resource, scope, or record. The forged-scope probe showed the
+documented limitation that a producer forging the trusted-scope marker itself is
+indistinguishable from injected scope for the mapping component, and one request
+mixing a forged-scope group with a group missing the scope wrote nothing at all,
+so an invalidating rejection covers the whole request. That marker check is a
+pipeline-composition guard, not provenance or authentication: the tested
+configuration upserts the reserved workspace/dataset/marker keys in both
+workspace `resource` processors and references the owned exporter only from those
+stamped pipelines, and the exported ClickHouse endpoint must be unreachable
+except through them (an operational control the harness cannot assert). One real
+downstream batch carried both workspaces, but isolation of those rows downstream
+of the write is a query-layer question that remains open, and catch-up provenance
+(whether a replayed object passes the same stamping and scope checks) was not
+tested. Key-derived resolution, rotation/revocation, and dataset routing
+rejection remain out of scope. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Integrate authentication, validation, redaction, quotas, and cached versioned tenant policy with Collector gateways before normal and overflow export; reuse available components and justify any custom extension.
 

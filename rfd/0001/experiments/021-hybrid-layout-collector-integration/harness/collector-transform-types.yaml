@@ -1,0 +1,33 @@
+# Experiment 021 stock-processor gap probe (expected to fail config load): the
+# natural OTTL expression for a companion type map needs a per-key conditional
+# type name. This is Experiment 019's failing expression re-run against the
+# pinned v0.161.0 build for this experiment; run.sh records the load error text
+# instead of treating the failure as a silent skip.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:${env:LH021_OTLP_PORT:-4337}
+
+processors:
+  transform/types:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - 'set(attributes["lighthouse.types"], MapEach(attributes, (k, v) -> IsInt(v) ? "int" : "other"))'
+
+exporters:
+  file/received-logs:
+    path: ${env:LH021_RESULTS}/transform-types-received-logs.jsonl
+    format: json
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [transform/types]
+      exporters: [file/received-logs]

@@ -1,0 +1,14 @@
+{"phase": "retry-duplicate", "check": "fail.retry.producer_sent_twice", "ok": true, "detail": "expected two identical requests, got 2"}
+{"phase": "retry-duplicate", "check": "query.retry-a-1.serving_rows_resolved", "ok": true, "detail": "expected 2 serving row(s) for fixture identity retry-a-1 via body/span name in lh021, got 2"}
+{"phase": "retry-duplicate", "check": "fail.retry.identity_stable_across_retries", "ok": true, "detail": "the re-sent request must keep one stored write identity, got ['lh1-b45f2534dcfec3df9e2805fd9c0f7f7d']"}
+{"phase": "retry-duplicate", "check": "fail.retry.serving_duplicates_measured", "ok": true, "detail": "expected 2 serving rows, got 2"}
+{"phase": "retry-duplicate", "check": "fail.retry.canonical_duplicates_measured", "ok": true, "detail": "deduplication is unselected: expected 2 canonical rows, got 2"}
+{"phase": "retry-duplicate", "check": "fail.retry.identical_payload", "ok": true, "detail": "the re-sent request must produce the same canonical payload"}
+{"phase": "retry-duplicate", "check": "fail.retry.no_producer_visible_dedup", "ok": true, "detail": "both identical requests were accepted; deduplication remains unselected"}
+{"phase": "retry-duplicate", "check": "twin.requests_sent_twice", "ok": true, "detail": "expected two accepted twin requests, got [200, 200]"}
+{"phase": "retry-duplicate", "check": "twin.serving_rows_stored", "ok": true, "detail": "two legitimate identical events plus one retransmission should store 4 serving rows, got 4"}
+{"phase": "retry-duplicate", "check": "twin.one_shared_identity", "ok": true, "detail": "two legitimate identical events share one content-derived identity: ['lh1-158ad664abd3d2b228f8dee33caff7b7']"}
+{"phase": "retry-duplicate", "check": "twin.one_shared_payload", "ok": true, "detail": "identical content produces one payload hash: ['77b0703e37368880f42268cfc5cd6e6c048f3d9d1b45f2713d74eaab44f1c23b']"}
+{"phase": "retry-duplicate", "check": "twin.canonical_rows_stored", "ok": true, "detail": "expected 4 canonical rows for the shared identity, got 4"}
+{"phase": "retry-duplicate", "check": "twin.identity_ambiguous_by_design", "ok": true, "detail": "one identity resolves to two legitimate events plus a retransmission: the identity cannot distinguish them, so it is not a deduplication key"}
+{"phase": "retry-duplicate", "check": "twin.dedup_unselected", "ok": true, "detail": "nothing was deduplicated: both legitimate events and the repeated request are stored"}

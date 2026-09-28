@@ -1,0 +1,4 @@
+{"signal":"logs","label":"retry-a","description":"retry-a logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.24,"response_body":"\n","request_bytes":622,"sent_at":"2026-09-27T08:40:33.594932+00:00"}
+{"signal":"logs","label":"retry-a","description":"retry-a logs: 1 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.41,"response_body":"\n","request_bytes":622,"sent_at":"2026-09-27T08:40:34.336394+00:00"}
+{"signal":"logs","label":"twins","description":"twins logs: 2 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.2,"response_body":"\n","request_bytes":695,"sent_at":"2026-09-27T08:40:34.803874+00:00"}
+{"signal":"logs","label":"twins","description":"twins logs: 2 records","url":"http://127.0.0.1:4338/v1/logs","status":200,"elapsed_ms":6.63,"response_body":"\n","request_bytes":695,"sent_at":"2026-09-27T08:40:35.565419+00:00"}

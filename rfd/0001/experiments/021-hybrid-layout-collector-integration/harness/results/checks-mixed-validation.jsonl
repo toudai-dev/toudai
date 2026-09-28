@@ -1,0 +1,13 @@
+{"phase": "mixed-validation", "check": "mixed.producer_ack", "ok": true, "detail": "producer saw 200"}
+{"phase": "mixed-validation", "check": "mixed.valid_record_written_after_prevalidation", "ok": true, "detail": "the valid record should be written to both destinations, got serving=1 canonical=1"}
+{"phase": "mixed-validation", "check": "mixed.invalid_record_excluded", "ok": true, "detail": "the duplicate-key record must be excluded from both destinations"}
+{"phase": "mixed-validation", "check": "mixed.per_record_rejection_counted", "ok": true, "detail": "one rejected record from the mixed request plus one from the all-invalid request"}
+{"phase": "mixed-validation", "check": "mixed.only_all_invalid_batch_rejected_whole", "ok": true, "detail": "only the batch with nothing surviving validation may be rejected as a whole; the mixed batch wrote its surviving record instead"}
+{"phase": "mixed-validation", "check": "mixed.rejection_is_not_an_insert_failure", "ok": true, "detail": "per-record rejection must not be classified as an insert failure or retry"}
+{"phase": "mixed-validation", "check": "mixed.ack_precedes_visibility", "ok": true, "detail": "queue-enabled mixed request: visible_at_ack=False (ack 5.97 ms, visible after 2.94 s)"}
+{"phase": "mixed-validation", "check": "mixed.rejection_not_producer_visible", "ok": true, "detail": "the producer response must not report the per-record rejection"}
+{"phase": "mixed-validation", "check": "mixed.all_invalid_producer_ack", "ok": true, "detail": "the all-invalid request is acknowledged like any other (rejection is not producer visible)"}
+{"phase": "mixed-validation", "check": "mixed.all_invalid_writes_nothing", "ok": true, "detail": "a batch with nothing surviving validation must write to neither destination"}
+{"phase": "mixed-validation", "check": "mixed.all_invalid_no_insert_attempt", "ok": true, "detail": "the all-invalid batch is permanent: no insert was attempted and nothing was retried"}
+{"phase": "mixed-validation", "check": "comp.mixed_batch_summary_one_export", "ok": true, "detail": "expected one batch summary with records=1 and rejected=1 for the mixed request, got 1"}
+{"phase": "mixed-validation", "check": "comp.all_invalid_permanent_error_logged", "ok": true, "detail": "the all-invalid batch should be dropped with a permanent validation error"}

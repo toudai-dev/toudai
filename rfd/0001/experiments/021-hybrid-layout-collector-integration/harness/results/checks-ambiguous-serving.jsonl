@@ -1,0 +1,8 @@
+{"phase": "ambiguous-serving", "check": "query.emit.ambiguous-serving.ambiguous-serving-a.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
+{"phase": "ambiguous-serving", "check": "query.ambiguous-serving-1.serving_rows_resolved", "ok": true, "detail": "expected 2 serving row(s) for fixture identity ambiguous-serving-1 via body/span name in lh021, got 2"}
+{"phase": "ambiguous-serving", "check": "fail.ambiguous_serving.serving_duplicate_from_retry", "ok": true, "detail": "expected two serving rows (commit + retry after the lost response), got 2"}
+{"phase": "ambiguous-serving", "check": "fail.ambiguous_serving.canonical_duplicate_from_retry", "ok": true, "detail": "expected two canonical rows (the retry re-attempts both inserts), got 2"}
+{"phase": "ambiguous-serving", "check": "xdest.ambiguous_serving.same_identity_and_payload", "ok": true, "detail": "the duplicated serving rows must share identity and payload hash: identities=['lh1-10a51afc31657fb48775530673e9d5da'] payloads=['7bf79184b55ecd7ae5d9ebc70ad676993088b4fddec837eea010536046c92389']"}
+{"phase": "ambiguous-serving", "check": "xdest.ambiguous_serving.no_missing_rows", "ok": true, "detail": "the lost serving response committed, so the retry duplicated rows rather than repairing a missing one"}
+{"phase": "ambiguous-serving", "check": "fail.ambiguous_serving.proxy_withheld_serving_response", "ok": true, "detail": "the proxy log must show a withheld serving insert response aimed at serving_logs"}
+{"phase": "ambiguous-serving", "check": "fail.ambiguous_serving.destination_committed_twice", "ok": true, "detail": "query_log shows 2 finished serving inserts"}

@@ -1,0 +1,13 @@
+{"phase": "no-trust", "check": "fail.no_trust.rejected_from_trusted_db", "ok": true, "detail": "an untrusted request must not reach the trusted database"}
+{"phase": "no-trust", "check": "fail.no_trust.rejected_in_untrusted_pipeline", "ok": true, "detail": "the trusted-scope check did not fail closed"}
+{"phase": "no-trust", "check": "comp.no_trust.rejected_record_counter", "ok": true, "detail": "expected a rejected-record counter with reason=missing_trusted_scope"}
+{"phase": "no-trust", "check": "comp.no_trust.rejected_batch_counter", "ok": true, "detail": "expected the all-rejected plain request to be counted as a batch rejection"}
+{"phase": "no-trust", "check": "fail.no_trust.receiver_accepted_request", "ok": true, "detail": "expected the receiver file copy to show the request was admitted then rejected"}
+{"phase": "no-trust", "check": "fail.no_trust.forged_marker_not_in_trusted_db", "ok": true, "detail": "a forged-marker request must never land in the trusted database"}
+{"phase": "no-trust", "check": "fail.no_trust.forged_marker_gap_measured", "ok": true, "detail": "expected the documented limitation (1 row with the forged workspace) in lh021_untrusted, got 1"}
+{"phase": "no-trust", "check": "fail.no_trust.forged_marker_gap_is_producer_scope", "ok": true, "detail": "stored workspace 99999999-9999-4999-8999-999999999999"}
+{"phase": "no-trust", "check": "fail.no_trust.mixed_request_wrote_nothing", "ok": true, "detail": "a missing-scope group must invalidate the whole request, got forged=0 plain=0 rows in lh021_untrusted"}
+{"phase": "no-trust", "check": "fail.no_trust.mixed_request_absent_from_trusted_db", "ok": true, "detail": "the mixed untrusted request must never reach the trusted database"}
+{"phase": "no-trust", "check": "comp.no_trust.two_records_rejected_for_missing_scope", "ok": true, "detail": "expected the plain request's record and the mixed request's plain group to both count"}
+{"phase": "no-trust", "check": "comp.no_trust.mixed_batch_rejected_missing_scope", "ok": true, "detail": "the mixed request should be counted as a missing_trusted_scope batch rejection"}
+{"phase": "no-trust", "check": "comp.no_trust.all_rejected_counter_not_concealing_mixed_batch", "ok": true, "detail": "only the all-invalid plain request may count as all_records_rejected; a mixed request with surviving rows must be counted by its invalidating reason instead"}

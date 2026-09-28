@@ -1,0 +1,61 @@
+# HELP lighthouse_exporter_batches Exported batches, by signal and whether the batch carried more than one workspace.
+# TYPE lighthouse_exporter_batches counter
+lighthouse_exporter_batches{cross_workspace="false",signal="logs"} 4
+# HELP lighthouse_exporter_records Records successfully inserted, by signal and destination.
+# TYPE lighthouse_exporter_records counter
+lighthouse_exporter_records{destination="canonical",signal="logs"} 6
+lighthouse_exporter_records{destination="serving",signal="logs"} 6
+# HELP otelcol_exporter_in_flight_requests Number of export requests currently in-flight (including retry backoff). [Development]
+# TYPE otelcol_exporter_in_flight_requests gauge
+otelcol_exporter_in_flight_requests{data_type="logs",exporter="lighthouse"} 0
+# HELP otelcol_exporter_queue_capacity Fixed capacity of the retry queue (in batches). [Alpha]
+# TYPE otelcol_exporter_queue_capacity gauge
+otelcol_exporter_queue_capacity{data_type="logs",exporter="lighthouse"} 1000
+otelcol_exporter_queue_capacity{data_type="traces",exporter="lighthouse"} 1000
+# HELP otelcol_exporter_queue_size Current size of the retry queue (in batches). [Alpha]
+# TYPE otelcol_exporter_queue_size gauge
+otelcol_exporter_queue_size{data_type="logs",exporter="lighthouse"} 0
+otelcol_exporter_queue_size{data_type="traces",exporter="lighthouse"} 0
+# HELP otelcol_exporter_sent_log_records Number of log record successfully sent to destination. [Alpha]
+# TYPE otelcol_exporter_sent_log_records counter
+otelcol_exporter_sent_log_records{exporter="lighthouse"} 6
+# HELP otelcol_process_cpu_seconds Total CPU user and system time in seconds [Alpha]
+# TYPE otelcol_process_cpu_seconds counter
+otelcol_process_cpu_seconds 0.06
+# HELP otelcol_process_memory_rss Total physical memory (resident set size) [Alpha]
+# TYPE otelcol_process_memory_rss gauge
+otelcol_process_memory_rss 4.3565056e+07
+# HELP otelcol_process_runtime_heap_alloc_bytes Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc') [Alpha]
+# TYPE otelcol_process_runtime_heap_alloc_bytes gauge
+otelcol_process_runtime_heap_alloc_bytes 5.274264e+06
+# HELP otelcol_process_runtime_total_alloc_bytes Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc') [Alpha]
+# TYPE otelcol_process_runtime_total_alloc_bytes counter
+otelcol_process_runtime_total_alloc_bytes 1.166868e+07
+# HELP otelcol_process_runtime_total_sys_memory_bytes Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys') [Alpha]
+# TYPE otelcol_process_runtime_total_sys_memory_bytes gauge
+otelcol_process_runtime_total_sys_memory_bytes 1.8454792e+07
+# HELP otelcol_process_uptime Uptime of the process [Alpha]
+# TYPE otelcol_process_uptime counter
+otelcol_process_uptime 3.721451469
+# HELP otelcol_processor_incoming_items Number of items passed to the processor. [Alpha]
+# TYPE otelcol_processor_incoming_items counter
+otelcol_processor_incoming_items{otel_signal="logs",processor="resource/ws-a"} 6
+# HELP otelcol_processor_outgoing_items Number of items emitted from the processor. [Alpha]
+# TYPE otelcol_processor_outgoing_items counter
+otelcol_processor_outgoing_items{otel_signal="logs",processor="resource/ws-a"} 6
+# HELP otelcol_receiver_accepted_log_records Number of log records successfully pushed into the pipeline. [Alpha]
+# TYPE otelcol_receiver_accepted_log_records counter
+otelcol_receiver_accepted_log_records{receiver="otlp/gateway",transport="http"} 6
+# HELP otelcol_receiver_failed_log_records The number of log records that failed to be processed by the receiver due to internal errors. [Alpha]
+# TYPE otelcol_receiver_failed_log_records counter
+otelcol_receiver_failed_log_records{receiver="otlp/gateway",transport="http"} 0
+# HELP otelcol_receiver_refused_log_records Number of log records that could not be pushed into the pipeline. [Alpha]
+# TYPE otelcol_receiver_refused_log_records counter
+otelcol_receiver_refused_log_records{receiver="otlp/gateway",transport="http"} 0
+# HELP promhttp_metric_handler_errors_total Total number of internal errors encountered by the promhttp metric handler.
+# TYPE promhttp_metric_handler_errors_total counter
+promhttp_metric_handler_errors_total{cause="encoding"} 0
+promhttp_metric_handler_errors_total{cause="gathering"} 0
+# HELP target_info Target metadata
+# TYPE target_info gauge
+target_info{service_instance_id="33a6b690-8eff-4c8d-a90b-1bafef7fa02d",service_name="lighthouse-collector-021",service_version="0.1.0-exp021"} 1

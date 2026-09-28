@@ -1,0 +1,175 @@
+= Experiment 021 evidence
+
+link:../021-hybrid-layout-collector-integration.adoc[Experiment report] ·
+link:../../README.adoc[RFD 0001]
+
+This directory contains the runnable harness and the committed evidence for the
+provisional hybrid serving layout driven through a real OTLP -> Collector path.
+It contains only synthetic fixture data: no production corpus, credentials, or
+customer telemetry. The layout below is *provisional for this PoC trial*: it is
+grounded in the Experiment 019/020 micro-evidence and is not a final or
+retained-scale-qualified schema decision.
+
+== Provisional layout
+
+Two destinations, written in a fixed order, with no shared transaction:
+
+[source,sql]
+----
+canonical_events      workspace_id, dataset, signal, event_id, ts, schema_version,
+                     payload (type-preserving canonical JSON), payload_sha256
+                     ORDER BY (workspace_id, dataset, signal, ts, event_id)
+
+serving_logs          workspace_id, dataset, event_id, ts, observed_ts, kind,
+                     service_name, severity_text, severity_number, body,
+                     trace_id, span_id, event_name,
+                     resource Map(LowCardinality(String), String),
+                     scope    Map(LowCardinality(String), String),
+                     resource_types Map(LowCardinality(String), LowCardinality(String)),
+                     scope_types    Map(LowCardinality(String), LowCardinality(String)),
+                     record_int Map(LowCardinality(String), Int64),
+                     record_double Map(LowCardinality(String), Float64),
+                     record_string Map(LowCardinality(String), String),
+                     record_bool Map(LowCardinality(String), Bool),
+                     record_other Map(LowCardinality(String), LowCardinality(String)),
+                     payload_sha256
+
+serving_spans         like serving_logs, with span identity/kind/status, the
+                     supplied start and end timestamps (ts, end_ts), duration_ns
+                     Nullable(Int64), and span_timing_status
+                     LowCardinality(String) ('ok' | 'missing' | 'end_before_start'),
+                     span_scope / span_scope_types for the instrumentation scope,
+                     span_int / span_double / span_string / span_bool / span_other
+                     ORDER BY (workspace_id, dataset, ts, event_id)
+----
+
+Record attributes use native typed Maps plus a `record_other` kind map for the
+canonical-only types (bytes, array, map, explicit empty). Resource and scope
+attributes stay one string Map plus a companion `*_types` map, because Experiment
+020 measured that splitting those small, type-diverse namespaces into typed Maps
+cost more than one string Map. `serving_spans` names the instrumentation scope
+`span_scope`, matching Experiments 019/020; there is no second `scope` column.
+Native metrics are not part of this slice: the fixture and the checks cover logs
+and spans only. The complete DDL is `harness/serving-tables.sql`.
+
+Span timing is preserve-and-flag. OTLP has no timestamp presence (an unset
+`start_time_unix_nano`/`end_time_unix_nano` is 0 and an explicit 0 is
+indistinguishable), so an unset start or end is missing timing and takes
+precedence over the reversed classification: a missing start never fabricates a
+duration from epoch 0 and a missing end is never read as `end < start`. Every span
+keeps its supplied timestamps and stays searchable; its derived `duration_ns` is
+NULL whenever it is not observable (`missing` or `end_before_start`) and 0 for a
+valid zero duration (`ok`). Nothing is discarded or substituted, and the canonical
+payload keeps the supplied `start_ns`/`end_ns` with no derived duration when the
+duration is unavailable. Duration counts are span-only: the fixture's span rows
+live in `serving_spans` and its log rows in `serving_logs`, and a log row is never
+part of a span count. How an unavailable duration is presented is future work; the
+layout and the diagnostic vocabulary are provisional for this PoC trial.
+
+The fixed order is canonical first, with no shared transaction between the two
+inserts. An export request is validated and canonicalized completely before the
+first insert; records that fail validation are excluded per record (absent from
+both destinations) while the surviving records are written and the export returns
+success, so the producer still sees a normal acknowledgement and the drop is not
+an OTLP partial-success response. Only a request with nothing surviving
+validation, or one missing its gateway-injected trusted scope, is rejected as a
+whole with a permanent, non-retryable error. The trusted workspace, dataset, and marker
+are upserted by the workspace `resource` processors, and the owned exporter is
+referenced only from those stamped pipelines; the marker check is a
+pipeline-composition guard, not authentication, so the exported ClickHouse
+endpoint must be unreachable except through the stamping pipelines (an
+operational control this harness cannot assert). Producer-supplied attributes
+cannot override the injected values, and catch-up provenance is not tested here.
+
+== Layout of the harness
+
+- `harness/setup.sh` resolves the run root (`/home/user/lh021` by default), pins
+  the `otelcol-contrib` v0.161.0 release tarball by SHA-256, creates the Python
+  fixture environment, and builds the bounded Collector distribution
+  (`lighthouse-collector-021`, module `lighthouse.dev/rfd0001/exp021`) from
+  `harness/component/`.
+- `harness/component/` is the owned exporter plus the small distribution entry
+  point. Every component except `lighthouseexporter` is stock at the pinned
+  version; the exporter reuses `exporterhelper` for queue, retry, timeout, and
+  telemetry, and owns only mapping, validation, and the two ordered inserts.
+- `harness/run.sh` orchestrates the fifteen phases (`all` for a full run). It
+  starts and stops its own disposable ClickHouse service and per-phase Collector
+  processes and never touches repository or benchmark data. It fails closed: each
+  phase records its process and verifier exit status in `results/phase-status.tsv`,
+  the run exits nonzero when an expected phase is missing, empty, stale, or
+  nonzero, or when any recorded check fails, and `guard_fresh` refuses to run a
+  phase on top of a previous run's rows for the same fixture labels. Harness-only
+  injectors are started with `start_injector`, which refuses a port held by
+  another process (and reaps a stale harness injector it can identify) instead of
+  letting a phase run against a process it did not start.
+- `harness/test-run-failure-modes.sh fast` runs the synthetic coverage and
+  verifier-failure cases without services; `full` additionally runs `run.sh all`
+  with an injected verifier crash (`LH021_TEST_CRASH_PHASE`, a verify.py test-only
+  hook) and once normally. Both modes passed on the committed harness (`fast`
+  15/15, `full` 19/19). The fast mode includes a span-timing fixture regression:
+  missing timing (either timestamp unset), reversed timing, and a valid zero
+  duration must stay distinct, and the mixed request must carry one valid and one
+  reversed span.
+- `harness/fixture021.py` emits the OTLP fixture and reuses Experiment 019's typed
+  inventory; the imported 019 sources are pinned by hash in
+  `results/fixture019-sha256.txt` and re-checked by the verifier, so a changed
+  019 fixture would be reported instead of silently moving the expectations. It
+  adds the unset-timestamp (both unset, start-only, end-only), zero-duration, and
+  reversed-timing spans and the one-request valid+reversed batch.
+- `harness/verify.py` evaluates the phases from the fixture inventory, literals
+  authored from it, and the raw stored rows. It does not import the component's
+  mapping code. Stored write identities are content-derived (`lh1-<32 hex>`) and
+  opaque to the verifier; they correlate fixture rows across the two destinations
+  and across retries, and the `retry-duplicate` twin control shows two legitimate
+  identical events share one identity with a retransmission of the same request
+  (the two-record twin request is sent twice, so four records store under one
+  identity), so the identity is not a deduplication key. Deduplication is
+  unselected.
+- `harness/lost-response-proxy.py` and `harness/stalled-listener.py` are
+  harness-only failure injectors (ambiguous insert, stalled destination). They are
+  not components of the tested design.
+- `harness/clickhouse-*.xml` are the disposable server configuration (Nix
+  ClickHouse 26.8.2.7-lts) and the loopback-only user profile;
+  `harness/start-clickhouse.sh` starts the supervised orb service.
+- `harness/results/` is the evidence of the committed run.
+
+== Evidence files
+
+- `results/checks-*.jsonl`: every check with the phase, the check name, whether
+  it passed, and the expectation it was applied against.
+- `results/semantics-span-timing.jsonl`: the stored span-timing rows
+  (`span_name`, identity, both supplied timestamps, `duration_ns`,
+  `span_timing_status`), so the preserve-and-flag policy is reviewable from the
+  evidence. The `files` phase re-checks it against the fixture inventory; the
+  snapshot covers span rows only (log rows are in `serving_logs`).
+- `results/phase-status.tsv`, `results/phase-times.tsv`, `results/run-start.txt`,
+  `results/phase-preflight.tsv`: phase exit status, phase windows, the run marker,
+  and the pre-phase row counts that prove no phase started on stale state.
+- `results/metrics-*.txt`: Prometheus scrapes per phase, including the owned
+  exporter's batches, records, insert failures, partial writes, and rejection
+  counters. `rejected_batches{reason="all_records_rejected"}` increments only when
+  nothing survives validation, while `rejected_records` counts the excluded
+  records by namespace and reason; a whole-batch invalidation such as
+  `missing_trusted_scope` is counted by its reason and does not record how many
+  otherwise-valid records were dropped with it. The stock helper's own counters
+  are not write-side counts: `otelcol_exporter_sent_log_records` credits every
+  record of a request whose export returned nil (the item count is read before
+  the send), so it counts records as received, not rows written; the component's
+  `lighthouse_exporter_records{destination=...}` counters are the authority for
+  rows that reached ClickHouse.
+- `results/collector-*.log`, `results/proxy-ambiguous.log`,
+  `results/proxy-ambiguous-serving.log`, `results/transform-types.log`: the raw
+  component and injector output. These are regenerated by every run and are not
+  committed (the repository-wide `*.log` ignore rule); the checks that assert on
+  their contents are recorded in `results/checks-*.jsonl`, so re-running a phase
+  reproduces them.
+- `results/outage-*`, `results/crash-queue-storage-before.txt`: the measured
+  injector/component state that the corresponding checks read.
+- `results/*-emits.jsonl`: what each OTLP request received from the receiver.
+- `results/identity-map.tsv`: the fixture identity and the stored write identity
+  it produced, which is how canonical/serving rows are correlated.
+- `results/split-repair.sql`, `results/split-repair-result.txt` and their
+  `split-retry` counterparts: the bounded repair that derives a minimal serving
+  row from the retained canonical payload, with the landed/expected row counts.
+- `results/build-manifest.txt` and `results/go-modules.txt`: the pinned versions,
+  the built binary hash, and the resolved module graph of the committed build.

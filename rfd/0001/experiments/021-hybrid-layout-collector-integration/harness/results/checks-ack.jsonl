@@ -1,0 +1,11 @@
+{"phase": "ack", "check": "query.emit.ack.ack-on.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
+{"phase": "ack", "check": "query.emit.ack.ack-off.status", "ok": true, "detail": "producer saw HTTP 200: \n"}
+{"phase": "ack", "check": "query.ack-on-1.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity ack-on-1 via body/span name in lh021, got 1"}
+{"phase": "ack", "check": "ack.ack-on-1.canonical_present", "ok": true, "detail": "expected exactly one canonical row for ack-on-1"}
+{"phase": "ack", "check": "query.ack-off-1.serving_rows_resolved", "ok": true, "detail": "expected 1 serving row(s) for fixture identity ack-off-1 via body/span name in lh021, got 1"}
+{"phase": "ack", "check": "ack.ack-off-1.canonical_present", "ok": true, "detail": "expected exactly one canonical row for ack-off-1"}
+{"phase": "ack", "check": "ack.queue_enabled_not_visible_at_ack", "ok": true, "detail": "queue enabled: visible_at_ack=False (ack 6.4 ms, visible after 0.3 s)"}
+{"phase": "ack", "check": "ack.queue_disabled_visible_at_ack", "ok": true, "detail": "queue disabled: visible_at_ack=True (ack 21.95 ms)"}
+{"phase": "ack", "check": "ack.queue_enabled_drained", "ok": true, "detail": "the queue-enabled request never became visible"}
+{"phase": "ack", "check": "comp.ack_off_records_counter", "ok": true, "detail": "the queue-disabled write did not count a serving record"}
+{"phase": "ack", "check": "comp.ack_on_records_counter", "ok": true, "detail": "the queue-enabled write did not count a serving record"}

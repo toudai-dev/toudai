@@ -1,0 +1,140 @@
+# Experiment 021 crash phase: the gateway pipeline with a file-backed sending
+# queue, so the queue contents survive SIGKILL. The exporter endpoint points at
+# the stalled listener/proxy port, which keeps the consumer busy while later
+# requests stay in the queue. Everything else mirrors collector-gateway.yaml.
+extensions:
+  bearertokenauth/gateway:
+    tokens: [lh021-ws-a-key, lh021-ws-b-key]
+  file_storage/crash:
+    directory: ${env:LH021_QUEUE_DIR:-/tmp/lh021-queue}
+    create_directory: true
+
+receivers:
+  otlp/gateway:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:${env:LH021_OTLP_PORT:-4338}
+        include_metadata: true
+        auth:
+          authenticator: bearertokenauth/gateway
+
+processors:
+  resource/ws-a:
+    attributes:
+      - key: lighthouse.workspace_id
+        action: upsert
+        value: 11111111-1111-4111-8111-111111111111
+      - key: lighthouse.dataset
+        action: upsert
+        value: fixture
+      - key: lighthouse.scope_source
+        action: upsert
+        value: gateway
+  resource/ws-b:
+    attributes:
+      - key: lighthouse.workspace_id
+        action: upsert
+        value: 22222222-2222-4222-8222-222222222222
+      - key: lighthouse.dataset
+        action: upsert
+        value: fixture
+      - key: lighthouse.scope_source
+        action: upsert
+        value: gateway
+
+connectors:
+  routing/logs:
+    default_pipelines: [logs/quarantine]
+    table:
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh021-ws-a-key"
+        pipelines: [logs/ws-a]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh021-ws-a-key"
+        pipelines: [logs/ws-a]
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh021-ws-b-key"
+        pipelines: [logs/ws-b]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh021-ws-b-key"
+        pipelines: [logs/ws-b]
+  routing/traces:
+    default_pipelines: [traces/quarantine]
+    table:
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh021-ws-a-key"
+        pipelines: [traces/ws-a]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh021-ws-a-key"
+        pipelines: [traces/ws-a]
+      - condition: otelcol.client.metadata["authorization"][0] == "Bearer lh021-ws-b-key"
+        pipelines: [traces/ws-b]
+      - condition: otelcol.client.metadata["Authorization"][0] == "Bearer lh021-ws-b-key"
+        pipelines: [traces/ws-b]
+
+exporters:
+  lighthouse:
+    endpoint: ${env:LH021_ENDPOINT:-127.0.0.1:19102}
+    database: ${env:LH021_DATABASE:-lh021}
+    # Long enough that the first dispatched request is still in flight when the
+    # harness kills the process.
+    timeout: ${env:LH021_TIMEOUT:-30s}
+    log_batch_summaries: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 200ms
+      max_interval: 1s
+      max_elapsed_time: 60s
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 100
+      storage: file_storage/crash
+      batch:
+        # The v0.161 queue batch config requires an explicit sizer.
+        sizer: items
+        min_size: 0
+        flush_timeout: 100ms
+  file/quarantine-logs:
+    path: ${env:LH021_RESULTS}/crash-quarantine-logs.jsonl
+    format: json
+  file/quarantine-traces:
+    path: ${env:LH021_RESULTS}/crash-quarantine-traces.jsonl
+    format: json
+
+service:
+  extensions: [bearertokenauth/gateway, file_storage/crash]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: ${env:LH021_METRICS_PORT:-8894}
+  pipelines:
+    logs/gateway:
+      receivers: [otlp/gateway]
+      exporters: [routing/logs]
+    logs/ws-a:
+      receivers: [routing/logs]
+      processors: [resource/ws-a]
+      exporters: [lighthouse]
+    logs/ws-b:
+      receivers: [routing/logs]
+      processors: [resource/ws-b]
+      exporters: [lighthouse]
+    logs/quarantine:
+      receivers: [routing/logs]
+      exporters: [file/quarantine-logs]
+    traces/gateway:
+      receivers: [otlp/gateway]
+      exporters: [routing/traces]
+    traces/ws-a:
+      receivers: [routing/traces]
+      processors: [resource/ws-a]
+      exporters: [lighthouse]
+    traces/ws-b:
+      receivers: [routing/traces]
+      processors: [resource/ws-b]
+      exporters: [lighthouse]
+    traces/quarantine:
+      receivers: [routing/traces]
+      exporters: [file/quarantine-traces]

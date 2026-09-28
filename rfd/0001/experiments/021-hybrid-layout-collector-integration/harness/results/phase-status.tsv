@@ -1,0 +1,16 @@
+transform-config-load	1
+stock-probe	0
+semantics	0
+ack	0
+mixed-validation	0
+outage	0
+split	0
+split-retry	0
+canonical-permanent	0
+queue-full	0
+crash	0
+ambiguous	0
+ambiguous-serving	0
+retry-duplicate	0
+no-trust	0
+files	0

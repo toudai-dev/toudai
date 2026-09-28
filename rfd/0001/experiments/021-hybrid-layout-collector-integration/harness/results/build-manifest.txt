@@ -1,0 +1,12 @@
+experiment: 021-hybrid-layout-collector-integration
+generated: 2026-09-27T08:38:27Z
+collector: lighthouse-collector-021 version 0.1.0-exp021
+collector_bin_sha256: f7b7e5387e417761857250a83c3d89ecccc5e3d33643eed71696fff43422c668
+collector_source_pin: otelcol-contrib v0.161.0 (release tarball, see setup.sh)
+collector_build_inputs: 778c689efa681ff6e4722ce9f66b9b7f57c3ba009ab2e2b43dc2e0315862c731  /home/user/lh021/bin/otelcol-contrib.tar.gz
+go: go version go1.26.8 linux/amd64
+clickhouse: 26.8.2.7
+clickhouse_config: /home/user/workspace/repo/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/clickhouse-config.xml (26.8.2.7-lts from the repository Nix setup)
+component_module: lighthouse.dev/rfd0001/exp021 (harness/component, see go.mod and go-modules.txt)
+pins: clickhouse-go/v2 v2.47.0; otelcol-contrib components v0.161.0 (distro release); collector core modules v1.67.0
+core_module_series: exporterhelper v0.161.0 requires go.opentelemetry.io/collector/{component,exporter,pdata,confmap,consumer} v1.67.0, the core series of the v0.161.0 release train
