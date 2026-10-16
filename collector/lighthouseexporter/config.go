@@ -37,6 +37,11 @@ type Config struct {
 	// Password is opaque so a configuration dump cannot print it.
 	Password configopaque.String `mapstructure:"password"`
 
+	// RoutingEpoch is stamped on every serving row (Decision 0001 D4). The PoC has
+	// one epoch covering the whole cluster; adding shards later adds an epoch
+	// rather than moving parts, so the writer must carry the current number.
+	RoutingEpoch uint16 `mapstructure:"routing_epoch"`
+
 	CanonicalTable    string `mapstructure:"canonical_table"`
 	ServingLogsTable  string `mapstructure:"serving_logs_table"`
 	ServingSpansTable string `mapstructure:"serving_spans_table"`
@@ -63,6 +68,7 @@ func defaultConfig() *Config {
 		BackOffConfig:     configretry.NewDefaultBackOffConfig(),
 		Endpoint:          "127.0.0.1:19101",
 		Database:          "lighthouse",
+		RoutingEpoch:      1,
 		CanonicalTable:    "canonical_events",
 		ServingLogsTable:  "serving_logs",
 		ServingSpansTable: "serving_spans",

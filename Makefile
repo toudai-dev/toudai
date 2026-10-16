@@ -45,3 +45,11 @@ down:
 .PHONY: chcl
 chcl:
 	clickhouse-client --port 9000 --user admin --password admin -d lighthouse_dev
+
+.PHONY: collector-build
+collector-build:
+	cd collector && go build -o ../target/collector/lighthouse-collector .
+
+.PHONY: collector-test
+collector-test:
+	cd collector && go vet ./... && go test ./...
