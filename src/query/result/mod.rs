@@ -7,8 +7,8 @@
 use serde_json::{Value, json};
 
 use super::error::{Operation, QueryError, UnsupportedValue};
-use super::model::Aggregate;
-use super::plan::{Plan, PlanDiagnostics};
+use super::model::{Aggregate, AttrRef};
+use super::plan::{Plan, PlanDiagnostics, has_type_filter};
 use super::sql::{MISSING_TYPE, columns};
 use super::value::{TypedValue, ValueType};
 
@@ -219,7 +219,7 @@ fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryErro
             }))
         }
         Aggregate::Sum { attr, value_type } => {
-            check_incompatible(row, &attr.key, *value_type)?;
+            check_incompatible(plan, row, attr, *value_type)?;
             let contributing = count(row, columns::CONTRIBUTING)?;
             let sum = if *value_type == ValueType::Int {
                 int_sum(row, contributing)?
@@ -237,13 +237,18 @@ fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryErro
 
 /// Fail on non-empty values of another type. Bytes, arrays, and maps are
 /// unsupported operands; any other type is a plain type error.
-fn check_incompatible(row: &Value, attr: &str, expected: ValueType) -> Result<(), QueryError> {
-    let Some(found) = row.get(columns::INCOMPATIBLE_TYPES) else {
-        // The statement omitted the check because an explicit type filter
-        // already restricts the attribute to the declared type.
+fn check_incompatible(
+    plan: &Plan,
+    row: &Value,
+    attr: &AttrRef,
+    expected: ValueType,
+) -> Result<(), QueryError> {
+    // The statement omits the check only when the validated request itself
+    // restricts the aggregate input to its declared type.
+    if has_type_filter(&plan.query.filters, attr, expected) {
         return Ok(());
-    };
-    let found: Vec<ValueType> = found
+    }
+    let found: Vec<ValueType> = field(row, columns::INCOMPATIBLE_TYPES)?
         .as_array()
         .ok_or_else(|| malformed("incompatible_types is not an array"))?
         .iter()
@@ -261,7 +266,7 @@ fn check_incompatible(row: &Value, attr: &str, expected: ValueType) -> Result<()
     }
     if !found.is_empty() {
         return Err(QueryError::IncompatibleType {
-            attr: attr.to_owned(),
+            attr: attr.key.clone(),
             expected,
             found,
         });

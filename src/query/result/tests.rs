@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::query::model::{AttrRef, Query, Scope, Signal, TimeRange};
+use crate::query::model::{AttrRef, Predicate, Query, Scope, Signal, TimeRange};
 use crate::query::plan::plan;
 use crate::query::schema::ServingTables;
 
@@ -155,9 +155,24 @@ fn incompatible_values_fail_unless_excluded() {
         let got = interpret(&sum_int(), &[row], &[]).map(|_| ());
         assert_eq!(got, expected, "{found}");
     }
-    // The check is omitted when a type filter restricted the scan.
+    // Missing validation output is malformed when the request did not restrict
+    // the aggregate input to its declared type.
     let row = json!({"events": 1, "contributing": 1, "sum_value": "1"});
-    assert!(interpret(&sum_int(), &[row], &[]).is_ok());
+    assert_eq!(
+        interpret(&sum_int(), &[row.clone()], &[]),
+        Err(MalformedResult {
+            detail: "missing column incompatible_types".into(),
+        })
+    );
+
+    // An actual matching type filter makes the omitted column safe.
+    let mut filtered = sum_int().query;
+    filtered.filters = vec![Predicate::HasType(
+        AttrRef::record("metric.value"),
+        ValueType::Int,
+    )];
+    let filtered = plan(filtered, &ServingTables::new("lh").unwrap()).unwrap();
+    assert!(interpret(&filtered, &[row], &[]).is_ok());
 }
 
 #[test]
@@ -183,7 +198,13 @@ fn float_aggregates_reject_non_finite_values() {
         (1, 0, "nan", nf),
     ];
     for (contributing, non_finite, sum, expected) in cases {
-        let row = json!({"events": 5, "contributing": contributing, "sum_value": sum, "non_finite": non_finite});
+        let row = json!({
+            "events": 5,
+            "contributing": contributing,
+            "sum_value": sum,
+            "non_finite": non_finite,
+            "incompatible_types": [],
+        });
         let got = interpret(&plan, &[row], &[]).map(|r| r.rows[0].values.as_ref().unwrap().sum);
         assert_eq!(got, expected, "{contributing} {non_finite} {sum}");
     }
