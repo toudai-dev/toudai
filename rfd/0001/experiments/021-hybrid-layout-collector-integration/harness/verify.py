@@ -345,11 +345,11 @@ def span_duration_ns(event: dict) -> int | None:
     return event["end_ns"] - event["start_ns"]
 
 
-def span_expectation(event: dict) -> dict:
+def span_expectation(event: dict, workspace: str = WS_A) -> dict:
     scope_strings, scope_types = project_pairs(SPAN_SCOPE_OF[event["event_id"]])
-    resource_strings, resource_types = expected_resource(event["resource"], WS_A)
+    resource_strings, resource_types = expected_resource(event["resource"], workspace)
     return {
-        "workspace": WS_A,
+        "workspace": workspace,
         "dataset": DATASET,
         "record": record_maps(without_reserved(event["record"])),
         "resource": resource_strings,

@@ -95,7 +95,7 @@ def log_row(event: dict, workspace: str) -> dict:
 
 
 def span_row(event: dict, workspace: str) -> dict:
-    e = verify.span_expectation(event)
+    e = verify.span_expectation(event, workspace)
     return {
         "workspace_id": workspace,
         "dataset": e["dataset"],

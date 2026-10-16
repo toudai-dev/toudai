@@ -461,6 +461,32 @@ fn scope_and_time_bounds_are_enforced() {
             "{workspace} {dataset} [{start_ns}, {end_ns})"
         );
     }
+
+    // The copied workspace-B fixture must carry B in both authenticated scope
+    // and resource metadata; a mislabeled copy would weaken the isolation control.
+    let mut q = logs_query();
+    q.scope.workspace_id = WS_B.into();
+    q.filters = vec![cmp(
+        AttrRef::resource("lighthouse.workspace_id"),
+        CmpOp::Eq,
+        L::String(WS_B.into()),
+    )];
+    assert_eq!(events(ch, q.clone()), 27);
+    q.filters = vec![cmp(
+        AttrRef::resource("lighthouse.workspace_id"),
+        CmpOp::Eq,
+        L::String(WS_A.into()),
+    )];
+    assert_eq!(events(ch, q), 0);
+
+    let mut q = spans_query();
+    q.scope.workspace_id = WS_B.into();
+    q.filters = vec![cmp(
+        AttrRef::resource("lighthouse.workspace_id"),
+        CmpOp::Eq,
+        L::String(WS_B.into()),
+    )];
+    assert_eq!(events(ch, q), 7);
 }
 
 #[test]
@@ -568,16 +594,17 @@ fn group_by_resource_attribute_and_multiple_keys() {
         vec![("int", "9007199254740993", 26), ("missing", "", 1)]
     );
 
-    // Two keys: (metric.value type, resource service.name presence).
+    // Two genuinely varying keys: the three events missing metric.value split
+    // into one with int.one and two where int.one is also missing.
     let mut q = logs_query();
-    q.filters = vec![Predicate::HasType(metric(), ValueType::Int)];
-    q.group_by = vec![metric(), AttrRef::resource("service.name")];
+    q.group_by = vec![metric(), AttrRef::record("int.one")];
     let rows = run(ch, q);
-    assert_eq!(rows.len(), 9, "nine distinct int values");
-    assert!(
-        rows.iter()
-            .all(|r| r["g1_type"] == "string" && r["g1_value"] == "fixture-log-service")
-    );
+    assert!(rows.iter().any(|r| r["g0_type"] == "missing"
+        && r["g1_type"] == "int"
+        && u64_field(r, "events") == 1));
+    assert!(rows.iter().any(|r| r["g0_type"] == "missing"
+        && r["g1_type"] == "missing"
+        && u64_field(r, "events") == 2));
 }
 
 #[test]
@@ -805,7 +832,7 @@ fn span_attribute_namespaces() {
 }
 
 #[test]
-fn rejected_requests_never_reach_clickhouse() {
+fn rejected_requests_fail_during_planning() {
     let cases = [
         cmp(metric(), CmpOp::Eq, L::Double(f64::NAN)),
         cmp(metric(), CmpOp::Eq, L::Bytes(vec![0, 1, 0xfe, 0xff])),
