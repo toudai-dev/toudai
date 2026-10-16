@@ -159,7 +159,7 @@ fn incompatible_values_fail_unless_excluded() {
     // the aggregate input to its declared type.
     let row = json!({"events": 1, "contributing": 1, "sum_value": "1"});
     assert_eq!(
-        interpret(&sum_int(), &[row.clone()], &[]),
+        interpret(&sum_int(), std::slice::from_ref(&row), &[]),
         Err(MalformedResult {
             detail: "missing column incompatible_types".into(),
         })
