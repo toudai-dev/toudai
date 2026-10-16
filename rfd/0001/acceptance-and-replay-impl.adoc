@@ -20,11 +20,11 @@ pinned components, not checklist completion. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +
 Product tree: the Collector distribution and its pins now live in `collector/`
-(`go.mod`/`go.sum` unchanged from Experiment 021, with `go list -m all` identical to
-that experiment's `results/go-modules.txt`); ClickHouse stays pinned to 26.8.2.7-lts by
-`flake.nix`. Still open: there is no product gateway configuration yet, the owned
-exporter does not map native metrics, and no standard-OTLP run of the product build is
-recorded as an experiment.
+(dependency requirements and `go.sum` unchanged from Experiment 021, with only the
+main module path changed); ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`.
+Still open: there is no product gateway configuration yet, the owned exporter does
+not map native metrics, and no standard-OTLP run of the product build is recorded as
+an experiment.
 
 * [ ] Define application-event encoding and internal identity assignment without requiring proprietary producer batch IDs; verify what survives SDK retries and Collector rebatching.
 +
@@ -104,6 +104,7 @@ and span rows, stamped the epoch, moved an old payload partition to the S3 disk 
 and retrieved it by `(tenant_id, dataset, event_id)`. Those runs are not recorded as an
 experiment, and dataset routing still comes from a static `resource` processor, so the
 item stays open.
+
 * [ ] Integrate authenticated tenant policy before both exports; demonstrate normal-path ingestion and exact-event retrieval against independent fixture expectations.
 +
 Experiment 021 ran the provisional layout with real credential validation inside

@@ -275,8 +275,8 @@ func marshalCanonical(doc map[string]any) (string, error) {
 // eventID is a stable, content-derived fixture-scale identity: retries and
 // re-batching of the same record produce the same ID, which is what lets the
 // harness correlate canonical and serving rows and tell canonical duplicates
-// apart from missing serving rows. It is not a deduplication mechanism and the
-// RFD's identity decision remains open.
+// apart from missing serving rows. It is not a deduplication mechanism and does
+// not yet implement Decision 0001's gateway-assigned identity.
 func eventID(kind, workspace, dataset string, ts, observed uint64, traceID, spanID, payloadWithoutID string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%d\x00%d\x00%s\x00%s\x00", kind, workspace, dataset, ts, observed, traceID, spanID)
