@@ -1,0 +1,128 @@
+= Decision 0001: PoC physical layout
+:status: accepted
+:date: 2026-10-16
+
+link:../README.adoc[RFD 0001] · link:../experiments-impl.adoc[experiment plan]
+
+This record closes the Phase 1 decision item that has been open since the
+1 TB schema bakeoff. It fixes the physical layout the PoC vertical slice is
+built on so that the query service, the owned exporter, and the ten-day
+retained-scale load all target one DDL. Everything here is a PoC decision
+backed by the cited experiments; production qualification may revise it, but
+only through a superseding decision record, not through drift.
+
+== Context
+
+Experiments 006 through 021 narrowed the representation choice without
+selecting it. Each of 019, 020, and 021 ends by deferring the DDL and the
+component boundary. Meanwhile the RFD's petabyte direction makes two further
+choices expensive to retrofit: where the canonical payload lives, and how
+rows are placed across shards when the shard count changes. At a petabyte of
+retained input (about 90 TiB of hot table and 64 TiB of payload at the
+Experiment 010 ratios), payload on NVMe doubles the leaf count, and a
+hash-modulo placement with no epoch leaves a cluster skewed for the whole
+retention window after every expansion.
+
+== Decisions
+
+=== D1. Long-tail serving representation
+
+ClickHouse `Map` serving with the Experiment 021 hybrid layout:
+
+* record-namespace attributes in per-type value Maps (`Map(String, String)`,
+  `Map(String, Int64)`, `Map(String, Float64)`, `Map(String, Bool)`) plus the
+  key-only `record_other` map for canonical-only kinds (bytes, array, map) and
+  explicit empty;
+* resource and instrumentation-scope attributes in one string `Map` per
+  namespace with a companion type `Map`, because Experiment 020 measured the
+  small, type-diverse namespaces as cheaper in that form;
+* fixed columns for the routing and commonly queried envelope: workspace,
+  dataset, timestamps, event kind, event identity, trace context, service and
+  deployment context, severity, span timing status, payload checksum, and the
+  epoch stamp from D4.
+
+Native JSON is not reconsidered (Experiment 006). A full per-key type sidecar
+is not used (Experiment 020). Evidence: Experiments 006, 010, 019, 020, 021.
+
+=== D2. Sort key, partition key, and identifiers
+
+* Sort key `(tenant_id, dataset, timestamp, event_id)` as the provisional
+  baseline from Experiments 013, 016, and 017. `tenant_id` holds the globally
+  unique workspace ID, never an account ID.
+* Daily partitions by event time; retention and tiering act on partitions.
+* `event_id` is assigned by the gateway (D5). Identifiers stay `String`
+  columns, which is what every benchmark and experiment measured; fixed-width
+  or `UUID` encodings are an optimization for the ten-day load to measure,
+  not a layout change. Trace and span IDs are empty for non-span events.
+
+The ten-day load in the experiment plan is the first retained-scale
+measurement of D1 and D2 together; it may revise column types but not the
+sort-key shape without a new decision.
+
+=== D3. Canonical payload on object storage
+
+The canonical payload table moves off the hot NVMe tier. The PoC uses a
+ClickHouse table on an S3-backed disk with a small local cache volume and a
+storage policy whose `TTL ... TO VOLUME` keeps the most recent partitions on
+the cache. Lookup stays a SQL query keyed by `(tenant_id, dataset, event_id)`,
+replication and backup procedures are unchanged, and the owned exporter keeps
+its two ordered inserts.
+
+Payload lookup latency is a separate class from serving-query latency and is
+reported against the bounded event/trace/payload lookup target, not the
+dashboard target. Exporter-written batch objects with an offset reference
+remain the alternative if a later recovery design needs overflow and canonical
+storage in one format. Evidence: Experiment 009 for the split, the Experiment
+010 ratios for the cost, and the petabyte projection in the direction review.
+
+=== D4. Routing epochs
+
+Every serving row carries a `routing_epoch UInt16`. An epoch table in the
+policy registry (a static configuration file in the PoC) holds, per epoch, its
+number, the trusted ingestion time it became current, the shard set or shard
+groups it covers, and the placement function. Writers stamp the current epoch
+and place with its function; the planner resolves a query's time range to the
+epochs that may hold it (by trusted ingestion time with a late-arrival slack)
+and fans out to the union of their shard sets, filtering on the stamp inside
+each shard.
+
+The PoC has one epoch with the existing `cityHash64(tenant_id, dataset,
+event_id)` placement over the whole cluster. Adding shards later means adding
+an epoch, never moving parts. The same mechanism carries dataset-aware shard
+groups when fanout measurements justify them (replication plan). The live
+epoch table is control-plane state with the same fail-closed and backup rules
+as deletion fences; it is never stored only inside ClickHouse, because the
+planner needs it to know which nodes to ask.
+
+=== D5. Write identity and delivery semantics
+
+The gateway assigns `event_id` at trusted-scope injection, before batching.
+Delivery is at least once: an exporter retry after an ambiguous insert may
+write the same `event_id` twice, and a producer retry produces a second
+`event_id` for the same content. The PoC tolerates both, discloses measured
+duplicate counts in diagnostics, and does not deduplicate. Experiment 021
+showed that the content-derived identity cannot separate two legitimate
+identical events from a retransmission, so a deduplication design is deferred
+to qualification with the duplicate-rate measurement that would justify it.
+Aggregate states built in the PoC inherit this limitation and say so.
+
+== Consequences
+
+* The query service is written against one DDL; the planner's typed-predicate
+  rules, union/type expressions for unknown-key work, and guarded integer
+  aggregation are query-layer obligations (Experiments 019 and 020), not
+  layout choices.
+* The experiment plan's ten-day load targets this DDL, with payload on the
+  S3-backed disk and `bloom_filter` skip indexes on the Map keys and values
+  measured as part of the same run.
+* Exact counts are counts of stored rows under at-least-once delivery until a
+  deduplication decision supersedes D5.
+* Product-contract items that previously read "tests must still determine"
+  now point here; the open questions they leave are listed in the design
+  sections, not duplicated.
+
+== Superseding
+
+A later decision record may revise any item above. It must cite the measured
+reason, name the migration (reload, part move, or epoch addition), and update
+the section plans that reference this record.
