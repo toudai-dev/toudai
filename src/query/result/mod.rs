@@ -66,8 +66,8 @@ pub struct QueryResult {
 }
 
 impl QueryResult {
-    /// Lossless response: integers are decimal strings with explicit types,
-    /// counts are plain numbers.
+    /// Lossless response: integers and unsigned counts are decimal strings
+    /// with explicit types.
     pub fn to_json(&self) -> Value {
         let rows: Vec<Value> = self
             .rows
@@ -75,12 +75,12 @@ impl QueryResult {
             .map(|row| {
                 let mut out = json!({
                     "groups": row.groups.iter().map(GroupValue::to_json).collect::<Vec<_>>(),
-                    "events": row.events,
+                    "events": count_json(row.events),
                 });
                 if let Some(stats) = &row.values {
-                    out["contributing"] = json!(stats.contributing);
+                    out["contributing"] = count_json(stats.contributing);
                     if let Some(errors) = stats.timing_errors {
-                        out["timing_errors"] = json!(errors);
+                        out["timing_errors"] = count_json(errors);
                     }
                     out["sum"] = match stats.sum {
                         None => Value::Null,
@@ -93,10 +93,14 @@ impl QueryResult {
             .collect();
         let mut diagnostics = self.diagnostics.to_json();
         if let Some(excluded) = self.non_finite_excluded {
-            diagnostics["non_finite_excluded"] = json!(excluded);
+            diagnostics["non_finite_excluded"] = count_json(excluded);
         }
         json!({ "rows": rows, "diagnostics": diagnostics })
     }
+}
+
+fn count_json(value: u64) -> Value {
+    json!({ "type": "uint64", "value": value.to_string() })
 }
 
 /// Apply the contract checks to the `JSONEachRow` rows of `plan.statement`;

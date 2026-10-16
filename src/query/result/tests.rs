@@ -340,8 +340,8 @@ fn response_json_is_lossless() {
         out["rows"][0],
         json!({
             "groups": [{"type": "int", "value": "9007199254740993"}],
-            "events": 1,
-            "contributing": 1,
+            "events": {"type": "uint64", "value": "1"},
+            "contributing": {"type": "uint64", "value": "1"},
             "sum": {"type": "int", "value": "9007199254740993"},
         })
     );
@@ -349,6 +349,41 @@ fn response_json_is_lossless() {
     assert_eq!(out["diagnostics"]["approximation"], "exact");
     let guards = out["diagnostics"]["guards"].as_array().unwrap();
     assert!(guards.iter().any(|g| g == "int128_sum"));
+}
+
+#[test]
+fn response_count_json_is_lossless_and_typed() {
+    let plan = query(Aggregate::Count, vec![]);
+    let result = QueryResult {
+        rows: vec![ResultRow {
+            groups: vec![],
+            events: 9_007_199_254_740_993,
+            values: Some(ValueStats {
+                contributing: u64::MAX,
+                timing_errors: Some(9_007_199_254_740_994),
+                sum: None,
+            }),
+        }],
+        diagnostics: plan.diagnostics,
+        non_finite_excluded: Some(u64::MAX - 1),
+    };
+    let out = result.to_json();
+    assert_eq!(
+        out["rows"][0]["events"],
+        json!({"type": "uint64", "value": "9007199254740993"})
+    );
+    assert_eq!(
+        out["rows"][0]["contributing"],
+        json!({"type": "uint64", "value": "18446744073709551615"})
+    );
+    assert_eq!(
+        out["rows"][0]["timing_errors"],
+        json!({"type": "uint64", "value": "9007199254740994"})
+    );
+    assert_eq!(
+        out["diagnostics"]["non_finite_excluded"],
+        json!({"type": "uint64", "value": "18446744073709551614"})
+    );
 }
 
 #[test]
@@ -387,7 +422,10 @@ fn non_finite_exclusions_are_reported_not_fatal() {
         &[json!({"non_finite_excluded": 3})],
     )
     .unwrap();
-    assert_eq!(result.to_json()["diagnostics"]["non_finite_excluded"], 3);
+    assert_eq!(
+        result.to_json()["diagnostics"]["non_finite_excluded"],
+        json!({"type": "uint64", "value": "3"})
+    );
 
     // A request without a double comparison has no probe and reports nothing.
     let plain = query(Aggregate::Count, vec![]);
