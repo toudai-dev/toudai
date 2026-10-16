@@ -31,7 +31,8 @@ pub enum ApproximationMode {
 pub enum Guard {
     /// Comparisons match only values received with the literal's type.
     TypeMatchedPredicates,
-    /// Non-finite floats never match a numeric comparison.
+    /// Non-finite floats never match a numeric comparison; the response
+    /// reports how many events that left out.
     FiniteFloatComparison,
     /// Presence is Map key membership, never a default value.
     KeyMembershipPresence,
@@ -347,6 +348,9 @@ pub fn diagnostics(query: &Query) -> PlanDiagnostics {
 pub struct Plan {
     pub query: Query,
     pub statement: SqlStatement,
+    /// Counts the events double comparisons skipped because they hold a
+    /// non-finite float; present only when the request has such a comparison.
+    pub non_finite_probe: Option<SqlStatement>,
     pub diagnostics: PlanDiagnostics,
 }
 
@@ -355,6 +359,7 @@ pub fn plan(query: Query, tables: &ServingTables) -> Result<Plan, QueryError> {
     validate(&query)?;
     Ok(Plan {
         statement: sql::generate(&query, tables),
+        non_finite_probe: sql::generate_non_finite_probe(&query, tables),
         diagnostics: diagnostics(&query),
         query,
     })

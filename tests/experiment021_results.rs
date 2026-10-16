@@ -36,7 +36,12 @@ fn cmp(attr: AttrRef, op: CmpOp, value: L) -> Predicate {
 
 fn execute(ch: &ClickHouse, query: Query) -> Result<QueryResult, QueryError> {
     let planned = plan(query, &tables())?;
-    interpret(&planned, &ch.run(&planned.statement))
+    let probe = planned
+        .non_finite_probe
+        .as_ref()
+        .map(|statement| ch.run(statement))
+        .unwrap_or_default();
+    interpret(&planned, &ch.run(&planned.statement), &probe)
 }
 
 fn sum(attr: AttrRef, value_type: ValueType) -> Aggregate {
@@ -422,4 +427,89 @@ fn plan_diagnostics_travel_with_the_result() {
         json["diagnostics"]["columns"],
         serde_json::json!(["dataset", "record_int", "ts", "workspace_id"])
     );
+}
+
+#[test]
+fn double_comparisons_report_the_non_finite_values_they_skip() {
+    let Some(ch) = clickhouse() else { return };
+    // `metric.value` holds NaN, +Inf, and -Inf on three events; a double
+    // comparison matches none of them and says how many it left out.
+    let cases: Vec<(&str, Vec<Predicate>, u64, Option<u64>)> = vec![
+        (
+            "> 0.5 matches 1.0 only",
+            vec![cmp(metric(), CmpOp::Gt, L::Double(0.5))],
+            1,
+            Some(3),
+        ),
+        (
+            "< 0.5 matches -0.0 only",
+            vec![cmp(metric(), CmpOp::Lt, L::Double(0.5))],
+            1,
+            Some(3),
+        ),
+        // The probe honors the other filters: an int comparison cannot hold a double.
+        (
+            "an int filter on the same key leaves nothing to skip",
+            vec![
+                cmp(metric(), CmpOp::Gt, L::Double(0.5)),
+                cmp(metric(), CmpOp::Ge, L::Int(0)),
+            ],
+            0,
+            Some(0),
+        ),
+        (
+            "a key with only finite doubles",
+            vec![cmp(
+                AttrRef::record("double.half"),
+                CmpOp::Lt,
+                L::Double(2.0),
+            )],
+            1,
+            Some(0),
+        ),
+        (
+            "a key that holds NaN",
+            vec![cmp(
+                AttrRef::record("double.nan"),
+                CmpOp::Lt,
+                L::Double(1.0),
+            )],
+            0,
+            Some(1),
+        ),
+        (
+            "two compared keys count each event once",
+            vec![
+                cmp(AttrRef::record("double.posinf"), CmpOp::Gt, L::Double(0.0)),
+                cmp(AttrRef::record("double.neginf"), CmpOp::Lt, L::Double(0.0)),
+            ],
+            0,
+            Some(1),
+        ),
+        (
+            "int comparisons have no probe",
+            vec![cmp(metric(), CmpOp::Gt, L::Int(9))],
+            5,
+            None,
+        ),
+    ];
+    for (name, filters, events, excluded) in cases {
+        let mut q = logs_query();
+        q.filters = filters;
+        let result = execute(ch, q).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(result.non_finite_excluded, excluded, "{name}");
+        assert_eq!(single(result).events, events, "{name}");
+    }
+
+    // Grouped queries that match nothing still report the skipped events.
+    let mut q = logs_query();
+    q.filters = vec![cmp(
+        AttrRef::record("double.nan"),
+        CmpOp::Lt,
+        L::Double(1.0),
+    )];
+    q.group_by = vec![metric()];
+    let result = execute(ch, q).unwrap();
+    assert!(result.rows.is_empty());
+    assert_eq!(result.non_finite_excluded, Some(1));
 }

@@ -94,8 +94,12 @@ fn integer_totals_are_range_checked() {
         ),
     ];
     for (name, contributing, total, expected) in cases {
-        let got = interpret(&sum_int(), &[sum_row(contributing, &total.to_string())])
-            .map(|r| r.rows[0].values.as_ref().unwrap().sum);
+        let got = interpret(
+            &sum_int(),
+            &[sum_row(contributing, &total.to_string())],
+            &[],
+        )
+        .map(|r| r.rows[0].values.as_ref().unwrap().sum);
         assert_eq!(got, expected, "{name}");
     }
 }
@@ -148,12 +152,12 @@ fn incompatible_values_fail_unless_excluded() {
     for (found, expected) in cases {
         let row =
             json!({"events": 1, "contributing": 1, "sum_value": "1", "incompatible_types": found});
-        let got = interpret(&sum_int(), &[row]).map(|_| ());
+        let got = interpret(&sum_int(), &[row], &[]).map(|_| ());
         assert_eq!(got, expected, "{found}");
     }
     // The check is omitted when a type filter restricted the scan.
     let row = json!({"events": 1, "contributing": 1, "sum_value": "1"});
-    assert!(interpret(&sum_int(), &[row]).is_ok());
+    assert!(interpret(&sum_int(), &[row], &[]).is_ok());
 }
 
 #[test]
@@ -180,7 +184,7 @@ fn float_aggregates_reject_non_finite_values() {
     ];
     for (contributing, non_finite, sum, expected) in cases {
         let row = json!({"events": 5, "contributing": contributing, "sum_value": sum, "non_finite": non_finite});
-        let got = interpret(&plan, &[row]).map(|r| r.rows[0].values.as_ref().unwrap().sum);
+        let got = interpret(&plan, &[row], &[]).map(|r| r.rows[0].values.as_ref().unwrap().sum);
         assert_eq!(got, expected, "{contributing} {non_finite} {sum}");
     }
 }
@@ -266,7 +270,7 @@ fn group_keys_keep_their_type() {
     ];
     for (ty, value, expected) in cases {
         let row = json!({"g0_type": ty, "g0_value": value, "events": "2"});
-        let got = interpret(&plan, &[row]).map(|r| r.rows[0].groups[0].clone());
+        let got = interpret(&plan, &[row], &[]).map(|r| r.rows[0].groups[0].clone());
         assert_eq!(got, expected, "{ty} {value}");
     }
     // Same text, three types: three distinct keys.
@@ -286,12 +290,12 @@ fn malformed_result(detail: &str) -> QueryError {
 fn counts_accept_quoted_and_plain_json_numbers() {
     let plan = query(Aggregate::Count, vec![]);
     for events in [json!(27), json!("27")] {
-        let result = interpret(&plan, &[json!({ "events": events })]).unwrap();
+        let result = interpret(&plan, &[json!({ "events": events })], &[]).unwrap();
         assert_eq!(result.rows[0].events, 27);
         assert_eq!(result.rows[0].values, None);
     }
     assert_eq!(
-        interpret(&plan, &[json!({})]),
+        interpret(&plan, &[json!({})], &[]),
         Err(malformed_result("missing column events"))
     );
 }
@@ -309,7 +313,7 @@ fn response_json_is_lossless() {
         "g0_type": "int", "g0_value": "9007199254740993", "events": "1",
         "contributing": "1", "sum_value": "9007199254740993", "incompatible_types": [],
     });
-    let result = interpret(&plan, &[row]).unwrap();
+    let result = interpret(&plan, &[row], &[]).unwrap();
     let out = result.to_json();
     assert_eq!(
         out["rows"][0],
@@ -324,4 +328,54 @@ fn response_json_is_lossless() {
     assert_eq!(out["diagnostics"]["approximation"], "exact");
     let guards = out["diagnostics"]["guards"].as_array().unwrap();
     assert!(guards.iter().any(|g| g == "int128_sum"));
+}
+
+#[test]
+fn non_finite_exclusions_are_reported_not_fatal() {
+    use crate::query::model::Predicate;
+    use crate::query::value::Literal;
+    let mut with_double = query(Aggregate::Count, vec![]);
+    with_double.query.filters = vec![Predicate::Compare {
+        attr: AttrRef::record("metric.value"),
+        op: crate::query::model::CmpOp::Gt,
+        value: Literal::Double(0.5),
+    }];
+    let q = with_double.query.clone();
+    let with_double = plan(q, &ServingTables::new("lh").unwrap()).unwrap();
+    assert!(with_double.non_finite_probe.is_some());
+    // (probe rows, expected)
+    type ProbeCase = (Vec<Value>, Result<Option<u64>, QueryError>);
+    let cases: Vec<ProbeCase> = vec![
+        (vec![json!({"non_finite_excluded": "3"})], Ok(Some(3))),
+        (vec![json!({"non_finite_excluded": 0})], Ok(Some(0))),
+        (
+            vec![],
+            Err(malformed_result(
+                "the non-finite probe returned no single row",
+            )),
+        ),
+    ];
+    for (probe, expected) in cases {
+        let got =
+            interpret(&with_double, &[json!({"events": 1})], &probe).map(|r| r.non_finite_excluded);
+        assert_eq!(got, expected, "{probe:?}");
+    }
+    let result = interpret(
+        &with_double,
+        &[json!({"events": 1})],
+        &[json!({"non_finite_excluded": 3})],
+    )
+    .unwrap();
+    assert_eq!(result.to_json()["diagnostics"]["non_finite_excluded"], 3);
+
+    // A request without a double comparison has no probe and reports nothing.
+    let plain = query(Aggregate::Count, vec![]);
+    assert!(plain.non_finite_probe.is_none());
+    let result = interpret(&plain, &[json!({"events": 1})], &[]).unwrap();
+    assert_eq!(result.non_finite_excluded, None);
+    assert!(
+        result.to_json()["diagnostics"]
+            .get("non_finite_excluded")
+            .is_none()
+    );
 }

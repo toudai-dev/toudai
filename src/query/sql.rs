@@ -24,6 +24,7 @@ pub mod columns {
     pub const NON_FINITE: &str = "non_finite";
     pub const INCOMPATIBLE_TYPES: &str = "incompatible_types";
     pub const TIMING_ERRORS: &str = "timing_errors";
+    pub const NON_FINITE_EXCLUDED: &str = "non_finite_excluded";
 
     pub fn group_type(index: usize) -> String {
         format!("g{index}_type")
@@ -126,6 +127,31 @@ pub fn generate(query: &Query, tables: &ServingTables) -> SqlStatement {
     select.push(format!("count() AS {}", columns::EVENTS));
     select.extend(aggregate_columns(query, &mut binder));
 
+    let conditions = conditions(query, &mut binder, |_| true);
+
+    let mut sql = format!(
+        "SELECT {} FROM {} WHERE {}",
+        select.join(", "),
+        tables.table(query.signal),
+        conditions.join(" AND ")
+    );
+    if !group.is_empty() {
+        let keys = group.join(", ");
+        sql.push_str(&format!(" GROUP BY {keys} ORDER BY {keys}"));
+    }
+    sql.push_str(" FORMAT JSONEachRow");
+    SqlStatement {
+        sql,
+        params: binder.params,
+    }
+}
+
+/// Scope, time range, and the filters selected by `keep`.
+fn conditions(
+    query: &Query,
+    binder: &mut Binder,
+    keep: impl Fn(&Predicate) -> bool,
+) -> Vec<String> {
     let mut conditions = vec![
         format!(
             "{WORKSPACE_COLUMN} = {}",
@@ -145,24 +171,63 @@ pub fn generate(query: &Query, tables: &ServingTables) -> SqlStatement {
         query
             .filters
             .iter()
-            .map(|p| predicate(query.signal, p, &mut binder)),
+            .filter(|p| keep(p))
+            .map(|p| predicate(query.signal, p, binder)),
     );
+    conditions
+}
 
-    let mut sql = format!(
-        "SELECT {} FROM {} WHERE {}",
-        select.join(", "),
-        tables.table(query.signal),
-        conditions.join(" AND ")
-    );
-    if !group.is_empty() {
-        let keys = group.join(", ");
-        sql.push_str(&format!(" GROUP BY {keys} ORDER BY {keys}"));
+fn is_double_comparison(predicate: &Predicate) -> bool {
+    matches!(
+        predicate,
+        Predicate::Compare {
+            value: Literal::Double(_),
+            ..
+        }
+    )
+}
+
+/// Count the events a double comparison silently skips: events that satisfy
+/// every other filter but hold a non-finite float (NaN, +Inf, -Inf) at a
+/// compared attribute. Comparisons never match such values, and the response
+/// reports how many were left out instead of failing the query. `None` when
+/// the request has no double comparison.
+pub fn generate_non_finite_probe(query: &Query, tables: &ServingTables) -> Option<SqlStatement> {
+    let mut seen: Vec<&AttrRef> = Vec::new();
+    for filter in &query.filters {
+        if let Predicate::Compare {
+            attr,
+            value: Literal::Double(_),
+            ..
+        } = filter
+            && !seen.contains(&attr)
+        {
+            seen.push(attr);
+        }
     }
-    sql.push_str(" FORMAT JSONEachRow");
-    SqlStatement {
-        sql,
+    if seen.is_empty() {
+        return None;
+    }
+    let mut binder = Binder::default();
+    let map = typed_map(query.signal, ValueType::Double);
+    let mut conditions = conditions(query, &mut binder, |p| !is_double_comparison(p));
+    let held: Vec<String> = seen
+        .iter()
+        .map(|attr| {
+            let key = binder.string(&attr.key);
+            format!("(mapContains({map}, {key}) AND NOT isFinite({map}[{key}]))")
+        })
+        .collect();
+    conditions.push(format!("({})", held.join(" OR ")));
+    Some(SqlStatement {
+        sql: format!(
+            "SELECT count() AS {} FROM {} WHERE {} FORMAT JSONEachRow",
+            columns::NON_FINITE_EXCLUDED,
+            tables.table(query.signal),
+            conditions.join(" AND ")
+        ),
         params: binder.params,
-    }
+    })
 }
 
 fn typed_map(signal: Signal, ty: ValueType) -> &'static str {

@@ -59,6 +59,10 @@ pub struct ResultRow {
 pub struct QueryResult {
     pub rows: Vec<ResultRow>,
     pub diagnostics: PlanDiagnostics,
+    /// Events a double comparison skipped because they hold a non-finite float
+    /// at a compared attribute. `None` when the request has no double
+    /// comparison. The query succeeds; the count keeps the gap visible.
+    pub non_finite_excluded: Option<u64>,
 }
 
 impl QueryResult {
@@ -87,20 +91,35 @@ impl QueryResult {
                 out
             })
             .collect();
-        json!({ "rows": rows, "diagnostics": self.diagnostics.to_json() })
+        let mut diagnostics = self.diagnostics.to_json();
+        if let Some(excluded) = self.non_finite_excluded {
+            diagnostics["non_finite_excluded"] = json!(excluded);
+        }
+        json!({ "rows": rows, "diagnostics": diagnostics })
     }
 }
 
-/// Apply the contract checks to the `JSONEachRow` rows of `plan.statement`.
-/// The first violation fails the whole query.
-pub fn interpret(plan: &Plan, rows: &[Value]) -> Result<QueryResult, QueryError> {
+/// Apply the contract checks to the `JSONEachRow` rows of `plan.statement`;
+/// `probe_rows` are the rows of `plan.non_finite_probe` (empty when the plan
+/// has none). The first violation fails the whole query.
+pub fn interpret(
+    plan: &Plan,
+    rows: &[Value],
+    probe_rows: &[Value],
+) -> Result<QueryResult, QueryError> {
     let rows = rows
         .iter()
         .map(|row| interpret_row(plan, row))
         .collect::<Result<Vec<_>, _>>()?;
+    let non_finite_excluded = match (&plan.non_finite_probe, probe_rows) {
+        (None, _) => None,
+        (Some(_), [row]) => Some(count(row, columns::NON_FINITE_EXCLUDED)?),
+        (Some(_), _) => return Err(malformed("the non-finite probe returned no single row")),
+    };
     Ok(QueryResult {
         rows,
         diagnostics: plan.diagnostics.clone(),
+        non_finite_excluded,
     })
 }
 
