@@ -43,7 +43,8 @@ Scope limits of this item: resource and scope attributes are stored as text with
 a companion type Map, so only exact string, bool, and int equality, presence,
 type tests, and grouping are accepted for them (anything else is an explicit
 `UnsupportedForNamespace` error); non-finite stored floats never satisfy a
-numeric comparison but are not reported by it; group values order by
+numeric comparison, and the response reports how many events that skipped
+(`non_finite_excluded`) instead of failing; group values order by
 `(type, text)`, not numerically; and the column names follow the Experiment 021
 `serving-tables.sql` (`workspace_id`, `ts`) until the Decision 0001 DDL lands.
 The presentation of an unavailable duration remains a rendering decision.

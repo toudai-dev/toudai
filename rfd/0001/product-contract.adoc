@@ -299,6 +299,10 @@ finite floats, plus explicit presence/type predicates. Preserve bytes, arrays,
 maps, and non-finite floats for canonical retrieval, but reject unsupported query
 operations on them with an explicit error. Nested traversal and collection
 aggregation are later extensions, not reasons to stringify or discard content.
+A comparison never matches a stored non-finite float, and the query response
+reports how many events that left out instead of failing the query, so one bad
+producer cannot blank a dashboard and the exclusion stays visible. Grouping,
+aggregation, and literals reject non-finite floats with an explicit error.
 
 Field identity includes its namespace: resource attributes, instrumentation-scope
 attributes, record attributes, body, and reserved envelope fields do not overwrite
