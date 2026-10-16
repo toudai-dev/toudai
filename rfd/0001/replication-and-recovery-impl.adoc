@@ -2,7 +2,11 @@
 
 Checklist ownership: link:replication-and-recovery.adoc[Replication And Recovery].
 
-== PoC-required: small-topology recovery
+== Qualification: small-topology recovery
+
+These items are required before a production readiness claim and before RFD 0001 moves to `committed`. They do not block the PoC vertical slice defined in link:README.adoc#_poc_completion_gate[the PoC completion gate]; a PoC pass does not mark any of them complete.
+
+=== Small-topology recovery
 
 Depends on the durable vertical slice and raw-query correctness. Topology and
 failure assumptions must be written before execution; this test does not require

@@ -97,7 +97,57 @@ resolution, rotation/revocation, dataset routing rejection, and broader
 authorization guarantees remain out of scope and open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
-== PoC-required: failure, overflow, and duplicates
+== PoC-required: independent health telemetry
+
+* [ ] Publish queue depth, export failures, rejected/dropped records, overflow backlog, and catch-up progress independently of ClickHouse; verify visibility during outages and disclose incomplete recovery coverage.
++
+Experiment 018 verified the stock counters during outages
+(`otelcol_exporter_send_failed_log_records`,
+`otelcol_exporter_enqueue_failed_log_records`, `otelcol_exporter_queue_size`,
+`otelcol_receiver_refused_log_records`, and the failover/`awss3` queue labels).
+No overflow-object backlog or catch-up progress metric appeared in this
+topology's scrapes (a statement about the tested configuration, not proof that no
+stock component can expose one); such signals must come from outside the tested
+pipeline. See
+link:experiments/018-collector-compatibility.adoc[Experiment 018].
++
+Experiment 021 added per-destination instrumentation in the owned component
+(records and insert failures per destination, partial-write batches, rejected
+records by namespace and reason, rejected batches, and cross-workspace batch
+counts) and verified it during the outage, full-queue, permanent-failure, and
+split-write phases; the outage phase also recorded that the destination endpoint
+was actually refusing connections while the counters were scraped. The
+rejected-batch counter cannot conceal a partial drop from the mixed-validation
+phase: `all_records_rejected` increments only when no record survives validation,
+a request whose rejection invalidates it (missing trusted scope) is counted under
+that reason instead, and the component's batch summary reports the written and
+rejected records of the same export. The remaining gap is explicit: a whole-batch
+invalidation counts its reason but not the number of otherwise-valid records
+dropped with it, and the stock helper's `sent` counter credits records as
+received rather than rows written, so the component counters are the write-side
+authority. Overflow backlog and catch-up progress signals remain
+unimplemented in this slice. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
+
+== PoC-required: reconstruction and recovery decision
+
+* [ ] Rebuild an isolated serving layout from retained canonical fixture data; compare identities, canonical payload checksums, and raw/derived results, leaving the original layout intact on validation failure.
++
+Experiment 021 demonstrated only the bounded half of this: after a canonical-first
+split write left canonical rows without serving rows, a recorded repair statement
+derived a *minimal* serving row (routing identity, timestamps, kind, payload
+checksum) from the retained canonical payload and landed exactly one such row per
+canonical row (1/1 for the single failure and 7/7 for the retried failure). The
+full typed serving representation was not rebuilt from canonical data by a
+service, so this item remains open; the semantics phase verifies the
+reconstruction rules against the fixture instead. See
+link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
+
+== Qualification: failure, overflow, duplicates, and recovery
+
+These items are required before a production readiness claim and before RFD 0001 moves to `committed`. They do not block the PoC vertical slice defined in link:README.adoc#_poc_completion_gate[the PoC completion gate]; a PoC pass does not mark any of them complete.
+
+=== Failure, overflow, and duplicates
 
 * [ ] Configure direct ClickHouse export and object-store failover with separate catch-up collectors; verify fresh ingestion resumes without waiting for the overflow backlog and bound catch-up resource use.
 +
@@ -199,48 +249,7 @@ and no duplicates. No object-store overflow was involved in this run, so the
 object-content, notification, and cleanup parts of this item remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
-* [ ] Publish queue depth, export failures, rejected/dropped records, overflow backlog, and catch-up progress independently of ClickHouse; verify visibility during outages and disclose incomplete recovery coverage.
-+
-Experiment 018 verified the stock counters during outages
-(`otelcol_exporter_send_failed_log_records`,
-`otelcol_exporter_enqueue_failed_log_records`, `otelcol_exporter_queue_size`,
-`otelcol_receiver_refused_log_records`, and the failover/`awss3` queue labels).
-No overflow-object backlog or catch-up progress metric appeared in this
-topology's scrapes (a statement about the tested configuration, not proof that no
-stock component can expose one); such signals must come from outside the tested
-pipeline. See
-link:experiments/018-collector-compatibility.adoc[Experiment 018].
-+
-Experiment 021 added per-destination instrumentation in the owned component
-(records and insert failures per destination, partial-write batches, rejected
-records by namespace and reason, rejected batches, and cross-workspace batch
-counts) and verified it during the outage, full-queue, permanent-failure, and
-split-write phases; the outage phase also recorded that the destination endpoint
-was actually refusing connections while the counters were scraped. The
-rejected-batch counter cannot conceal a partial drop from the mixed-validation
-phase: `all_records_rejected` increments only when no record survives validation,
-a request whose rejection invalidates it (missing trusted scope) is counted under
-that reason instead, and the component's batch summary reports the written and
-rejected records of the same export. The remaining gap is explicit: a whole-batch
-invalidation counts its reason but not the number of otherwise-valid records
-dropped with it, and the stock helper's `sent` counter credits records as
-received rather than rows written, so the component counters are the write-side
-authority. Overflow backlog and catch-up progress signals remain
-unimplemented in this slice. See
-link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
+=== Reconstruction and recovery decision
 
-== PoC-required: reconstruction and recovery decision
-
-* [ ] Rebuild an isolated serving layout from retained canonical fixture data; compare identities, canonical payload checksums, and raw/derived results, leaving the original layout intact on validation failure.
-+
-Experiment 021 demonstrated only the bounded half of this: after a canonical-first
-split write left canonical rows without serving rows, a recorded repair statement
-derived a *minimal* serving row (routing identity, timestamps, kind, payload
-checksum) from the retained canonical payload and landed exactly one such row per
-canonical row (1/1 for the single failure and 7/7 for the retried failure). The
-full typed serving representation was not rebuilt from canonical data by a
-service, so this item remains open; the semantics phase verifies the
-reconstruction rules against the fixture instead. See
-link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 * [ ] Run a small ClickHouse backup/restore test with a declared recovery point; distinguish normal-path recovery from overflow replay and document uncovered failures.
 * [ ] Decide whether full independent archival is required in addition to canonical retention and backups; record recovery objectives, cost, and failure-domain trade-offs, and add archive-specific work only if selected.

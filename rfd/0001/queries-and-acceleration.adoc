@@ -254,9 +254,14 @@ than silently return unadjusted results labeled as corrected.
 == Storage tiers
 
 The PoC uses normalized events on ClickHouse's fast serving tier and retains
-canonical payload for reconstruction. Object-store overflow covers failed-path
-traffic only; full independent archival is not assumed. Experiment 009 validates
-the physical payload split and exact lookup, but not backup/restore guarantees.
+canonical payload for reconstruction in a ClickHouse table on an S3-backed disk
+with a local cache volume for recent partitions
+(link:decisions/0001-poc-physical-layout.adoc[Decision 0001]). Payload lookup is
+reported against the bounded event/trace/payload lookup target, not the dashboard
+target. Object-store overflow covers failed-path traffic only; full independent
+archival is not assumed. Experiment 009 validates the physical payload split and
+exact lookup on local disks, but not object-backed lookup latency or
+backup/restore guarantees.
 Querying archived normalized
 events through ClickHouse object-backed parts versus a distinct archive executor
 remains an experiment; either path must preserve one logical query contract and
