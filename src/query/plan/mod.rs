@@ -7,9 +7,10 @@ use serde_json::{Value, json};
 use super::error::{Operation, QueryError, UnsupportedValue};
 use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
 use super::schema::{
-    self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, TS_COLUMN,
-    TYPED_SCALARS, WORKSPACE_COLUMN,
+    self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
+    TS_COLUMN, TYPED_SCALARS, WORKSPACE_COLUMN,
 };
+use super::sql::{self, SqlStatement};
 use super::value::{Literal, ValueType};
 
 /// The storage path a plan reads. The PoC has only the raw serving tables;
@@ -83,12 +84,16 @@ impl PlanDiagnostics {
     }
 }
 
-/// Whether the filters hold an explicit type filter for `attr` of type `ty`:
-/// only such a filter excludes incompatible values from an aggregate.
+/// Whether the filters restrict `attr` to `ty`: an explicit type predicate, or
+/// a comparison against a literal of that type (which only matches values
+/// received with it). Only such a filter excludes incompatible values from an
+/// aggregate instead of leaving them to fail it.
 pub(crate) fn has_type_filter(filters: &[Predicate], attr: &AttrRef, ty: ValueType) -> bool {
-    filters
-        .iter()
-        .any(|p| matches!(p, Predicate::HasType(a, t) if a == attr && *t == ty))
+    filters.iter().any(|p| match p {
+        Predicate::HasType(a, t) => a == attr && *t == ty,
+        Predicate::Compare { attr: a, value, .. } => a == attr && value.value_type() == ty,
+        _ => false,
+    })
 }
 
 /// Check a request against the PoC typed-value contract.
@@ -335,6 +340,24 @@ pub fn diagnostics(query: &Query) -> PlanDiagnostics {
         columns: columns_read(query),
         guards: guards(query),
     }
+}
+
+/// A validated request with its statement and diagnostics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Plan {
+    pub query: Query,
+    pub statement: SqlStatement,
+    pub diagnostics: PlanDiagnostics,
+}
+
+/// Validate a request and build its ClickHouse statement.
+pub fn plan(query: Query, tables: &ServingTables) -> Result<Plan, QueryError> {
+    validate(&query)?;
+    Ok(Plan {
+        statement: sql::generate(&query, tables),
+        diagnostics: diagnostics(&query),
+        query,
+    })
 }
 
 #[cfg(test)]

@@ -380,3 +380,41 @@ fn diagnostics_table() {
         assert_eq!(d.approximation, ApproximationMode::Exact);
     }
 }
+
+#[test]
+fn typed_comparison_counts_as_a_type_filter() {
+    let sum = Aggregate::Sum {
+        attr: metric(),
+        value_type: ValueType::Int,
+    };
+    // (filter, whether incompatible values are left to fail the aggregate)
+    let cases = [
+        (compare(metric(), CmpOp::Ge, Literal::Int(0)), false),
+        (compare(metric(), CmpOp::Eq, Literal::Double(1.0)), true),
+        (
+            compare(AttrRef::record("other.key"), CmpOp::Eq, Literal::Int(0)),
+            true,
+        ),
+        (
+            compare(
+                AttrRef::resource("metric.value"),
+                CmpOp::Eq,
+                Literal::Int(0),
+            ),
+            true,
+        ),
+    ];
+    for (filter, checks_incompatible) in cases {
+        let q = logs_with(|q| {
+            q.filters = vec![filter.clone()];
+            q.aggregate = sum.clone();
+        });
+        assert_eq!(
+            diagnostics(&q)
+                .guards
+                .contains(&Guard::IncompatibleTypeCheck),
+            checks_incompatible,
+            "{filter:?}"
+        );
+    }
+}
