@@ -109,6 +109,10 @@ these larger tests complete based on a small-fixture pass.
 
 * [x] Build the selected tenant indexes and dashboard aggregate states over ten days, then measure storage, build/backfill cost, correctness anchors, and query speedup.
 
+* [ ] Load one ten-day corpus into the link:decisions/0001-poc-physical-layout.adoc[Decision 0001] layout on one node, with the canonical payload on an S3-backed disk and `bloom_filter` skip indexes on the Map keys and values; record storage, read bytes for known-type and unknown-type predicates, and object-backed payload lookup latency against the Experiment 010 and 011 baselines.
+
+* [ ] Measure sustained ingestion once through the real path: one corpus day replayed through the owned exporter at 10,000 events/s for one hour on one node, recording acknowledgement latency, insert lag, part counts, and merge backlog.
+
 * [ ] Measure live accelerator maintenance cost during sustained ingestion and merges.
 
 * [ ] Run the mixed-concurrency workload.

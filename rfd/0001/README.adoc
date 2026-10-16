@@ -34,22 +34,35 @@ Lighthouse provides Scuba-style recent-data exploration over logs, spans, and st
 
 . Define the PoC workload, pass/fail thresholds, event contract, and acceptance semantics.
 . Build a deterministic emitter and enforce tenant authorization and ingestion policy.
-. Demonstrate OTLP ingestion, raw querying, overflow/catch-up, and canonical-data reconstruction.
+. Demonstrate OTLP ingestion, raw querying, and canonical-data reconstruction on one node.
 . Demonstrate the operator workflow, then bounded acceleration with raw fallback.
-. Exercise mixed tenants, cancellation, and small-topology replicated recovery.
+. Qualification: overflow/catch-up, mixed tenants, cancellation, privacy and deletion, and small-topology replicated recovery.
 . Only then expand retention, topology, cold-tier execution, and production qualification.
 
 Experiment results may revise design sections, but every checklist item has exactly one implementation-section owner.
 
 == PoC completion gate
 
-The PoC must demonstrate one reproducible vertical slice:
+The PoC must demonstrate one reproducible vertical slice on a single
+ClickHouse node, using the physical layout fixed in
+link:decisions/0001-poc-physical-layout.adoc[Decision 0001]:
 
 ....
-OTLP -> Collector authentication/validation -> ClickHouse -> query/drill down
-                         |                        |
-                         +-> overflow -> catch-up +-> reconstruct/restore
+OTLP -> Collector authentication/validation -> owned exporter -> ClickHouse
+                                                                   |
+   operator client <- query service (typed contract, diagnostics) <-+
+                                                                   |
+                                      reconstruct serving rows <- canonical payload
 ....
+
+The slice is: a deterministic fixture emitter; the owned exporter writing the
+serving and canonical tables; a query service that enforces the typed-value
+contract and reports plan diagnostics; the minimum aggregate states the
+dashboard fixture needs, with raw fallback; exact-event retrieval from the
+object-backed payload; reconstruction of serving rows from retained canonical
+data; and a recorded operator walkthrough of the compare, group-by, outlier,
+and drill-down workflow. Independent health counters must remain visible when
+ClickHouse is unavailable.
 
 Use a small deterministic corpus before repeating large retained-volume tests.
 Each required milestone must record its fixture, command, expected result,
@@ -64,15 +77,23 @@ link:acceptance-and-replay.adoc[Collector-first acceptance plan] requires measur
 OTLP acknowledgement, loss, duplicate, and recovery behavior. Neither queue
 admission nor protocol compatibility alone establishes durable acceptance.
 
-PoC completion requires the emitter and operator tests in the product plan,
-Collector/overflow/reconstruction tests in the acceptance plan, raw and accelerated
-semantic tests in the query plan, authorization and bounded-work tests in the
-tenant plan, and small-topology failure tests in the replication plan. Independent
-health telemetry must expose failures even when ClickHouse is unavailable.
+PoC completion requires the `PoC-required` sections of the product,
+acceptance, query, and tenant plans: the emitter and operator tests,
+Collector normal-path and reconstruction tests, raw and accelerated semantic
+tests, and trusted-scope authorization with bounded exploration. Each plan's
+`Qualification` section holds the work that was previously gated as
+PoC-required and now follows the slice: overflow and catch-up, acknowledgement
+and duplicate injection, backup/restore and the archive decision, policy
+registry and quotas, privacy and deletion, admission and mixed-tenant
+isolation, coverage and live accelerator maintenance, and small-topology
+replicated recovery. Qualification items are required before a production
+readiness claim and before this RFD moves to `committed`; a PoC pass does not
+mark any of them complete.
 
 Provider comparisons, 100 TB loading, cross-zone qualification, and 24-to-72-hour
-soaks do not block this PoC. They remain necessary where applicable before a
-production readiness claim. Passing the PoC does not establish production SLOs.
+soaks do not block this PoC or qualification. They remain necessary where
+applicable before a production readiness claim. Passing the PoC does not
+establish production SLOs.
 
 == Cross-cutting exit criteria
 
@@ -82,7 +103,10 @@ RFD 0001 remains in discussion. The MVP contract is ready to commit only when:
   restart, merge-time, and workload-isolation tests close its explicit gaps;
 * the user workflow and p50/p95 latency, freshness, retention, concurrency, and
   cost targets are explicit;
-* acceptance, retry, deduplication, archive, and replay semantics are decided;
+* acceptance, retry, deduplication, archive, and replay semantics are decided
+  (write identity, at-least-once delivery, and payload placement are decided
+  for the PoC in link:decisions/0001-poc-physical-layout.adoc[Decision 0001];
+  deduplication and archival remain qualification decisions);
 * cardinality and privacy defaults have concrete per-tenant budgets and
   observable rejection behavior;
 * one service can emit the versioned envelope, replay into a clean serving

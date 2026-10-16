@@ -93,8 +93,6 @@ link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Return plan diagnostics including selected storage path and approximation mode.
 
-* [ ] Define ingestion watermarks, expected shard coverage, and complete versus bounded-latency execution independently of exact versus approximate math.
-
 * [ ] Execute the required raw query shapes against the deterministic fixture; verify expected rows/aggregates and diagnostic accuracy, including rejected and failed requests.
 
 == PoC-required: minimal acceleration
@@ -109,6 +107,19 @@ operator fixture; complete live-maintenance correctness before scale testing.
 * [ ] Route eligible dashboard queries to aggregate states with raw fallback.
 
 * [ ] Implement and table-test eligibility for half-open time bounds, bucket origin/timezone, workspace/dataset, field types, filters, groupings, algorithm version, and sampling treatment; use asymmetric boundary fixtures and verify full raw fallback or a policy error rather than rounded or partial aggregate answers.
+
+* [ ] Validate histogram bins, normalized rates, time-by-duration heatmaps, and approximate quantile tolerances against independently known distributions on the single-node fixture; do not treat count/sum anchors alone as aggregate correctness.
+
+== Qualification: coverage, live maintenance, and amplification
+
+These items are required before a production readiness claim and before RFD 0001 moves to `committed`. They do not block the PoC vertical slice defined in link:README.adoc#_poc_completion_gate[the PoC completion gate]; a PoC pass does not mark any of them complete.
+
+=== Raw query semantics
+
+* [ ] Define ingestion watermarks, expected shard coverage, and complete versus bounded-latency execution independently of exact versus approximate math.
+
+=== Minimal acceleration
+
 * [ ] Define a verifiable source-set boundary and acceleration-generation lifecycle for the Collector path; test late arrivals, backfill/live handoff, overflow catch-up, partial build failure, activation/retirement during queries, and invalidation without assuming a global log offset or event-time completeness.
 * [ ] Validate histogram bins, normalized rates, time-by-duration heatmaps, and approximate quantile tolerances against independently known distributions with unequal shard populations; do not treat count/sum anchors alone as aggregate correctness.
 
