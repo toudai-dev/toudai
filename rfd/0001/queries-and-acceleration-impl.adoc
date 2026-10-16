@@ -19,25 +19,32 @@ remain open, so this item stays unchecked.
 +
 `src/query/` validates a request against
 link:product-contract.adoc#_poc_typed_value_contract[the PoC typed-value
-contract] (`plan`), generates one parameterized statement (`sql`) that guards
-on Map key membership and accumulates integers in `Int128`, and turns the
-returned values into contract errors (`result`): an `Int128` total outside
-`Int64` is an `IntegerOverflow`, never a wrapped sum; a sum with no contributing
-value is absent rather than zero; an incompatible non-empty value fails the
-aggregate unless an explicit type filter (or a comparison against a literal of
-the aggregate's type) excludes it; bytes, arrays, maps, and non-finite floats
-fail grouping and float aggregation. Table tests in `tests/experiment021_*.rs`
-run the generated SQL under `clickhouse local` against the Experiment 021
-fixture (rows exported from the 021 harness's independent expectations by
-`scripts/export-fixture021-rows.py`, tables from `serving-tables.sql`
-unchanged) and check the Experiment 019/021 expectations: int 1, double 1.0,
-and string `"1"` are three filters and three groups; missing, explicit empty,
+contract] (`plan`), generates a parameterized main statement (`sql`) that guards
+on Map key membership and accumulates integers in `Int128`, and, for double
+comparisons, generates a separate parameterized probe that counts excluded
+non-finite values. The result layer turns returned values into contract errors:
+an `Int128` total outside `Int64` is an `IntegerOverflow`, never a wrapped sum;
+a sum with no contributing value is absent rather than zero; an incompatible
+non-empty value fails the aggregate unless an explicit type filter (or a
+comparison against a literal of the aggregate's type) excludes it; bytes,
+arrays, maps, and non-finite floats fail grouping and float aggregation. Integers
+and unsigned counts use typed decimal strings in response JSON. Table tests in
+`tests/experiment021_*.rs` run the generated SQL under `clickhouse local`
+against the Experiment 021 fixture (rows exported from the 021 harness's
+independent expectations by `scripts/export-fixture021-rows.py`, tables from
+`serving-tables.sql` unchanged) and check the Experiment 019/021 expectations:
+int 1, double 1.0, and string `"1"` are three filters and three groups; missing,
+explicit empty,
 `""`, `false`, and `0` stay distinct; `2^53 + 1` and the `Int64` limits stay
-exact; `sum-a + sum-b + sum-c` (which wraps to `-1` in ClickHouse's `Int64`
-`sum`) is rejected; and the span duration aggregate reports 4 contributing, 5
-excluded, and 2 timing errors for the fixture's 9 spans. Known-type filters read
-only the matching typed Map; presence, grouping, and an untyped sum read every
-record Map, as Experiment 020 anticipated.
+exact; the SQL-backed cases reject two `Int64::MAX` values and the full 12-int
+fixture total, while the `sum-a + sum-b + sum-c` wrap case is checked directly
+at the result-interpreter boundary; and the span duration aggregate reports 4
+contributing, 5 excluded, and 2 timing errors for the fixture's 9 spans.
+Known-type filters read only the matching typed Map; presence, grouping, and an
+untyped sum read every record Map, as Experiment 020 anticipated. The immutable
+fixture makes the main statement and non-finite probe deterministic here; a
+future executor must run both against one snapshot before claiming the same
+diagnostic consistency during concurrent ingestion.
 +
 Scope limits of this item: resource and scope attributes are stored as text with
 a companion type Map, so only exact string, bool, and int equality, presence,
