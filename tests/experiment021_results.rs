@@ -478,6 +478,33 @@ fn double_comparisons_report_the_non_finite_values_they_skip() {
             Some(1),
         ),
         (
+            "another finite double predicate must still pass",
+            vec![
+                cmp(AttrRef::record("double.posinf"), CmpOp::Gt, L::Double(0.0)),
+                cmp(AttrRef::record("double.half"), CmpOp::Lt, L::Double(2.0)),
+            ],
+            0,
+            Some(1),
+        ),
+        (
+            "another failing double predicate leaves nothing to skip",
+            vec![
+                cmp(AttrRef::record("double.posinf"), CmpOp::Gt, L::Double(0.0)),
+                cmp(AttrRef::record("double.half"), CmpOp::Gt, L::Double(2.0)),
+            ],
+            0,
+            Some(0),
+        ),
+        (
+            "another wrong-typed double predicate leaves nothing to skip",
+            vec![
+                cmp(AttrRef::record("double.posinf"), CmpOp::Gt, L::Double(0.0)),
+                cmp(AttrRef::record("int.one"), CmpOp::Gt, L::Double(0.0)),
+            ],
+            0,
+            Some(0),
+        ),
+        (
             "two compared keys count each event once",
             vec![
                 cmp(AttrRef::record("double.posinf"), CmpOp::Gt, L::Double(0.0)),

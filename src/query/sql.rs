@@ -177,47 +177,59 @@ fn conditions(
     conditions
 }
 
-fn is_double_comparison(predicate: &Predicate) -> bool {
-    matches!(
-        predicate,
-        Predicate::Compare {
-            value: Literal::Double(_),
-            ..
-        }
-    )
-}
-
 /// Count the events a double comparison silently skips: events that satisfy
 /// every other filter but hold a non-finite float (NaN, +Inf, -Inf) at a
 /// compared attribute. Comparisons never match such values, and the response
 /// reports how many were left out instead of failing the query. `None` when
 /// the request has no double comparison.
 pub fn generate_non_finite_probe(query: &Query, tables: &ServingTables) -> Option<SqlStatement> {
-    let mut seen: Vec<&AttrRef> = Vec::new();
-    for filter in &query.filters {
-        if let Predicate::Compare {
-            attr,
-            value: Literal::Double(_),
-            ..
-        } = filter
-            && !seen.contains(&attr)
-        {
-            seen.push(attr);
-        }
-    }
-    if seen.is_empty() {
+    if !query.filters.iter().any(|filter| {
+        matches!(
+            filter,
+            Predicate::Compare {
+                value: Literal::Double(_),
+                ..
+            }
+        )
+    }) {
         return None;
     }
     let mut binder = Binder::default();
     let map = typed_map(query.signal, ValueType::Double);
-    let mut conditions = conditions(query, &mut binder, |p| !is_double_comparison(p));
-    let held: Vec<String> = seen
-        .iter()
-        .map(|attr| {
+    let mut conditions = conditions(query, &mut binder, |filter| {
+        !matches!(
+            filter,
+            Predicate::Compare {
+                value: Literal::Double(_),
+                ..
+            }
+        )
+    });
+    let mut seen: Vec<&AttrRef> = Vec::new();
+    let mut held = Vec::new();
+    for filter in &query.filters {
+        if let Predicate::Compare {
+            attr,
+            op,
+            value: Literal::Double(value),
+        } = filter
+        {
             let key = binder.string(&attr.key);
-            format!("(mapContains({map}, {key}) AND NOT isFinite({map}[{key}]))")
-        })
-        .collect();
+            let bound = binder.bind("Float64", value.to_string());
+            // Preserve every double predicate, but let a present non-finite
+            // value through so the final condition can count it as excluded.
+            conditions.push(format!(
+                "(mapContains({map}, {key}) AND (NOT isFinite({map}[{key}]) OR {map}[{key}] {} {bound}))",
+                sql_op(*op)
+            ));
+            if !seen.contains(&attr) {
+                seen.push(attr);
+                held.push(format!(
+                    "(mapContains({map}, {key}) AND NOT isFinite({map}[{key}]))"
+                ));
+            }
+        }
+    }
     conditions.push(format!("({})", held.join(" OR ")));
     Some(SqlStatement {
         sql: format!(
