@@ -1,0 +1,27 @@
+= ClickHouse schema
+
+The DDL the PoC vertical slice is built on, as fixed by
+link:../rfd/0001/decisions/0001-poc-physical-layout.adoc[Decision 0001]. It is derived from
+`rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/serving-tables.sql`,
+which stays in place as evidence.
+
+[cols="2,3,5"]
+|===
+| File | Creates | Notes
+
+| `schema/001-database.sql` | `lighthouse` database |
+| `schema/002-canonical-events.sql` | `canonical_events` | Payload table (D3) on the `lighthouse_payload` storage policy; the TTL moves partitions older than two days to the S3-backed `object` volume. Sorted for `(tenant_id, dataset, event_id)` lookup.
+| `schema/003-serving-logs.sql` | `serving_logs` | Hybrid typed-Map layout (D1)
+| `schema/004-serving-spans.sql` | `serving_spans` | Same, with span timing diagnostics
+|===
+
+Serving tables use daily partitions by event `timestamp`, the sort key
+`(tenant_id, dataset, timestamp, event_id)`, and a `routing_epoch UInt16` stamp (D2, D4).
+`tenant_id` holds the globally unique workspace ID. Identifiers are `String`.
+
+`config.d/lighthouse-storage.xml` defines the disks and the `lighthouse_payload` policy the
+payload table names. Its S3 endpoint and cache size are placeholders for the deployment.
+
+Apply the files in order with `clickhouse-client --multiquery < schema/NNN-name.sql`; every
+statement is `IF NOT EXISTS`. The owned exporter in `collector/` names these columns in its
+`INSERT` statements, and `collector/lighthouseexporter/schema_test.go` fails when they drift.

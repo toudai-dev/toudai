@@ -1,0 +1,43 @@
+<!--
+  Storage policy for the Decision 0001 payload table (D3). New parts land on the
+  small local `cache` volume; the table TTL moves older partitions to the `object`
+  volume, an S3-backed disk fronted by ClickHouse's filesystem cache so repeated
+  payload lookups against recent object-store parts stay local.
+
+  Endpoint, credentials, and sizes are deployment inputs. Replace the
+  placeholders (or inject them with from_env) before use.
+-->
+<clickhouse>
+    <storage_configuration>
+        <disks>
+            <payload_local>
+                <path>/var/lib/clickhouse/disks/payload_local/</path>
+            </payload_local>
+            <payload_s3>
+                <type>s3</type>
+                <endpoint>https://s3.example.invalid/lighthouse-payload/data/</endpoint>
+                <use_environment_credentials>true</use_environment_credentials>
+                <metadata_path>/var/lib/clickhouse/disks/payload_s3/</metadata_path>
+            </payload_s3>
+            <payload_s3_cached>
+                <type>cache</type>
+                <disk>payload_s3</disk>
+                <path>/var/lib/clickhouse/disks/payload_s3_cache/</path>
+                <max_size>10Gi</max_size>
+            </payload_s3_cached>
+        </disks>
+        <policies>
+            <lighthouse_payload>
+                <volumes>
+                    <!-- Volume names are referenced by the table TTL. -->
+                    <cache>
+                        <disk>payload_local</disk>
+                    </cache>
+                    <object>
+                        <disk>payload_s3_cached</disk>
+                    </object>
+                </volumes>
+            </lighthouse_payload>
+        </policies>
+    </storage_configuration>
+</clickhouse>
