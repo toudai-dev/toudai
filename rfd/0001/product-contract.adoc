@@ -83,10 +83,13 @@ accepted data.
 
 The proposal cannot move to `committed` until the implementation checklist's
 MVP exit criteria are met. The key unresolved choices are explicit SLOs and
-retention, durable acknowledgement and deduplication semantics, initial tenant
-budgets, synchronous versus asynchronous exact-query limits, object-backed
-ClickHouse versus explicit archive routing, and the shard count or workload at
-which broad fanout merits virtual partitions.
+retention, initial tenant budgets, synchronous versus asynchronous exact-query
+limits, and whether archived events are queried through object-backed parts or
+a separate archive path. Write identity, at-least-once delivery, payload
+placement, and epoch-based placement are decided for the PoC in
+link:decisions/0001-poc-physical-layout.adoc[Decision 0001]; deduplication and
+the shard count at which dataset-aware shard groups replace whole-cluster fanout
+remain qualification decisions.
 
 == References
 
@@ -253,22 +256,24 @@ ordered bulk ClickHouse table. Backup/restore and optional independent archival
 are evaluated in the acceptance plan. This is a physical implementation
 of one logical event medium, not separate log and trace products.
 
-The provisional PoC sort key is `(tenant_id, dataset, timestamp, event_id)`.
-Experiments 013, 016, and 017 support this baseline for timestamp-ordered tail
-retrieval, with a storage and service-filtering tradeoff; they do not settle
-mixed-workload production DDL. Tests must still determine:
+The PoC physical layout is fixed in
+link:decisions/0001-poc-physical-layout.adoc[Decision 0001]: the sort key
+`(tenant_id, dataset, timestamp, event_id)` from Experiments 013, 016, and 017,
+daily partitions, the Experiment 021 typed Map layout with resource, scope, and
+record namespaces, canonical payload on an S3-backed disk, a routing-epoch stamp,
+and gateway-assigned write identity. Those experiments do not settle
+mixed-workload production DDL, so the ten-day load of that layout and later
+qualification must still determine:
 
-* the number and boundaries of attribute namespaces;
 * whether the timestamp-first baseline remains appropriate under sustained
   ingestion, merges, and the agreed service-filtered and tail-query workload;
-* the best ClickHouse representation for event and trace identifiers;
+* whether fixed-width identifier encodings pay for themselves over the measured
+  `String` columns;
 * which GCP and OpenTelemetry fields deserve fixed or materialized columns;
-* how logical dimension and measure types are preserved alongside the selected
-  `Map` serving representation;
-* appropriate partition granularity, retention behavior, and archive format;
-  and
-* whether payload lookup remains a ClickHouse bulk table, moves to direct object
-  retrieval, or uses both by retention window.
+* retention behavior, hot-cache window, and archive format for the object-backed
+  payload; and
+* whether payload lookup latency from object storage stays within the bounded
+  lookup target across the retention window.
 
 Multi-tenancy does not imply one promoted column per tenant field. Fixed or
 materialized columns are reserved for common envelope fields or fields with

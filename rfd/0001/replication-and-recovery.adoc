@@ -7,9 +7,14 @@ This section defines distribution, replication, fanout, and recovery direction.
 Beyond one node, local `ReplicatedMergeTree` tables sit behind ClickHouse's
 `Distributed` engine. Events use a stable hash of `(tenant_id, dataset,
 event_id)`, allowing a large tenant to consume all shards. Tenant/dataset/time
-queries initially fan out broadly and aggregate locally. Adding shards may let
-old placement expire with retention rather than requiring immediate retained
-data redistribution.
+queries initially fan out broadly and aggregate locally. Placement is
+versioned by routing epoch
+(link:decisions/0001-poc-physical-layout.adoc[Decision 0001]): every row carries
+the epoch it was placed under, the registry records each epoch's shard set and
+placement function, and the planner fans a query out to the union of the shard
+sets of the epochs its time range can touch. Adding shards adds an epoch; it
+never moves parts and does not rely on old placement expiring with retention,
+which only converges when retention is short relative to cluster growth.
 
 Lighthouse will not implement a Kraken-style virtual-partition placement layer
 before measurements show that fixed per-shard latency, fanout traffic, dataset
@@ -70,8 +75,10 @@ servers scan and compute mergeable partial aggregates; the initiating server
 merges those states.
 
 The initial design deliberately sends tenant/dataset/time queries to every
-shard. Adding shards does not require immediate historical redistribution:
-queries remain correct across all shards, new events use the expanded topology,
-and old placement converges through retention. Measure fanout latency and
-network traffic before adding virtual partitions, targeted routing, or a custom
-placement service.
+shard of the current epoch. Adding shards does not require historical
+redistribution: queries remain correct because each epoch's rows stay on that
+epoch's shard set, and new events use the new epoch's topology. Measure fanout
+latency and network traffic before adding targeted routing. When a measured
+fanout cost justifies it, the next step is dataset-aware shard groups expressed
+as a new epoch's placement function, which is the mid-point between the current
+whole-cluster hash and a Kraken-style placement service.

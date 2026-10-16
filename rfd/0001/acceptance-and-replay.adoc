@@ -64,9 +64,15 @@ queued data, confirmed storage, and query visibility in operational reporting.
 
 The previous custom immutable-batch receipt contract is superseded for the PoC.
 Ordinary OTLP producers need not supply Lighthouse batch IDs or preserve a batch
-across Collector rebatching. Internal event/write identities may still be needed;
-choose their assignment point and preservation behavior from measured retry and
-replay requirements. Stable IDs by themselves do not establish deduplication.
+across Collector rebatching. The PoC write identity is decided in
+link:decisions/0001-poc-physical-layout.adoc[Decision 0001]: the gateway assigns
+`event_id` at trusted-scope injection, before batching, and delivery is at least
+once. An exporter retry after an ambiguous insert may store one identity twice
+and a producer retry stores the same content under a second identity; the PoC
+tolerates and discloses both and does not deduplicate. Stable IDs by themselves
+do not establish deduplication, and Experiment 021 showed a content-derived
+identity cannot separate identical legitimate events from a retransmission, so
+the deduplication design waits for a measured duplicate rate in qualification.
 
 Test standard OTLP partial-success and retryable/permanent-error behavior rather
 than imposing all-or-nothing request acceptance. Document rejected record counts,

@@ -93,7 +93,7 @@ these larger tests complete based on a small-fixture pass.
 
 * [ ] Compare trace projection and derived trace-table approaches using a deterministic correlated-event fixture.
 
-* [ ] Record the `Map` representation, final sort key, identifier types, and promoted-column baseline in a written decision record.
+* [x] Record the `Map` representation, final sort key, identifier types, and promoted-column baseline in a written decision record: link:decisions/0001-poc-physical-layout.adoc[Decision 0001] fixes the Experiment 021 typed layout, the timestamp-first sort key, daily partitions, `String` identifiers pending the ten-day measurement, payload on an S3-backed disk, routing epochs, and gateway-assigned identity.
 
 == Phase 4: 10 TB validation
 
