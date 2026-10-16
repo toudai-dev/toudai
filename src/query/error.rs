@@ -99,6 +99,22 @@ pub enum QueryError {
     },
     /// The aggregate reads a span column.
     AggregateRequiresSpans,
+    /// A numeric aggregate met non-empty values of another type and no
+    /// explicit type filter excluded them. Casts and mixed aggregation are not
+    /// part of the PoC surface.
+    IncompatibleType {
+        attr: String,
+        expected: ValueType,
+        found: Vec<ValueType>,
+    },
+    /// The exact integer total does not fit `Int64`; it is rejected, never wrapped.
+    IntegerOverflow {
+        total: i128,
+    },
+    /// ClickHouse returned a row the statement cannot have produced.
+    MalformedResult {
+        detail: String,
+    },
 }
 
 impl QueryError {
@@ -115,6 +131,9 @@ impl QueryError {
             QueryError::NotNumeric { .. } => "not_numeric",
             QueryError::NotScalar { .. } => "not_scalar",
             QueryError::AggregateRequiresSpans => "aggregate_requires_spans",
+            QueryError::IncompatibleType { .. } => "incompatible_type",
+            QueryError::IntegerOverflow { .. } => "integer_overflow",
+            QueryError::MalformedResult { .. } => "malformed_result",
         }
     }
 }
@@ -164,6 +183,26 @@ impl fmt::Display for QueryError {
             }
             QueryError::AggregateRequiresSpans => {
                 write!(f, "span duration aggregates need the spans signal")
+            }
+            QueryError::IncompatibleType {
+                attr,
+                expected,
+                found,
+            } => {
+                let found: Vec<_> = found.iter().map(|t| t.as_str()).collect();
+                write!(
+                    f,
+                    "{attr:?} holds {} values but the aggregate declares {}; \
+                     add a type filter to exclude them",
+                    found.join(", "),
+                    expected.as_str()
+                )
+            }
+            QueryError::IntegerOverflow { total } => {
+                write!(f, "integer total {total} does not fit Int64")
+            }
+            QueryError::MalformedResult { detail } => {
+                write!(f, "unexpected ClickHouse result: {detail}")
             }
         }
     }
