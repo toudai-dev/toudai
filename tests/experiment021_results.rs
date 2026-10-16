@@ -499,7 +499,18 @@ fn double_comparisons_report_the_non_finite_values_they_skip() {
             "another wrong-typed double predicate leaves nothing to skip",
             vec![
                 cmp(AttrRef::record("double.posinf"), CmpOp::Gt, L::Double(0.0)),
-                cmp(AttrRef::record("int.one"), CmpOp::Gt, L::Double(0.0)),
+                // A missing Float64 Map key reads as 0, so equality specifically
+                // proves that key membership—not the default—rejects this row.
+                cmp(AttrRef::record("int.one"), CmpOp::Eq, L::Double(0.0)),
+            ],
+            0,
+            Some(0),
+        ),
+        (
+            "another missing double predicate leaves nothing to skip",
+            vec![
+                cmp(AttrRef::record("double.posinf"), CmpOp::Gt, L::Double(0.0)),
+                cmp(AttrRef::record("no.such.key"), CmpOp::Eq, L::Double(0.0)),
             ],
             0,
             Some(0),
