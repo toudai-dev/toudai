@@ -9,6 +9,44 @@ acceptance plan's materialized fixture. Validate raw results against independent
 fixture expectations before using them as acceleration comparison anchors.
 
 * [ ] Define the event filter, grouping, time-series, heatmap, percentile, and raw-result query contract.
++
+The filter, grouping, and count/sum parts of this contract are defined and
+enforced by the typed-value item below. Time-series bucketing, heatmaps,
+percentiles, raw-result rows, and the HTTP surface that returns a response
+remain open, so this item stays unchecked.
+
+* [x] Enforce the PoC typed-value contract in the raw query layer (Rust library, ClickHouse SQL generation over the Experiment 021 layout; no HTTP API yet): type-matched predicates with no implicit coercion, group keys that include type, guarded `Int128` integer sums with overflow rejection, contributing-value counts separate from event counts, presence by Map key membership, explicit unsupported-operation errors for bytes, arrays, maps, and non-finite floats, and plan diagnostics for the raw path.
++
+`src/query/` validates a request against
+link:product-contract.adoc#_poc_typed_value_contract[the PoC typed-value
+contract] (`plan`), generates one parameterized statement (`sql`) that guards
+on Map key membership and accumulates integers in `Int128`, and turns the
+returned values into contract errors (`result`): an `Int128` total outside
+`Int64` is an `IntegerOverflow`, never a wrapped sum; a sum with no contributing
+value is absent rather than zero; an incompatible non-empty value fails the
+aggregate unless an explicit type filter (or a comparison against a literal of
+the aggregate's type) excludes it; bytes, arrays, maps, and non-finite floats
+fail grouping and float aggregation. Table tests in `tests/experiment021_*.rs`
+run the generated SQL under `clickhouse local` against the Experiment 021
+fixture (rows exported from the 021 harness's independent expectations by
+`scripts/export-fixture021-rows.py`, tables from `serving-tables.sql`
+unchanged) and check the Experiment 019/021 expectations: int 1, double 1.0,
+and string `"1"` are three filters and three groups; missing, explicit empty,
+`""`, `false`, and `0` stay distinct; `2^53 + 1` and the `Int64` limits stay
+exact; `sum-a + sum-b + sum-c` (which wraps to `-1` in ClickHouse's `Int64`
+`sum`) is rejected; and the span duration aggregate reports 4 contributing, 5
+excluded, and 2 timing errors for the fixture's 9 spans. Known-type filters read
+only the matching typed Map; presence, grouping, and an untyped sum read every
+record Map, as Experiment 020 anticipated.
++
+Scope limits of this item: resource and scope attributes are stored as text with
+a companion type Map, so only exact string, bool, and int equality, presence,
+type tests, and grouping are accepted for them (anything else is an explicit
+`UnsupportedForNamespace` error); non-finite stored floats never satisfy a
+numeric comparison but are not reported by it; group values order by
+`(type, text)`, not numerically; and the column names follow the Experiment 021
+`serving-tables.sql` (`workspace_id`, `ts`) until the Decision 0001 DDL lands.
+The presentation of an unavailable duration remains a rendering decision.
 
 * [x] Compare companion-type, tagged-value, and native typed Map encodings against the typed fixture; verify lossless canonical round-trip, type-sensitive filters/groups, numeric rather than lexical ordering, presence semantics, aggregate type errors/overflow, and lossless response encoding; record storage and execution cost before selecting the PoC DDL.
 +
@@ -81,8 +119,9 @@ searchable by its supplied timestamps, and counted in an explicit timing-error
 count, and a valid zero duration contributes with value 0 (the fixture-derived
 expectation is 4 contributing / 5 excluded / 2 timing errors of the fixture's 9
 span rows; the same-workspace log rows live in `serving_logs` and are never part
-of a span count). That count contract is agreed; the service/query implementation
-of it and the presentation of an unavailable duration remain open. See
+of a span count). That count contract is agreed; the query-layer aggregate is
+implemented by the typed-value item above, and the presentation of an
+unavailable duration remains open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 
 * [ ] Implement a planner that chooses raw, projection, metadata, or aggregate paths without changing query semantics.
@@ -92,8 +131,20 @@ link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 * [ ] Preserve and validate known/unknown sampling metadata and provenance; test identical retained events with different declared probabilities produce unchanged observed-event aggregates and explicit adjustment=none, while invalid metadata and unsupported correction requests never produce falsely corrected results.
 
 * [ ] Return plan diagnostics including selected storage path and approximation mode.
++
+Diagnostics for the only path that exists (raw serving tables, exact) are built
+with every plan, list the columns read and the contract guards applied, and
+travel with the result (`PlanDiagnostics`). The item stays unchecked until a
+planner chooses among raw, projection, metadata, and aggregate paths and a
+response surface returns the diagnostics for rejected and failed requests too.
 
 * [ ] Execute the required raw query shapes against the deterministic fixture; verify expected rows/aggregates and diagnostic accuracy, including rejected and failed requests.
++
+Filter, presence, grouping, count, integer and float sum, and span duration
+shapes now execute against the Experiment 021 fixture with independent
+expectations, and unsupported requests are rejected before any statement runs.
+Time-series, heatmap, percentile, and raw-result shapes, ClickHouse failures,
+and diagnostic accuracy for failed requests remain open.
 
 == PoC-required: minimal acceleration
 
