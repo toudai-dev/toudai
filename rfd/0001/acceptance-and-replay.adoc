@@ -31,14 +31,14 @@ The notification queue carries object references, not all telemetry. Live and
 catch-up deployments scale independently, but share downstream capacity; measure
 and bound catch-up load so it does not starve fresh ingestion or queries.
 
-== Reuse and Lighthouse ownership
+== Reuse and Toudai ownership
 
-Collectors own transport and pipeline plumbing. Lighthouse owns authenticated
+Collectors own transport and pipeline plumbing. Toudai owns authenticated
 tenant/dataset policy, unified log/span/event mapping, retained canonical content,
 and query semantics. First test whether existing Collector processors and the
 ClickHouse exporter can express the required mapping and routing. Add a custom
 processor/exporter or narrow service only for a demonstrated gap; do not assume
-the stock exporter implements Lighthouse's unified-event schema.
+the stock exporter implements Toudai's unified-event schema.
 
 Pin the Collector distribution, component versions, configuration, and ClickHouse
 version in the experiment. Establish support for OTLP logs, traces, and metrics;
@@ -63,7 +63,7 @@ simultaneous ClickHouse/object-store unavailability. Distinguish receiver receip
 queued data, confirmed storage, and query visibility in operational reporting.
 
 The previous custom immutable-batch receipt contract is superseded for the PoC.
-Ordinary OTLP producers need not supply Lighthouse batch IDs or preserve a batch
+Ordinary OTLP producers need not supply Toudai batch IDs or preserve a batch
 across Collector rebatching. The PoC write identity is decided in
 link:decisions/0001-poc-physical-layout.adoc[Decision 0001]: the gateway assigns
 `event_id` at trusted-scope injection, before batching, and delivery is at least

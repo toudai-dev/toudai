@@ -11,7 +11,7 @@ alert -> compare time ranges -> group by any retained field
       -> identify an outlier -> inspect exact representative events
 ....
 
-Lighthouse adopts Scuba's flexible event exploration, mandatory time bounds,
+Toudai adopts Scuba's flexible event exploration, mandatory time bounds,
 storage-node partial aggregation, and fast drill-down. It does not adopt
 Scuba's memory-authoritative serving, silent sampling, short-only retention, or
 unlabelled incomplete answers. Kraken is supporting evidence for future scale
@@ -54,7 +54,7 @@ recorded and rejected or isolated according to versioned tenant policy.
 
 == Implementation language
 
-Lighthouse uses Rust for the service and benchmark load generators. This was a
+Toudai uses Rust for the service and benchmark load generators. This was a
 low-cost choice because the repository contained only a three-line Go
 placeholder and no Go dependencies, generated code, or tests. Rust provides
 the asynchronous I/O, explicit resource control, and Arrow/Parquet ecosystem
@@ -100,7 +100,7 @@ remain qualification decisions.
 
 == Context
 
-Lighthouse is being designed as a ClickHouse-backed, Scuba-style telemetry
+Toudai is being designed as a ClickHouse-backed, Scuba-style telemetry
 system for recent-data exploration. The initial proof of concept lives at
 `~/workspace/inngest/lighthouse` and provides useful ingestion, query-planning,
 Prometheus compatibility, schema, and staging performance evidence. This
@@ -187,7 +187,7 @@ native metric samples unless a later interoperability feature needs it.
 
 == Full-resolution acceptance and retention
 
-Lighthouse does not silently sample accepted events. Preserve canonical events
+Toudai does not silently sample accepted events. Preserve canonical events
 at full resolution within declared retention. The Collector PoC must distinguish
 OTLP receipt/queue admission from confirmed storage and establish the supported
 failure envelope. Recovery uses retained canonical data and tested backups;

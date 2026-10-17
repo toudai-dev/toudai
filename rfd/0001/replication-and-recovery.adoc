@@ -16,7 +16,7 @@ sets of the epochs its time range can touch. Adding shards adds an epoch; it
 never moves parts and does not rely on old placement expiring with retention,
 which only converges when retention is short relative to cluster growth.
 
-Lighthouse will not implement a Kraken-style virtual-partition placement layer
+Toudai will not implement a Kraken-style virtual-partition placement layer
 before measurements show that fixed per-shard latency, fanout traffic, dataset
 placement requirements, or topology churn justify its versioned metadata and
 recovery complexity. Stable identities preserve that future option.
