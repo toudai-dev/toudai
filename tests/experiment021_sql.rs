@@ -467,13 +467,13 @@ fn scope_and_time_bounds_are_enforced() {
     let mut q = logs_query();
     q.scope.workspace_id = WS_B.into();
     q.filters = vec![cmp(
-        AttrRef::resource("lighthouse.workspace_id"),
+        AttrRef::resource("toudai.workspace_id"),
         CmpOp::Eq,
         L::String(WS_B.into()),
     )];
     assert_eq!(events(ch, q.clone()), 27);
     q.filters = vec![cmp(
-        AttrRef::resource("lighthouse.workspace_id"),
+        AttrRef::resource("toudai.workspace_id"),
         CmpOp::Eq,
         L::String(WS_A.into()),
     )];
@@ -482,7 +482,7 @@ fn scope_and_time_bounds_are_enforced() {
     let mut q = spans_query();
     q.scope.workspace_id = WS_B.into();
     q.filters = vec![cmp(
-        AttrRef::resource("lighthouse.workspace_id"),
+        AttrRef::resource("toudai.workspace_id"),
         CmpOp::Eq,
         L::String(WS_B.into()),
     )];

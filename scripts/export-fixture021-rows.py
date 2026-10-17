@@ -41,6 +41,19 @@ _spec.loader.exec_module(verify)
 
 fixture019 = fixture021.fixture019
 
+# The recorded experiment harness is immutable and forges the pre-rename
+# `lighthouse.*` resource attribute keys. The product tree uses the Toudai
+# names, so the exported rows translate the keys instead of editing the harness.
+WIRE_KEYS = {
+    "lighthouse.workspace_id": "toudai.workspace_id",
+    "lighthouse.dataset": "toudai.dataset",
+    "lighthouse.scope_source": "toudai.scope_source",
+}
+
+
+def wire_keys(attributes: dict) -> dict:
+    return {WIRE_KEYS.get(key, key): value for key, value in attributes.items()}
+
 
 def dump(obj) -> str:
     # allow_nan keeps NaN/Infinity, which ClickHouse's JSONEachRow reader accepts.
@@ -85,10 +98,10 @@ def log_row(event: dict, workspace: str) -> dict:
         "trace_id": hex_or_empty(event["trace_id"]),
         "span_id": hex_or_empty(event["span_id"]),
         "event_name": event["event_name"] or "",
-        "resource": e["resource"],
-        "scope": e["scope"],
-        "resource_types": e["resource_types"],
-        "scope_types": e["scope_types"],
+        "resource": wire_keys(e["resource"]),
+        "scope": wire_keys(e["scope"]),
+        "resource_types": wire_keys(e["resource_types"]),
+        "scope_types": wire_keys(e["scope_types"]),
         **maps("record", e["record"]),
         "payload_sha256": "",
     }
@@ -112,10 +125,10 @@ def span_row(event: dict, workspace: str) -> dict:
         "status_code": e["status_code"],
         "duration_ns": e["duration_ns"],
         "span_timing_status": e["timing_status"],
-        "resource": e["resource"],
-        "resource_types": e["resource_types"],
-        "span_scope": e["span_scope"],
-        "span_scope_types": e["span_scope_types"],
+        "resource": wire_keys(e["resource"]),
+        "resource_types": wire_keys(e["resource_types"]),
+        "span_scope": wire_keys(e["span_scope"]),
+        "span_scope_types": wire_keys(e["span_scope_types"]),
         **maps("span", e["record"]),
         "payload_sha256": "",
     }
