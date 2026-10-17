@@ -11,9 +11,11 @@ fixture, produced by that verifier's own independent expectation functions
 * spans: the nine fixture spans (valid, zero, missing-timing, and reversed
   durations) for both workspaces.
 
-Event identities are the fixture's own (`typed-1`, `sum-a`, ...); the owned
-exporter stores content-derived identities instead, which this layer never
-reads. The experiment harness needs its pinned Python dependencies; see
+Rows use the product column names of `clickhouse/schema/003-serving-logs.sql`
+and `004-serving-spans.sql` (`tenant_id`, `timestamp`, `routing_epoch`), not the
+experiment's `workspace_id` and `ts`. Event identities are the fixture's own
+(`typed-1`, `sum-a`, ...); the owned exporter stores content-derived identities
+instead, which this layer never reads. The experiment harness needs its pinned Python dependencies; see
 `rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/setup.sh`.
 
 Usage: export-fixture021-rows.py [--check] [OUT_DIR]   (default tests/fixtures/021)
@@ -51,6 +53,11 @@ WIRE_KEYS = {
 }
 
 
+# The serving tables stamp each row with its placement epoch (D4); the fixture
+# is a single-placement dataset, so every row carries the same epoch.
+ROUTING_EPOCH = 1
+
+
 def wire_keys(attributes: dict) -> dict:
     return {WIRE_KEYS.get(key, key): value for key, value in attributes.items()}
 
@@ -85,10 +92,11 @@ def maps(prefix: str, record: dict) -> dict:
 def log_row(event: dict, workspace: str) -> dict:
     e = verify.log_expectation(event, workspace)
     return {
-        "workspace_id": workspace,
+        "tenant_id": workspace,
+        "routing_epoch": ROUTING_EPOCH,
         "dataset": e["dataset"],
         "event_id": event["event_id"],
-        "ts": datetime64(e["ts_ns"]),
+        "timestamp": datetime64(e["ts_ns"]),
         "observed_ts": datetime64(e["observed_ns"]),
         "kind": "log",
         "service_name": e["service_name"],
@@ -110,10 +118,11 @@ def log_row(event: dict, workspace: str) -> dict:
 def span_row(event: dict, workspace: str) -> dict:
     e = verify.span_expectation(event, workspace)
     return {
-        "workspace_id": workspace,
+        "tenant_id": workspace,
+        "routing_epoch": ROUTING_EPOCH,
         "dataset": e["dataset"],
         "event_id": event["event_id"],
-        "ts": datetime64(e["ts_ns"]),
+        "timestamp": datetime64(e["ts_ns"]),
         "end_ts": datetime64(e["end_ns"]),
         "kind": "span",
         "service_name": e["service_name"],

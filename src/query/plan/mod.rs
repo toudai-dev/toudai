@@ -8,7 +8,7 @@ use super::error::{Operation, QueryError, UnsupportedValue};
 use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
 use super::schema::{
     self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TS_COLUMN, TYPED_SCALARS, WORKSPACE_COLUMN,
+    TENANT_COLUMN, TIMESTAMP_COLUMN, TYPED_SCALARS,
 };
 use super::sql::{self, SqlStatement};
 use super::value::{Literal, ValueType};
@@ -216,7 +216,7 @@ fn validate_record_aggregate(attr: &AttrRef, ty: ValueType) -> Result<(), QueryE
 pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
     let signal = query.signal;
     let mut columns: BTreeSet<&'static str> = BTreeSet::new();
-    columns.extend([WORKSPACE_COLUMN, DATASET_COLUMN, TS_COLUMN]);
+    columns.extend([TENANT_COLUMN, DATASET_COLUMN, TIMESTAMP_COLUMN]);
 
     // Every typed Map plus the key-only Map: what presence and grouping need
     // when the type of a key is not known in advance.

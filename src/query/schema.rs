@@ -1,18 +1,17 @@
 //! The serving layout the query service is written against.
 //!
-//! Names follow `rfd/0001/experiments/021-hybrid-layout-collector-integration/
-//! harness/serving-tables.sql`, the layout Decision 0001 D1 selects. Decision
-//! 0001 D2 names the tenant column `tenant_id` and adds `routing_epoch`; those
-//! belong to the DDL the Decision's implementation lands, so every column name
-//! lives here and nowhere else.
+//! Names follow the product DDL in `clickhouse/schema/003-serving-logs.sql` and
+//! `004-serving-spans.sql` (Decision 0001 D1/D2/D4), so every column name lives
+//! here and nowhere else. The tenant column holds the workspace ID.
 
 use super::error::QueryError;
 use super::model::{Namespace, Signal};
 use super::value::ValueType;
 
-pub const WORKSPACE_COLUMN: &str = "workspace_id";
+/// Holds the globally unique workspace ID (D2); the Rust `workspace_id` field maps to it.
+pub const TENANT_COLUMN: &str = "tenant_id";
 pub const DATASET_COLUMN: &str = "dataset";
-pub const TS_COLUMN: &str = "ts";
+pub const TIMESTAMP_COLUMN: &str = "timestamp";
 pub const SPAN_DURATION_COLUMN: &str = "duration_ns";
 pub const SPAN_TIMING_STATUS_COLUMN: &str = "span_timing_status";
 /// `span_timing_status` of a span whose end precedes its start.

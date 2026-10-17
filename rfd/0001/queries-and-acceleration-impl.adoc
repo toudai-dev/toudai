@@ -31,8 +31,9 @@ arrays, maps, and non-finite floats fail grouping and float aggregation. Integer
 and unsigned counts use typed decimal strings in response JSON. Table tests in
 `tests/experiment021_*.rs` run the generated SQL under `clickhouse local`
 against the Experiment 021 fixture (rows exported from the 021 harness's
-independent expectations by `scripts/export-fixture021-rows.py`, tables from
-`serving-tables.sql` unchanged) and check the Experiment 019/021 expectations:
+independent expectations by `scripts/export-fixture021-rows.py`, tables from the
+product DDL in `clickhouse/schema/*.sql` applied verbatim, skipping the
+`canonical_events` file that `clickhouse local` cannot run) and check the Experiment 019/021 expectations:
 int 1, double 1.0, and string `"1"` are three filters and three groups; missing,
 explicit empty,
 `""`, `false`, and `0` stay distinct; `2^53 + 1` and the `Int64` limits stay
@@ -52,8 +53,9 @@ type tests, and grouping are accepted for them (anything else is an explicit
 `UnsupportedForNamespace` error); non-finite stored floats never satisfy a
 numeric comparison, and the response reports how many events that skipped
 (`non_finite_excluded`) instead of failing; group values order by
-`(type, text)`, not numerically; and the column names follow the Experiment 021
-`serving-tables.sql` (`workspace_id`, `ts`) until the Decision 0001 DDL lands.
+`(type, text)`, not numerically; and the column names follow the product DDL in
+`clickhouse/schema/` (`tenant_id`, `timestamp`), which the ClickHouse-backed
+tests apply verbatim. The query layer does not yet filter on `routing_epoch`.
 The presentation of an unavailable duration remains a rendering decision.
 
 * [x] Compare companion-type, tagged-value, and native typed Map encodings against the typed fixture; verify lossless canonical round-trip, type-sensitive filters/groups, numeric rather than lexical ordering, presence semantics, aggregate type errors/overflow, and lossless response encoding; record storage and execution cost before selecting the PoC DDL.

@@ -248,19 +248,19 @@ fn diagnostics_table() {
         (
             "plain count reads only the envelope",
             query(Signal::Logs),
-            vec!["dataset", "ts", "workspace_id"],
+            vec!["dataset", "tenant_id", "timestamp"],
             vec![],
         ),
         (
             "known-type filter reads only the matching typed Map",
             logs_with(|q| q.filters = vec![compare(metric(), CmpOp::Eq, Literal::Int(1))]),
-            vec!["dataset", "record_int", "ts", "workspace_id"],
+            vec!["dataset", "record_int", "tenant_id", "timestamp"],
             vec![TypeMatchedPredicates, KeyMembershipPresence],
         ),
         (
             "float comparison is finite-only",
             logs_with(|q| q.filters = vec![compare(metric(), CmpOp::Gt, Literal::Double(1.5))]),
-            vec!["dataset", "record_double", "ts", "workspace_id"],
+            vec!["dataset", "record_double", "tenant_id", "timestamp"],
             vec![
                 TypeMatchedPredicates,
                 FiniteFloatComparison,
@@ -277,8 +277,8 @@ fn diagnostics_table() {
                 "record_int",
                 "record_other",
                 "record_string",
-                "ts",
-                "workspace_id",
+                "tenant_id",
+                "timestamp",
             ],
             vec![KeyMembershipPresence],
         ),
@@ -288,7 +288,7 @@ fn diagnostics_table() {
                 q.filters = vec![int_filter.clone()];
                 q.aggregate = sum_int.clone();
             }),
-            vec!["dataset", "record_int", "ts", "workspace_id"],
+            vec!["dataset", "record_int", "tenant_id", "timestamp"],
             vec![KeyMembershipPresence, Int128Sum, ContributingCounts],
         ),
         (
@@ -301,8 +301,8 @@ fn diagnostics_table() {
                 "record_int",
                 "record_other",
                 "record_string",
-                "ts",
-                "workspace_id",
+                "tenant_id",
+                "timestamp",
             ],
             vec![
                 KeyMembershipPresence,
@@ -324,8 +324,8 @@ fn diagnostics_table() {
                 "record_int",
                 "record_other",
                 "record_string",
-                "ts",
-                "workspace_id",
+                "tenant_id",
+                "timestamp",
             ],
             vec![
                 KeyMembershipPresence,
@@ -341,8 +341,8 @@ fn diagnostics_table() {
                 "dataset",
                 "resource",
                 "resource_types",
-                "ts",
-                "workspace_id",
+                "tenant_id",
+                "timestamp",
             ],
             vec![
                 KeyMembershipPresence,
@@ -361,8 +361,8 @@ fn diagnostics_table() {
                 "dataset",
                 "duration_ns",
                 "span_timing_status",
-                "ts",
-                "workspace_id",
+                "tenant_id",
+                "timestamp",
             ],
             vec![Int128Sum, ContributingCounts],
         ),
