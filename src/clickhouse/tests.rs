@@ -105,6 +105,10 @@ async fn parameters_travel_beside_the_sql_never_inside_it() {
         ("additional_result_filter", ""),
         ("run_query_in_background", "0"),
         ("output_format", "JSONEachRow"),
+        ("use_query_cache", "0"),
+        ("empty_result_for_aggregation_by_empty_set", "0"),
+        ("bool_true_representation", "true"),
+        ("bool_false_representation", "false"),
     ] {
         assert!(args.iter().any(|(n, v)| n == name && v == value), "{name}");
     }

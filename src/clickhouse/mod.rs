@@ -33,10 +33,11 @@ const OVERFLOW_MODES: [&str; 10] = [
 /// Settings that a user profile (or the server defaults) could use to change
 /// what a statement returns or how the reply is encoded without failing it:
 /// an outer row cap or offset, a result filter, a rewritten select, sort, or
-/// order, background execution that replies with an empty body, and an output
-/// format that overrides the statement's `FORMAT`. Pinned on every request so
+/// order, background execution that replies with an empty body, an output
+/// format that overrides the statement's `FORMAT`, the query cache, the
+/// empty-aggregate row, and the spelling of booleans. Pinned on every request so
 /// the generated SQL alone decides the answer.
-const NEUTRAL_SETTINGS: [(&str, &str); 11] = [
+const NEUTRAL_SETTINGS: [(&str, &str); 15] = [
     ("limit", "0"),
     ("offset", "0"),
     ("page", "0"),
@@ -50,6 +51,16 @@ const NEUTRAL_SETTINGS: [(&str, &str); 11] = [
     ("additional_table_filters", "{}"),
     ("run_query_in_background", "0"),
     ("output_format", "JSONEachRow"),
+    // A cached answer to an identical request would hide an event that arrived
+    // or a second payload that made it a conflict.
+    ("use_query_cache", "0"),
+    // On, an ungrouped aggregate over no rows returns no row instead of the
+    // zero-count row the result layer expects.
+    ("empty_result_for_aggregation_by_empty_set", "0"),
+    // Bool parameters and `toString(Bool)` follow these; inverted, a true value
+    // would be read and reported as false.
+    ("bool_true_representation", "true"),
+    ("bool_false_representation", "false"),
 ];
 
 #[derive(Debug, Clone)]
