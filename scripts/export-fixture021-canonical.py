@@ -16,7 +16,10 @@ The rows are chosen to separate the lookup key's parts:
   wrong payload;
 * `only-b` exists for workspace B alone;
 * `dup-1` is stored twice with the same payload (an at-least-once replay) and
-  `conflict-1` twice with different payloads;
+  `conflict-1` twice with different payloads; `conflict-3` holds two copies of
+  the payload whose hash sorts first plus one different payload, so a lookup
+  that read only the first two physical rows by hash order would see a replay
+  and miss the conflict;
 * `odd id/1 é+%` has characters that need URL escaping.
 
 Usage: export-fixture021-canonical.py [--check] [OUT_DIR]   (default tests/fixtures/021)
@@ -85,8 +88,19 @@ def rows():
         row(WS_A, "fixture", "logs", "dup-1", {"n": typed("int", "1")}),
         row(WS_A, "fixture", "logs", "conflict-1", {"n": typed("int", "1")}),
         row(WS_A, "fixture", "logs", "conflict-1", {"n": typed("int", "2")}),
+        *conflict_with_replays(),
         row(WS_A, "fixture", "logs", "odd id/1 é+%", {"marker": typed("string", "odd")}),
     ]
+
+
+def conflict_with_replays():
+    # Two copies of the lower-hash payload and one of the higher: ordered by
+    # hash, the first two physical rows are identical.
+    pair = sorted(
+        (row(WS_A, "fixture", "logs", "conflict-3", {"n": typed("int", str(n))}) for n in (1, 2)),
+        key=lambda r: r["payload_sha256"],
+    )
+    return [pair[0], pair[0], pair[1]]
 
 
 def main(argv):

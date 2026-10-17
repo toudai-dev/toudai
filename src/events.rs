@@ -14,7 +14,8 @@ use serde_json::value::RawValue;
 use crate::query::{Param, ServingTables, SqlStatement};
 
 /// A canonical event as stored. `payload` is the stored type-preserving JSON
-/// text, embedded byte for byte, so `payload_sha256` verifies against it.
+/// text, embedded without re-encoding, so `payload_sha256` verifies against it.
+/// Stored payloads carry no leading or trailing whitespace (see [`decode`]).
 #[derive(Debug, Serialize)]
 pub struct CanonicalEvent {
     pub dataset: String,
@@ -56,9 +57,11 @@ fn string_param(name: &str, value: &str) -> Param {
     }
 }
 
-/// The lookup for one event. It reads two rows at most: ingestion is
-/// at-least-once, so a replay can store the same payload twice, which is one
-/// event; two different payloads under one identity is an error, not a pick.
+/// The lookup for one event. Ingestion is at-least-once, so a replay can store
+/// the same payload many times, which is one event; two different payloads
+/// under one identity is an error, not a pick. `LIMIT 1 BY payload_sha256`
+/// collapses replays before the final `LIMIT 2`, so any number of identical
+/// copies cannot crowd a differing payload out of the two rows read.
 pub fn lookup_statement(
     tables: &ServingTables,
     tenant_id: &str,
@@ -74,7 +77,7 @@ pub fn lookup_statement(
              WHERE tenant_id = {{tenant_id:String}} \
              AND dataset = {{dataset:String}} \
              AND event_id = {{event_id:String}} \
-             ORDER BY payload_sha256 LIMIT 2 FORMAT JSONEachRow",
+             ORDER BY payload_sha256 LIMIT 1 BY payload_sha256 LIMIT 2 FORMAT JSONEachRow",
             tables.canonical_events()
         ),
         params: vec![
@@ -109,6 +112,15 @@ pub fn decode(rows: &[Value]) -> Result<Option<CanonicalEvent>, EventError> {
         .iter()
         .map(|row| {
             let payload = text(row, "payload")?;
+            // `RawValue` drops boundary whitespace, which would leave the
+            // returned text unequal to the text `payload_sha256` covers. The
+            // canonical producer must not emit any, so a row with it is
+            // reported, not silently altered.
+            if payload.trim_matches([' ', '\t', '\n', '\r']) != payload {
+                return Err(EventError::Malformed(
+                    "payload has leading or trailing whitespace".into(),
+                ));
+            }
             Ok(CanonicalEvent {
                 dataset: text(row, "dataset")?,
                 event_id: text(row, "event_id")?,
@@ -203,6 +215,13 @@ mod tests {
             decode(&[row("not json", "h1")]),
             Err(EventError::Malformed(_))
         ));
+        // Boundary whitespace would not survive embedding, so it is refused.
+        for padded in ["{}\n", " {}", "\t{}"] {
+            assert!(matches!(
+                decode(&[row(padded, "h1")]),
+                Err(EventError::Malformed(_))
+            ));
+        }
         let mut bad = row("{}", "h1");
         bad.as_object_mut().unwrap().remove("signal");
         assert!(matches!(decode(&[bad]), Err(EventError::Malformed(_))));
