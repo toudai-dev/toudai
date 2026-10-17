@@ -9,4 +9,5 @@
 
 pub mod auth;
 pub mod clickhouse;
+pub mod events;
 pub mod query;
