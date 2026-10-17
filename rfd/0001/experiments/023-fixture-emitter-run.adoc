@@ -78,7 +78,11 @@ The model (`model.rs`) defines every event once. Two consumers read it:
 
 The SDK's batch processors only log a failed export, so each exporter is wrapped
 (`delivery.rs`) to count the items whose export call succeeded; `emit` fails
-unless the counts equal the model's. That is OTLP acceptance, not storage.
+unless the counts equal the model's. That is request-level acceptance: the SDK
+exporter discards the OTLP response body, so a partial-success response (HTTP 200
+with `rejected_*` counts) is not visible and per-record acceptance is unknown,
+and nothing here confirms storage. `selfcheck` is not affected because it
+compares the contents the receiver actually decoded.
 
 `selfcheck` starts a loopback OTLP receiver (tonic gRPC server and a minimal
 HTTP/1.1 protobuf listener), emits to it, decodes the received requests back into

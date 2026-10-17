@@ -112,7 +112,8 @@ fn run() -> Result<(), String> {
             let _enter = (transport == Transport::Grpc).then(|| rt.enter());
             emit::emit(&fixture, transport, endpoint)?;
             eprintln!(
-                "sent {} log records, {} spans, {} metrics over {transport:?} to {endpoint}",
+                "export calls succeeded for {} log records, {} spans, {} metrics over {transport:?} to {endpoint} \
+                 (request-level; partial-success rejections are not visible to the SDK exporter)",
                 fixture.logs.len(),
                 fixture.spans.len(),
                 fixture.metrics.len()

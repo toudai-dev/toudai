@@ -4,8 +4,12 @@
 //! `shutdown`, so a run that the destination rejected would look clean. Each
 //! exporter is wrapped to count the items whose export call returned success
 //! and the ones that failed, and `emit` compares the totals with what the model
-//! sent. Success here means the destination answered the OTLP export request
-//! with success: acceptance, not confirmation that anything was stored.
+//! sent. Success here means the export call returned success, i.e. the
+//! destination answered the OTLP request with success. That is request-level
+//! acceptance only: the SDK exporter discards the response body, so an OTLP
+//! partial-success response (HTTP 200 / gRPC OK with `rejected_*` counts) is not
+//! visible here and per-record acceptance is unknown. It is also not
+//! confirmation that anything was stored.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -51,7 +55,7 @@ impl Tally {
         }
         let errors = self.errors.lock().unwrap();
         Err(format!(
-            "{signal}: {exported} of {expected} items exported, {failed} failed ({})",
+            "{signal}: {exported} of {expected} items in successful export calls, {failed} in failed ones ({})",
             errors.first().map_or("no export error", String::as_str)
         ))
     }

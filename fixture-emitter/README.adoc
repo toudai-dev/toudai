@@ -38,11 +38,15 @@ Determinism is claimed for the expected-contents file and for the decoded
 contents of the stream, not for the raw OTLP bytes (the SDK may batch a signal
 into several requests, and nested map entries have no fixed order on the wire).
 
-`emit` and `selfcheck` exit non-zero unless every exported item was accepted:
-the SDK's batch processors only log a failed export, so each exporter is wrapped
-to count the items whose export succeeded, and the totals must equal the model's.
-Acceptance is the destination answering the OTLP request with success, not proof
-that anything was stored.
+`emit` and `selfcheck` exit non-zero unless every export call succeeded for every
+item: the SDK's batch processors only log a failed export, so each exporter is
+wrapped to count the items in export calls that succeeded or failed, and the
+totals must equal the model's. That is request-level acceptance. The SDK
+exporter discards the OTLP response body, so a partial-success response (a 200
+that reports `rejected_log_records` or similar) is invisible to `emit` and
+per-record acceptance is unknown. It is also not proof that anything was stored.
+Against a real destination, use its own counters (or `selfcheck`'s receiver) to
+confirm what arrived.
 
 == Fixture
 
@@ -147,5 +151,7 @@ the data point when it collects.
   stays covered only by Experiment 021's raw-OTLP fixture.
 * The resource omits `telemetry.sdk.*` and host attributes, which vary by build
   and machine.
+* `emit` checks request-level acceptance only (see above); OTLP partial-success
+  rejections are not observable through the SDK exporter.
 * `selfcheck` proves the SDK and exporters put the modelled content on the wire.
   It does not exercise a Collector, the owned exporter, or ClickHouse.
