@@ -1,0 +1,31 @@
+<!--
+  Test substitute for clickhouse/config.d/toudai-storage.xml. It defines the same
+  `toudai_payload` policy with the same `cache` and `object` volume names, which
+  the `canonical_events` DDL names, but backs both volumes with local disks: the
+  production file points `object` at an S3 endpoint that a test cannot reach.
+  `@DATA_DIR@` is replaced with the server's data directory.
+-->
+<clickhouse>
+    <storage_configuration>
+        <disks>
+            <toudai_payload_local>
+                <path>@DATA_DIR@/disks/toudai_payload_local/</path>
+            </toudai_payload_local>
+            <toudai_payload_object>
+                <path>@DATA_DIR@/disks/toudai_payload_object/</path>
+            </toudai_payload_object>
+        </disks>
+        <policies>
+            <toudai_payload>
+                <volumes>
+                    <cache>
+                        <disk>toudai_payload_local</disk>
+                    </cache>
+                    <object>
+                        <disk>toudai_payload_object</disk>
+                    </object>
+                </volumes>
+            </toudai_payload>
+        </policies>
+    </storage_configuration>
+</clickhouse>
