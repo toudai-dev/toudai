@@ -44,7 +44,15 @@ impl ServingTables {
     pub fn table(&self, signal: Signal) -> String {
         format!("{}.{}", self.database, table_name(signal))
     }
+
+    /// The canonical payload table (Decision 0001 D3), looked up by
+    /// `(tenant_id, dataset, event_id)`.
+    pub fn canonical_events(&self) -> String {
+        format!("{}.{CANONICAL_EVENTS_TABLE}", self.database)
+    }
 }
+
+pub const CANONICAL_EVENTS_TABLE: &str = "canonical_events";
 
 pub fn table_name(signal: Signal) -> &'static str {
     match signal {
