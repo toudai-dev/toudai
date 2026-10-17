@@ -3,7 +3,8 @@
 //!
 //! The fixture rows are `tests/fixtures/021/*.jsonl`, exported from the
 //! Experiment 021 harness by `scripts/export-fixture021-rows.py`; the tables
-//! are created from that experiment's `serving-tables.sql` unchanged.
+//! are created from the product DDL in `clickhouse/schema/*.sql`, applied
+//! verbatim, so those files stay the single source of truth.
 //! Parameters travel as `--param_<name>` exactly as they would over the
 //! ClickHouse HTTP interface.
 
@@ -22,11 +23,31 @@ pub const WS_B: &str = "22222222-2222-4222-8222-222222222222";
 pub const DATASET: &str = "fixture";
 /// 2026-09-01T07:00:00.123456789Z, the fixture's event time.
 pub const TS: i64 = 1_788_246_000_123_456_789;
-pub const DATABASE: &str = "lh021";
+/// The database the product DDL creates (`clickhouse/schema/001-database.sql`).
+pub const DATABASE: &str = "toudai";
 
-const DDL: &str = include_str!(
-    "../../rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/serving-tables.sql"
-);
+/// The product DDL files in apply order, minus those `clickhouse local` cannot
+/// run. `canonical_events` names the `toudai_payload` storage policy, which only
+/// exists in a server configured with `clickhouse/config.d/toudai-storage.xml`;
+/// no query test reads it, so such files are skipped rather than edited.
+fn product_ddl() -> Vec<(String, String)> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("clickhouse/schema");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("read clickhouse/schema")
+        .map(|entry| entry.expect("schema entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let sql = std::fs::read_to_string(&path).expect("read schema file");
+            (name, sql)
+        })
+        .filter(|(_, sql)| !sql.contains("storage_policy"))
+        .collect()
+}
 const LOG_ROWS: &str = include_str!("../fixtures/021/serving_logs.jsonl");
 const SPAN_ROWS: &str = include_str!("../fixtures/021/serving_spans.jsonl");
 
@@ -121,18 +142,21 @@ pub fn clickhouse() -> Option<&'static ClickHouse> {
                 lock: Mutex::new(()),
             };
             let flag = |s: &str| s.to_owned();
-            ch.local(
-                &[flag("--query"), format!("CREATE DATABASE {DATABASE}")],
-                None,
+            let ddl = product_ddl();
+            assert!(
+                [
+                    "001-database.sql",
+                    "003-serving-logs.sql",
+                    "004-serving-spans.sql"
+                ]
+                .iter()
+                .all(|file| ddl.iter().any(|(name, _)| name == file)),
+                "the product DDL files the tests depend on were skipped: {:?}",
+                ddl.iter().map(|(name, _)| name).collect::<Vec<_>>()
             );
-            ch.local(
-                &[
-                    flag("--multiquery"),
-                    flag("--query"),
-                    DDL.replace("{{DB}}", DATABASE),
-                ],
-                None,
-            );
+            for (_, sql) in ddl {
+                ch.local(&[flag("--multiquery"), flag("--query"), sql], None);
+            }
             for (table, rows) in [("serving_logs", LOG_ROWS), ("serving_spans", SPAN_ROWS)] {
                 ch.local(
                     &[

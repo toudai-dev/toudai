@@ -12,7 +12,7 @@
 use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
 use super::schema::{
     self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TIMING_END_BEFORE_START, TS_COLUMN, TYPED_SCALARS, WORKSPACE_COLUMN,
+    TENANT_COLUMN, TIMESTAMP_COLUMN, TIMING_END_BEFORE_START, TYPED_SCALARS,
 };
 use super::value::{Literal, ValueType};
 
@@ -154,16 +154,16 @@ fn conditions(
 ) -> Vec<String> {
     let mut conditions = vec![
         format!(
-            "{WORKSPACE_COLUMN} = {}",
+            "{TENANT_COLUMN} = {}",
             binder.string(&query.scope.workspace_id)
         ),
         format!("{DATASET_COLUMN} = {}", binder.string(&query.scope.dataset)),
         format!(
-            "{TS_COLUMN} >= fromUnixTimestamp64Nano({})",
+            "{TIMESTAMP_COLUMN} >= fromUnixTimestamp64Nano({})",
             binder.bind("Int64", query.time.start_ns.to_string())
         ),
         format!(
-            "{TS_COLUMN} < fromUnixTimestamp64Nano({})",
+            "{TIMESTAMP_COLUMN} < fromUnixTimestamp64Nano({})",
             binder.bind("Int64", query.time.end_ns.to_string())
         ),
     ];

@@ -48,7 +48,7 @@ fn fixture_loaded() {
     // rejects (`dup-1`), in each of two workspaces.
     let per_workspace = ch.raw(
         &format!(
-            "SELECT workspace_id, count() FROM {DATABASE}.serving_logs GROUP BY workspace_id ORDER BY workspace_id"
+            "SELECT tenant_id, count() FROM {DATABASE}.serving_logs GROUP BY tenant_id ORDER BY tenant_id"
         ),
         &[],
     );
