@@ -93,10 +93,14 @@ async fn parameters_travel_beside_the_sql_never_inside_it() {
     // No limit can turn into a truncated, successful answer.
     let overflow: Vec<_> = args
         .iter()
-        .filter(|(name, _)| name.ends_with("_overflow_mode"))
+        .filter(|(name, _)| name.contains("_overflow_mode"))
         .collect();
     assert_eq!(overflow.len(), OVERFLOW_MODES.len());
     assert!(overflow.iter().all(|(_, value)| value == "throw"));
+    // Leaf limits are separate settings that the ordinary modes do not override.
+    for leaf in ["read_overflow_mode_leaf", "timeout_overflow_mode_leaf"] {
+        assert!(overflow.iter().any(|(name, _)| name == leaf), "{leaf}");
+    }
     // The URL value decodes back to the text-format escaped parameter.
     let decoded = url_decode(&args[0].1);
     assert_eq!(decoded, "a' OR 1=1 --\\t\\\\ &x=1 %41+ é\\n");

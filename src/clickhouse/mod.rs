@@ -15,7 +15,7 @@ use crate::query::SqlStatement;
 
 /// Settings that choose between failing and silently truncating a result or
 /// its inputs when a limit is hit.
-const OVERFLOW_MODES: [&str; 8] = [
+const OVERFLOW_MODES: [&str; 10] = [
     "result_overflow_mode",
     "read_overflow_mode",
     "group_by_overflow_mode",
@@ -24,6 +24,10 @@ const OVERFLOW_MODES: [&str; 8] = [
     "set_overflow_mode",
     "join_overflow_mode",
     "distinct_overflow_mode",
+    // Leaf limits are checked on their own settings, so the ordinary modes do
+    // not override them.
+    "read_overflow_mode_leaf",
+    "timeout_overflow_mode_leaf",
 ];
 
 #[derive(Debug, Clone)]
