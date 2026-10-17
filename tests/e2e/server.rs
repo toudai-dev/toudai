@@ -21,20 +21,45 @@ use std::time::{Duration, Instant};
 
 pub const USER: &str = "toudai";
 pub const PASSWORD: &str = "toudai-test";
-/// Users whose profiles silently truncate (`break` overflow modes), to prove
-/// the service refuses to report a truncated answer as exact: one limits the
-/// result, the other the rows a leaf reads (a separate setting family).
-pub const LIMITED_USERS: [&str; 2] = ["limited_result", "limited_leaf"];
-const LIMITED_PROFILES: &str = "\
-    <limited_result><max_result_rows>1</max_result_rows>\
-    <result_overflow_mode>break</result_overflow_mode><max_block_size>1</max_block_size></limited_result>\
-    <limited_leaf><max_rows_to_read_leaf>1</max_rows_to_read_leaf>\
-    <read_overflow_mode_leaf>break</read_overflow_mode_leaf><max_block_size>1</max_block_size></limited_leaf>";
-const LIMITED_USERS_XML: &str = "\
-    <limited_result><password>toudai-test</password>\
-    <networks><ip>::/0</ip></networks><profile>limited_result</profile><quota>default</quota></limited_result>\
-    <limited_leaf><password>toudai-test</password>\
-    <networks><ip>::/0</ip></networks><profile>limited_leaf</profile><quota>default</quota></limited_leaf>";
+/// Users whose profiles would silently change a successful answer: truncate it
+/// (`break` overflow modes, in two limit families), cap or shift it, filter it,
+/// re-encode it, or make it an empty background reply. The test proves the
+/// service refuses to report any of them as the exact answer. `(user, settings)`.
+pub const HOSTILE_PROFILES: [(&str, &str); 7] = [
+    (
+        "h_result",
+        "<max_result_rows>1</max_result_rows><result_overflow_mode>break</result_overflow_mode><max_block_size>1</max_block_size>",
+    ),
+    (
+        "h_leaf",
+        "<max_rows_to_read_leaf>1</max_rows_to_read_leaf><read_overflow_mode_leaf>break</read_overflow_mode_leaf><max_block_size>1</max_block_size>",
+    ),
+    ("h_limit", "<limit>1</limit>"),
+    ("h_offset", "<offset>1</offset>"),
+    (
+        "h_filter",
+        "<additional_result_filter>0</additional_result_filter>",
+    ),
+    ("h_format", "<output_format>CSV</output_format>"),
+    (
+        "h_background",
+        "<run_query_in_background>1</run_query_in_background>",
+    ),
+];
+
+/// The `<profiles>` and `<users>` fragments defining [`HOSTILE_PROFILES`].
+fn hostile_xml() -> (String, String) {
+    let mut profiles = String::new();
+    let mut users = String::new();
+    for (name, settings) in HOSTILE_PROFILES {
+        profiles.push_str(&format!("<{name}>{settings}</{name}>"));
+        users.push_str(&format!(
+            "<{name}><password>{PASSWORD}</password><networks><ip>::/0</ip></networks>\
+             <profile>{name}</profile><quota>default</quota></{name}>"
+        ));
+    }
+    (profiles, users)
+}
 const DEFAULT_IMAGE: &str = "clickhouse/clickhouse-server:26.8.2.7";
 const STORAGE_TEMPLATE: &str = include_str!("../fixtures/e2e/storage-test.xml");
 
@@ -121,14 +146,15 @@ fn start_docker() -> ClickHouseServer {
         STORAGE_TEMPLATE.replace("@DATA_DIR@", "/var/lib/clickhouse"),
     )
     .expect("write storage config");
+    let (hostile_profiles, hostile_users) = hostile_xml();
     let limited = dir.join("limited-user.xml");
     std::fs::write(
         &limited,
         format!(
-            "<clickhouse><profiles>{LIMITED_PROFILES}</profiles><users>{LIMITED_USERS_XML}</users></clickhouse>"
+            "<clickhouse><profiles>{hostile_profiles}</profiles><users>{hostile_users}</users></clickhouse>"
         ),
     )
-    .expect("write limited user config");
+    .expect("write hostile user config");
     let image = std::env::var("TOUDAI_E2E_CLICKHOUSE_IMAGE").unwrap_or(DEFAULT_IMAGE.into());
     let output = Command::new("docker")
         .args(["run", "--detach", "--publish", "127.0.0.1::8123"])
@@ -180,6 +206,7 @@ fn start_native() -> ClickHouseServer {
         .and_then(|l| l.local_addr())
         .expect("free port")
         .port();
+    let (hostile_profiles, hostile_users) = hostile_xml();
     let data = dir.join("data");
     let config_d = dir.join("config.d");
     std::fs::create_dir_all(&config_d).unwrap();
@@ -200,7 +227,7 @@ fn start_native() -> ClickHouseServer {
     <tmp_path>{data}/tmp/</tmp_path>
     <user_files_path>{data}/user_files/</user_files_path>
     <default_profile>default</default_profile>
-    <profiles><default/>{LIMITED_PROFILES}</profiles>
+    <profiles><default/>{hostile_profiles}</profiles>
     <quotas><default/></quotas>
     <users>
         <{USER}>
@@ -209,7 +236,7 @@ fn start_native() -> ClickHouseServer {
             <profile>default</profile>
             <quota>default</quota>
         </{USER}>
-        {LIMITED_USERS_XML}
+        {hostile_users}
     </users>
 </clickhouse>
 "#,

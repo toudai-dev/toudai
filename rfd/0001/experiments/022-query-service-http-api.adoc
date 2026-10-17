@@ -7,7 +7,7 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Source mutation:* None; a disposable loopback ClickHouse server and the synthetic Experiment 021 fixture only
 - *Base:* `f87020d` (`origin/main`); the service under test is the head of the Track A pull request
 - *Harness:* `tests/e2e/` (server lifecycle in `server.rs`, scenarios in `main.rs`), `tests/fixtures/021/`, `tests/fixtures/e2e/`, `scripts/export-fixture021-canonical.py`
-- *Result:* 1 end-to-end test passed (the scenario sections below), after the five mutations listed under Results each made it fail.
+- *Result:* 1 end-to-end test passed (the scenario sections below), after the mutations listed under Results each made it fail.
 
 == Question
 
@@ -140,8 +140,8 @@ TOUDAI_E2E_RUNTIME=docker cargo test --test e2e   # clickhouse/clickhouse-server
 |Events `conflict-1` and `conflict-3`
 |500 `event_conflict`, no payload chosen (replays of one payload do not hide the other)
 
-|Query as a user whose profile has `max_result_rows=1`, `result_overflow_mode=break`; query over 200,000 `bulk` rows as a user with `max_rows_to_read_leaf=1`, `read_overflow_mode_leaf=break`
-|502 `clickhouse_error` and no rows for each: the service forces the ordinary and `_leaf` overflow-mode settings (result, read, group by, sort, timeout, set, join, distinct) to `throw`. The same users queried directly get truncated results (1 of 5 rows; fewer than 200,000), and the unrestricted service counts all 200,000
+|Query and event requests run as users whose profiles truncate the result (`max_result_rows=1`, `result_overflow_mode=break`), truncate a leaf read (`max_rows_to_read_leaf=1`, `read_overflow_mode_leaf=break`, over 200,000 `bulk` rows), or set `limit=1`, `offset=1`, `additional_result_filter=0`, `output_format=CSV`, or `run_query_in_background=1`
+|The two truncating profiles: 502 `clickhouse_error` and no rows (the service forces the ordinary and `_leaf` overflow modes to `throw` and keeps the operator's limits). The other five: exactly the unrestricted answers (nine groups; `conflict-3` is still a conflict, `typed-1` is still found, `/healthz` is healthy), because the service pins `limit`, `offset`, `filter`, `additional_result_filter`, `run_query_in_background`, `output_format`, and related result-shaping settings on every request. Each profile is first shown to change a direct query, and the unrestricted service counts all 200,000 `bulk` rows
 |===
 
 == Results
@@ -179,6 +179,12 @@ test run each time; each failed at the intended assertion and was reverted:
   `approximation=exact` (found by the oracle review; the ordinary
   `read_overflow_mode` does not override the leaf limit).
 
+. The client without one pinned setting at a time (`limit`, `offset`,
+  `additional_result_filter`, `output_format`, `run_query_in_background`): the
+  matching hostile user got a wrong or failed answer (one group of nine, a
+  filtered-out result, a CSV body, an empty background reply) with 200 or a
+  false error (found by the oracle review).
+
 Two defects surfaced without mutation. During development, a body
 `{"kind":"count","tenant_id":"x"}` was accepted because serde ignores unknown
 fields on a unit variant of an internally tagged enum; the wire-format unit test
@@ -186,7 +192,9 @@ caught it and the aggregates became empty struct variants. The oracle review
 found that `RawValue` strips leading and trailing whitespace, which would leave
 the returned text unequal to the text `payload_sha256` covers, so a stored
 payload with any is now reported as malformed (502) instead of returned altered
-(unit-tested; the canonical producer must not emit boundary whitespace).
+(unit-tested; the canonical producer must not emit boundary whitespace). Pinning
+`filter` to the empty string, the obvious neutral value, failed every statement
+with `WHERE tuple()` on 26.8.2.7, so it is pinned to `1`, which keeps every row.
 
 Failed and rejected requests return an error body without plan diagnostics: the
 `PlanDiagnostics` of a request that never ran are not returned.

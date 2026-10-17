@@ -222,12 +222,14 @@ async fn query_service_end_to_end() {
     query_failures(&api).await;
     scope_and_escaping(&api).await;
     event_retrieval(&api).await;
-    truncating_profiles_are_errors(&clickhouse, &api).await;
+    hostile_profiles_cannot_change_answers(&clickhouse, &api).await;
 }
 
-/// A ClickHouse profile that truncates with `break` must not turn an exact
-/// query into a successful partial answer, whichever limit family it uses.
-async fn truncating_profiles_are_errors(clickhouse: &ClickHouseServer, api: &Api) {
+/// A user profile must not be able to change a successful answer. Each hostile
+/// profile (see `server::HOSTILE_PROFILES`) is first shown to alter a direct
+/// query; the service, run as that user, must then either answer exactly as it
+/// does for the unrestricted user or fail without rows.
+async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, api: &Api) {
     // Enough rows in one dataset for a leaf read limit to bite (the fixture is a
     // single block).
     let bulk = format!(
@@ -248,47 +250,68 @@ async fn truncating_profiles_are_errors(clickhouse: &ClickHouseServer, api: &Api
     let (status, response) = api.query(Some(KEY_A), &bulk_count).await;
     assert_eq!(status, StatusCode::OK, "{response}");
     assert_eq!(response["rows"][0]["events"], count_json(BULK_ROWS));
-
-    // (user, a request its profile would truncate, a query to show it does)
     let nine_groups = logs(ints_filter(), json!([metric()]), json!({"kind": "count"}));
-    let cases = [
-        (
-            server::LIMITED_USERS[0],
-            nine_groups,
-            "SELECT number FROM numbers(5) FORMAT JSONEachRow",
-            5,
-        ),
-        (
-            server::LIMITED_USERS[1],
-            bulk_count,
-            "SELECT count() AS n FROM toudai.serving_logs WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow",
-            BULK_ROWS,
-        ),
-    ];
-    for (user, body, probe, complete) in cases {
-        // Precondition: left alone, this user's profile really does truncate.
-        let direct = server::execute_as(clickhouse, user, probe, None).await;
-        let got = match direct.lines().next().map(serde_json::from_str::<Value>) {
-            Some(Ok(row)) if row.get("n").is_some() => match &row["n"] {
-                Value::String(n) => n.parse::<u64>().unwrap(),
-                other => other.as_u64().unwrap(),
-            },
-            _ => direct.lines().count() as u64,
+    let (_, expected_groups) = api.query(Some(KEY_A), &nine_groups).await;
+    assert_eq!(expected_groups["rows"].as_array().unwrap().len(), 9);
+
+    let numbers = "SELECT number FROM numbers(5) FORMAT JSONEachRow";
+    let leaf_probe = "SELECT count() AS n FROM toudai.serving_logs \
+                      WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow";
+    for (user, _) in server::HOSTILE_PROFILES {
+        // Precondition: left alone, this user's profile really does change what
+        // a plain query returns.
+        let probe = if user == "h_leaf" {
+            leaf_probe
+        } else {
+            numbers
         };
-        assert!(got < complete, "{user} must truncate: {got} of {complete}");
+        let unrestricted = server::execute(clickhouse, probe, None).await;
+        let direct = server::execute_as(clickhouse, user, probe, None).await;
+        assert_ne!(direct, unrestricted, "{user} must alter a direct query");
 
         let service = spawn_service(clickhouse, user);
-        let limited = Api {
+        let hostile = Api {
             client: reqwest::Client::new(),
             base: service.base.clone(),
         };
-        let (status, response) = limited.query(Some(KEY_A), &body).await;
-        assert_eq!(status, StatusCode::BAD_GATEWAY, "{user}: {response}");
-        assert_eq!(response["error"]["code"], "clickhouse_error", "{user}");
-        assert!(
-            response.get("rows").is_none(),
-            "{user}: no partial rows: {response}"
-        );
+        let truncating = matches!(user, "h_result" | "h_leaf");
+        let body = if user == "h_leaf" {
+            &bulk_count
+        } else {
+            &nine_groups
+        };
+        let (status, response) = hostile.query(Some(KEY_A), body).await;
+        if truncating {
+            // Overflow limits are operator protections the service keeps; it
+            // turns their `break` into an error.
+            assert_eq!(status, StatusCode::BAD_GATEWAY, "{user}: {response}");
+            assert_eq!(response["error"]["code"], "clickhouse_error", "{user}");
+            assert!(
+                response.get("rows").is_none(),
+                "{user}: partial rows: {response}"
+            );
+        } else {
+            assert_eq!(status, StatusCode::OK, "{user}: {response}");
+            assert_eq!(response["rows"], expected_groups["rows"], "{user}");
+        }
+
+        // The event lookup (`LIMIT 1 BY ... LIMIT 2`) is exposed to the same
+        // settings: a capped result must not hide a conflict or an event.
+        if !truncating {
+            let (status, text) = hostile.event(Some(KEY_A), "fixture", "conflict-3").await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{user}: {text}");
+            let (status, text) = hostile.event(Some(KEY_A), "fixture", "typed-1").await;
+            assert_eq!(status, StatusCode::OK, "{user}: {text}");
+            let (status, _) = hostile
+                .send(
+                    Method::GET,
+                    format!("{}/healthz", hostile.base).parse().unwrap(),
+                    None,
+                    None,
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK, "{user}");
+        }
     }
 }
 
