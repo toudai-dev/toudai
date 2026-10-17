@@ -12,10 +12,11 @@ fixture expectations before using them as acceleration comparison anchors.
 +
 The filter, grouping, and count/sum parts of this contract are defined and
 enforced by the typed-value item below. Time-series bucketing, heatmaps,
-percentiles, raw-result rows, and the HTTP surface that returns a response
-remain open, so this item stays unchecked.
+percentiles, and raw-result rows remain open, so this item stays unchecked.
+`POST /v1/query` now carries the filter, grouping, and count/sum requests
+(Experiment 022).
 
-* [x] Enforce the PoC typed-value contract in the raw query layer (Rust library, ClickHouse SQL generation over the Experiment 021 layout; no HTTP API yet): type-matched predicates with no implicit coercion, group keys that include type, guarded `Int128` integer sums with overflow rejection, contributing-value counts separate from event counts, presence by Map key membership, explicit unsupported-operation errors for bytes, arrays, maps, and non-finite floats, and plan diagnostics for the raw path.
+* [x] Enforce the PoC typed-value contract in the raw query layer (Rust library and ClickHouse SQL generation over the Experiment 021 layout; the HTTP API that serves it is recorded under the two items below): type-matched predicates with no implicit coercion, group keys that include type, guarded `Int128` integer sums with overflow rejection, contributing-value counts separate from event counts, presence by Map key membership, explicit unsupported-operation errors for bytes, arrays, maps, and non-finite floats, and plan diagnostics for the raw path.
 +
 `src/query/` validates a request against
 link:product-contract.adoc#_poc_typed_value_contract[the PoC typed-value
@@ -144,17 +145,31 @@ link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
 Diagnostics for the only path that exists (raw serving tables, exact) are built
 with every plan, list the columns read and the contract guards applied, and
-travel with the result (`PlanDiagnostics`). The item stays unchecked until a
-planner chooses among raw, projection, metadata, and aggregate paths and a
-response surface returns the diagnostics for rejected and failed requests too.
+`POST /v1/query` returns them with every successful result (`PlanDiagnostics`:
+`storage_path`, `approximation`, `table`, `columns`, `guards`, plus
+`non_finite_excluded` for double comparisons). Experiment 022 checks the
+returned values over HTTP against ClickHouse for a count, an integer sum, a
+span-duration aggregate, and a non-finite probe. Still open, so the item stays
+unchecked: rejected requests (400), contract failures (422), and backend
+failures (502) return an error body without diagnostics; and no planner yet
+chooses among raw, projection, metadata, and aggregate paths, so
+`storage_path` is always `raw`.
 
 * [ ] Execute the required raw query shapes against the deterministic fixture; verify expected rows/aggregates and diagnostic accuracy, including rejected and failed requests.
 +
 Filter, presence, grouping, count, integer and float sum, and span duration
-shapes now execute against the Experiment 021 fixture with independent
+shapes execute against the Experiment 021 fixture with independent
 expectations, and unsupported requests are rejected before any statement runs.
-Time-series, heatmap, percentile, and raw-result shapes, ClickHouse failures,
-and diagnostic accuracy for failed requests remain open.
+Experiment 022 repeats a subset through the HTTP service against a real
+ClickHouse server with the product DDL: counts, exact and overflowing integer
+sums, a null sum, a finite float sum, `count_values`, typed and missing groups,
+span durations, and the non-finite probe, plus the rejected and failed outcomes
+(`integer_overflow`, `incompatible_type`, `unsupported_operation`,
+`ordering_not_defined`, `invalid_time_range`, `aggregate_requires_spans`,
+`invalid_request`) and request text that needs URL, text-format, and SQL
+escaping. Time-series, heatmap, percentile, and raw-result shapes, diagnostics
+for rejected and failed requests, and a ClickHouse failure other than an
+unreachable backend remain open.
 
 == PoC-required: minimal acceleration
 

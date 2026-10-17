@@ -117,6 +117,22 @@ the canonical payload was retrieved losslessly for the fixture. Dynamic key
 resolution, rotation/revocation, dataset routing rejection, and broader
 authorization guarantees remain out of scope and open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
++
+Exact-event retrieval half: `GET /v1/events/{dataset}/{event_id}` in the query
+service reads `canonical_events` by `(tenant_id, dataset, event_id)`, taking the
+tenant from a bearer read key mapped to a tenant by a static key file (a
+placeholder for the tenant-policy registry; it is read at startup and never
+accepts a tenant from a request). Experiment 022 retrieves the fixture payloads
+over HTTP from the product table with independent expectations: the stored text
+byte for byte, its generator-computed SHA-256 (also recomputed from the response),
+three distinct payloads for one event ID across two workspaces and two datasets,
+a replayed duplicate as one event, two payloads under one identity as an
+explicit conflict, an ID needing URL escaping, and another workspace's event
+indistinguishable from an absent one (404). The payloads are hand-authored
+fixtures, not the owned exporter's output, and the harness serves them from a
+local-disk stand-in for the `object` volume, so the item stays open for
+normal-path ingestion through authenticated tenant policy, retrieval of a
+payload after its TTL move to S3, and dynamic key resolution.
 
 == PoC-required: independent health telemetry
 

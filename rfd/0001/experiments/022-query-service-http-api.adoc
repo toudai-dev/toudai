@@ -1,0 +1,198 @@
+= Experiment 022: Query service HTTP API against ClickHouse
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed (bounded slice); the Docker runtime of the harness is unexercised on the recording host
+- *Run:* 2026-10-17 (committed run, `cargo test --test e2e`, exit 0)
+- *Source mutation:* None; a disposable loopback ClickHouse server and the synthetic Experiment 021 fixture only
+- *Base:* `f87020d` (`origin/main`); the service under test is the head of the Track A pull request
+- *Harness:* `tests/e2e/` (server lifecycle in `server.rs`, scenarios in `main.rs`), `tests/fixtures/021/`, `tests/fixtures/e2e/`, `scripts/export-fixture021-canonical.py`
+- *Result:* 1 end-to-end test passed (the scenario sections below), after the two mutations listed under Results each made it fail.
+
+== Question
+
+The query layer of RFD 0001 enforces the typed-value contract as a Rust library
+over ClickHouse SQL, tested through `clickhouse local`. The PoC gate needs a
+_query service_ that returns plan diagnostics and exact-event retrieval from the
+canonical payload table. This experiment asks:
+
+. Does the generated SQL, sent through the ClickHouse HTTP interface with its
+  bound parameters, return the same fixture results the `clickhouse local` tests
+  establish, including attribute keys and literals that need URL, text-format,
+  and SQL escaping?
+. Does an HTTP request keep the contract's explicit errors (overflow,
+  incompatible types, unsupported values) as distinct statuses and codes rather
+  than partial rows?
+. Is the tenant scope derived from the credential alone, so that no body, path,
+  or event ID reaches another workspace's rows?
+. Can an event be retrieved by `(tenant_id, dataset, event_id)` from the product
+  `canonical_events` table, byte for byte, with the hash verifying against the
+  returned payload?
+
+This is not a performance measurement, a planner, an authorization design, or a
+test of the object-backed payload volume.
+
+== Environment
+
+- Host: Amp orb, 2 vCPU Intel Xeon @ 2.60 GHz, 3 GiB RAM, Linux 6.1.158. Functional run only: no timing, throughput, or storage-path conclusion is drawn from it, so `_local-hardware-baseline.adoc` does not apply.
+- ClickHouse: 26.8.2.7 (the version pinned by the Nix development shell and CI), `clickhouse server` on a loopback port, started by the harness (`TOUDAI_E2E_RUNTIME=native`, chosen automatically because the orb has no Docker daemon).
+- Rust 1.97, `axum` 0.8, `reqwest` 0.12.
+- Storage policy: the harness substitutes `tests/fixtures/e2e/storage-test.xml` for `clickhouse/config.d/toudai-storage.xml`. It defines the same `toudai_payload` policy with the same `cache` and `object` volume names, backed by local disks, because the production file's `object` volume is an S3 endpoint a test cannot reach. The product `canonical_events` DDL (storage policy and TTL clause included) therefore applies verbatim, but nothing here exercises S3 reads or the filesystem cache.
+
+== Dataset
+
+- Serving rows: `tests/fixtures/021/serving_logs.jsonl` (54 rows: 27 per workspace) and `serving_spans.jsonl` (18 rows: 9 per workspace), exported from the Experiment 021 verifier's expectations by `scripts/export-fixture021-rows.py`.
+- Canonical rows: `tests/fixtures/021/canonical_events.jsonl` (10 rows), written by `scripts/export-fixture021-canonical.py`. The payloads are hand-authored type-preserving JSON, not Collector output; the exporter owns the real encoding, and retrieval treats a payload as opaque JSON text. `payload_sha256` is computed by the generator, independently of the service. The rows separate the lookup key's parts: `typed-1` exists for both workspaces and in a second dataset (three distinct payloads), `only-b` belongs to workspace B alone, `dup-1` is stored twice with one payload (an at-least-once replay), `conflict-1` twice with two payloads, and one ID contains `/`, a space, `é`, `+`, and `%`.
+- Rows the test adds: a workspace-B-only dataset `b-only`, and one workspace-A event in dataset `special` whose attribute key is `k +%&=<TAB> é\'"` and whose value contains a backslash, quote, and newline, plus an int attribute keyed `a' OR 1=1 --`.
+- Credentials: `tests/fixtures/e2e/read-keys.txt` binds `test-key-workspace-a` and `test-key-workspace-b` to the two workspace IDs. The key file is a placeholder for the tenant-policy registry.
+
+Limits: the fixture is small and single-node; the canonical payload encoding is not the exporter's; there is one dataset per signal under query.
+
+== Method
+
+The harness applies `clickhouse/schema/*.sql` in order, inserts the fixture rows
+over the HTTP interface, starts the `toudai` binary on port 0 with the key file
+and the server's address, and calls it with `reqwest`. Expected values are not
+produced by the service: counts, sums, group lists, and the overflow, type, and
+unsupported-value outcomes are the independent expectations of
+`tests/experiment021_results.rs` (derived from the fixture inventory: 27 log
+events per workspace, 12 ints at `metric.value`, nine spans with four observable
+durations and two reversed), and payloads and hashes come from the generator.
+The test recomputes SHA-256 over the payload text it receives.
+
+== Commands
+
+[source,sh]
+----
+# Fixture (regenerates tests/fixtures/021/canonical_events.jsonl; --check verifies it).
+scripts/export-fixture021-canonical.py --check
+
+# The experiment. Runtime: Docker container when a daemon answers, else the
+# native binary from the development shell; force one with TOUDAI_E2E_RUNTIME.
+TOUDAI_REQUIRE_CLICKHOUSE=1 cargo test --test e2e -- --nocapture
+TOUDAI_E2E_RUNTIME=docker cargo test --test e2e   # clickhouse/clickhouse-server:26.8.2.7
+----
+
+== Expected results
+
+[options="header",cols="3,4"]
+|===
+|Scenario |Expected
+
+|`GET /healthz`
+|200, `{"status":"ok","clickhouse":"ok"}`
+
+|No key, wrong key, truncated key, on `/v1/query` and `/v1/events/...`
+|401 `unauthenticated` with `WWW-Authenticate: Bearer`
+
+|Count of workspace A `fixture` logs
+|27 events; diagnostics `storage_path=raw`, `approximation=exact`, `table=serving_logs`
+
+|Same query for dataset `b-only` as A, then as B
+|0 events, then 1: scope follows the key
+
+|Body carrying `tenant_id` or `workspace_id`
+|400 `invalid_request`
+
+|Sum of ints in `[9, 100]`
+|3 events, 3 contributing, sum `119`
+
+|Sum where `metric.value = 9007199254740993` sent as a decimal string
+|sum `"9007199254740993"` (no rounding in either direction)
+
+|Sum with no contributing value
+|`sum: null`, 0 contributing
+
+|Sum of all ints
+|422 `integer_overflow`, no rows
+
+|Sum of `str.one` as int
+|422 `incompatible_type`
+
+|Sum of `bytes.raw`; sum of `double.nan`; group by the mixed `metric.value`
+|422 `unsupported_operation`
+
+|Literal `NaN`; ordering on a bool; empty time range; span duration on logs
+|400 `unsupported_operation`, `ordering_not_defined`, `invalid_time_range`, `aggregate_requires_spans`
+
+|Group by `metric.value` filtered to ints
+|nine groups in text order, counts `1,1,3,1,1,1,1,1,2` (-9223372036854775808, 0, 1, 10, 100, 2, 9, 9007199254740993, 9223372036854775807)
+
+|Absent `metric.value` grouped
+|one group `{"type":"missing"}`, 3 events
+
+|Span duration, all spans
+|9 events, 4 contributing, 2 timing errors, sum `4010`, `table=serving_spans`
+
+|`double.nan < 1.0` grouped by `metric.value`
+|no rows, `non_finite_excluded=1`
+
+|Special key and value; injection-shaped key and literals
+|1 event for the exact key/value; 0 for a prefix of the injection key, a different value, or `' OR 1=1 --`
+
+|Event `fixture/typed-1` as A, as B; `other/typed-1`; a span; `dup-1`; the escaped ID
+|200 with the stored payload byte for byte, `payload_sha256` equal to the generator's and to SHA-256 of the received payload, `timestamp_ns=1788246000123456789`; three distinct `typed-1` payloads
+
+|Event of another workspace, other dataset, unknown ID, different case
+|404 `event_not_found` (cross-workspace is indistinguishable from absent)
+
+|Event `conflict-1`
+|500 `event_conflict`, no payload chosen
+|===
+
+== Results
+
+Observed 2026-10-17 on the host above, native runtime: `test query_service_end_to_end ... ok`
+(1 passed, 0 failed). Every expected row above held. A manual run of the same
+binary against the same data directory gave, for example:
+
+[source,text]
+----
+GET /healthz                       -> 200 {"clickhouse":"ok","status":"ok"}
+POST /v1/query (no key)            -> 401, www-authenticate: Bearer
+POST /v1/query sum metric.value in [9,100] as workspace A
+  -> rows: events 3, contributing 3, sum {"type":"int","value":"119"}
+     diagnostics: storage_path raw, approximation exact, table serving_logs,
+       columns [dataset, record_int, tenant_id, timestamp],
+       guards [type_matched_predicates, key_membership_presence, int128_sum, contributing_counts]
+GET /v1/events/fixture/only-b as A -> 404 event_not_found
+POST /v1/query with "tenant_id"    -> 400 invalid_request: unknown field `tenant_id`
+----
+
+To confirm the test can fail, two mutations were applied one at a time and the
+test run each time; each failed at the intended assertion and was reverted:
+
+. The event lookup bound a constant tenant instead of the key's tenant: the first
+  event retrieval returned 404.
+. Query parameters were sent without the text-format escaping
+  (`Param::wire_value`): the special-key scenario returned 502 `clickhouse_error`.
+
+A third defect surfaced during development, not by mutation: a body
+`{"kind":"count","tenant_id":"x"}` was accepted because serde ignores unknown
+fields on a unit variant of an internally tagged enum. The wire-format unit test
+caught it and the aggregates became empty struct variants.
+
+Failed and rejected requests return an error body without plan diagnostics: the
+`PlanDiagnostics` of a request that never ran are not returned.
+
+== Interpretation
+
+The HTTP path reproduces the library results on the Experiment 021 fixture,
+keeps the contract errors distinct (400 for a request the plan rejects, 422 for a
+result the contract refuses, 502 for the backend), derives scope only from the
+credential, and retrieves canonical payloads exactly by
+`(tenant_id, dataset, event_id)` from the product table.
+
+It does not show: object-backed payload reads (the harness policy is local),
+behavior under load or with large payloads, the Collector's canonical encoding,
+dynamic key resolution, rotation or revocation, dataset-level authorization,
+TLS to ClickHouse, time-series, heatmap, percentile, or raw-row query shapes, or
+diagnostics for rejected and failed requests. The Docker runtime shares the
+scenario code and the storage substitution with the native runtime but was not
+run on the recording host (no Docker daemon in the orb); CI runs it.
+
+== Follow-ups
+
+- Return plan diagnostics with rejected and failed requests, then tick the remaining part of the plan-diagnostics checklist item.
+- Replace the static key file with the tenant-policy registry and extend retrieval to dataset-level authorization.
+- Run exact-event retrieval against the S3-backed `object` volume after the TTL move.
