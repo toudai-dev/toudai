@@ -7,16 +7,16 @@
 # checksummed bundle of node-level evidence.
 set -Eeuo pipefail
 
-project="${LIGHTHOUSE_GCP_PROJECT:-lighthouse-508219}"
-zone="${LIGHTHOUSE_GCP_ZONE:-us-central1-a}"
-instance_filter="${LIGHTHOUSE_GCP_INSTANCE_FILTER:-labels.experiment=015 AND labels.stage=b}"
-ssh_attempts="${LIGHTHOUSE_GCP_SSH_ATTEMPTS:-3}"
+project="${TOUDAI_GCP_PROJECT:-lighthouse-508219}"
+zone="${TOUDAI_GCP_ZONE:-us-central1-a}"
+instance_filter="${TOUDAI_GCP_INSTANCE_FILTER:-labels.experiment=015 AND labels.stage=b}"
+ssh_attempts="${TOUDAI_GCP_SSH_ATTEMPTS:-3}"
 
 run_id="${1:-}"
 out_dir="${2:-}"
 if [[ -z "${run_id}" || -z "${out_dir}" ]]; then
   echo "usage: $0 RUN_ID OUTPUT_DIR" >&2
-  echo "env: LIGHTHOUSE_GCP_PROJECT, LIGHTHOUSE_GCP_ZONE, LIGHTHOUSE_GCP_INSTANCE_FILTER" >&2
+  echo "env: TOUDAI_GCP_PROJECT, TOUDAI_GCP_ZONE, TOUDAI_GCP_INSTANCE_FILTER" >&2
   exit 2
 fi
 [[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid run ID: ${run_id}" >&2; exit 2; }

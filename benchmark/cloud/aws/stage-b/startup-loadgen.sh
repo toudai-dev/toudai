@@ -9,7 +9,7 @@ exec > >(tee -a /var/log/lighthouse-stage-b-startup.log) 2>&1
 state=/var/lib/lighthouse-stage-b
 
 # See startup-leaf.sh: this timer is what bounds the cost of an abandoned node.
-shutdown -h "+${LIGHTHOUSE_MAX_LIFETIME_MINUTES}" "lighthouse experiment 015 stage B lifetime reached"
+shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "toudai experiment 015 stage B lifetime reached"
 
 install -d -m 0755 "${state}"
 
@@ -25,8 +25,8 @@ install -d -m 0755 "${state}"
   lscpu
   free --bytes
   lsblk --bytes --output NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS,MODEL
-  printf 'coordinator_ip=%s\n' "${LIGHTHOUSE_COORDINATOR_IP}"
-  printf 'leaf_ips=%s\n' "${LIGHTHOUSE_LEAF_IPS}"
+  printf 'coordinator_ip=%s\n' "${TOUDAI_COORDINATOR_IP}"
+  printf 'leaf_ips=%s\n' "${TOUDAI_LEAF_IPS}"
   flox activate --dir /opt/lighthouse -- clickhouse local --version
 } > "${state}/hardware.txt"
 

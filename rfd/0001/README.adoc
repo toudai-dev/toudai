@@ -10,7 +10,7 @@ https://github.com/chaba-dev/lighthouse/pull/11[PR #11].
 
 == Architecture summary
 
-Lighthouse provides Scuba-style recent-data exploration over logs, spans, and structured application events through one logical event model. Native metrics remain separate. The PoC uses OpenTelemetry Collectors with direct ClickHouse ingestion and object-store overflow/catch-up. Canonical retention and backup/restore support reconstruction; independent all-event archival remains an explicit decision. Bounded accelerators improve interactive queries without making raw retained fields unqueryable.
+Toudai provides Scuba-style recent-data exploration over logs, spans, and structured application events through one logical event model. Native metrics remain separate. The PoC uses OpenTelemetry Collectors with direct ClickHouse ingestion and object-store overflow/catch-up. Canonical retention and backup/restore support reconstruction; independent all-event archival remains an explicit decision. Bounded accelerators improve interactive queries without making raw retained fields unqueryable.
 
 == Design principles
 

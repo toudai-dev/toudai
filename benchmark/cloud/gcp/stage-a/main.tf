@@ -22,7 +22,7 @@ data "google_compute_subnetwork" "benchmark" {
 
 resource "google_service_account" "benchmark" {
   account_id   = "lighthouse-exp015"
-  display_name = "Lighthouse Experiment 015"
+  display_name = "Toudai Experiment 015"
   description  = "Temporary read-only corpus access for Stage A benchmark VMs"
 }
 

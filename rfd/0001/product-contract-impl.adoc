@@ -24,7 +24,7 @@ stock ClickHouse exporter stores all attribute values as strings (so integer 1,
 double 1.0, and string "1" are indistinguishable; arrays and maps become JSON
 text that collides with producer strings; explicit-empty and empty-string merge),
 keeps duplicate keys in the `Map`, drops span scope attributes, and converts a
-negative span duration into a `UInt64` underflow. A Lighthouse canonical envelope
+negative span duration into a `UInt64` underflow. A Toudai canonical envelope
 must therefore be implemented outside the stock schema. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +

@@ -4,13 +4,13 @@ set -euo pipefail
 
 # Keep benchmark data isolated from the source corpus and operating-system disk.
 
-fast_dataset="${LIGHTHOUSE_FAST_DATASET:-fast-storage/lighthouse}"
-fast_mount="${LIGHTHOUSE_FAST_MOUNT:-/mnt/fast-storage/lighthouse}"
-fast_refquota="${LIGHTHOUSE_FAST_REFQUOTA:-750G}"
+fast_dataset="${TOUDAI_FAST_DATASET:-fast-storage/lighthouse}"
+fast_mount="${TOUDAI_FAST_MOUNT:-/mnt/fast-storage/lighthouse}"
+fast_refquota="${TOUDAI_FAST_REFQUOTA:-750G}"
 
-capacity_dataset="${LIGHTHOUSE_CAPACITY_DATASET:-storage/lighthouse-bench}"
-capacity_mount="${LIGHTHOUSE_CAPACITY_MOUNT:-/mnt/storage/lighthouse-bench}"
-capacity_refquota="${LIGHTHOUSE_CAPACITY_REFQUOTA:-4T}"
+capacity_dataset="${TOUDAI_CAPACITY_DATASET:-storage/lighthouse-bench}"
+capacity_mount="${TOUDAI_CAPACITY_MOUNT:-/mnt/storage/lighthouse-bench}"
+capacity_refquota="${TOUDAI_CAPACITY_REFQUOTA:-4T}"
 
 owner="${SUDO_USER:-${USER}}"
 group="$(id -gn "${owner}")"

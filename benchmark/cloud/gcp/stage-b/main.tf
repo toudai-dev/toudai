@@ -32,7 +32,7 @@ data "google_compute_subnetwork" "benchmark" {
 
 resource "google_service_account" "benchmark" {
   account_id   = "lighthouse-exp015-b"
-  display_name = "Lighthouse Experiment 015 Stage B"
+  display_name = "Toudai Experiment 015 Stage B"
   description  = "Temporary least-privilege corpus and result object access"
 }
 

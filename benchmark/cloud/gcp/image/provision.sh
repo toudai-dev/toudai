@@ -18,11 +18,11 @@ sudo useradd --create-home --shell /bin/bash lighthouse
 sudo install --directory --owner lighthouse --group lighthouse /opt/lighthouse/.flox/env
 sudo chown --recursive lighthouse:lighthouse /opt/lighthouse
 sudo install --owner lighthouse --group lighthouse --mode 0644 \
-  /tmp/lighthouse-manifest.toml /opt/lighthouse/.flox/env/manifest.toml
+  /tmp/toudai-manifest.toml /opt/lighthouse/.flox/env/manifest.toml
 sudo install --owner lighthouse --group lighthouse --mode 0644 \
-  /tmp/lighthouse-manifest.lock /opt/lighthouse/.flox/env/manifest.lock
+  /tmp/toudai-manifest.lock /opt/lighthouse/.flox/env/manifest.lock
 sudo install --owner lighthouse --group lighthouse --mode 0644 \
-  /tmp/lighthouse-env.json /opt/lighthouse/.flox/env.json
+  /tmp/toudai-env.json /opt/lighthouse/.flox/env.json
 
 sudo --user lighthouse --set-home env FLOX_DISABLE_METRICS=true \
   flox activate --dir /opt/lighthouse -- \
@@ -33,8 +33,8 @@ flox_version=${flox_version}
 clickhouse_version=26.8.2.7
 EOF
 
-rm -f "${flox_deb}" /tmp/lighthouse-manifest.toml \
-  /tmp/lighthouse-manifest.lock /tmp/lighthouse-env.json
+rm -f "${flox_deb}" /tmp/toudai-manifest.toml \
+  /tmp/toudai-manifest.lock /tmp/toudai-env.json
 sudo apt-get clean
 sudo rm -rf /var/lib/apt/lists/*
 if command -v cloud-init >/dev/null 2>&1; then

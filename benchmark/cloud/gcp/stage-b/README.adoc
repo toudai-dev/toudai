@@ -54,15 +54,15 @@ before starting the long load:
 [source,shell]
 ----
 revision="$(jj log -r @- --no-graph -T commit_id)"
-git archive --format=tar.gz -o "/tmp/lighthouse-${revision}.tar.gz" "${revision}"
-sha256sum "/tmp/lighthouse-${revision}.tar.gz"
+git archive --format=tar.gz -o "/tmp/toudai-${revision}.tar.gz" "${revision}"
+sha256sum "/tmp/toudai-${revision}.tar.gz"
 
 zone=us-central1-a
 loadgen=lighthouse-exp015-stage-b-loadgen
 gcloud compute scp --tunnel-through-iap --zone "${zone}" \
-  "/tmp/lighthouse-${revision}.tar.gz" "${loadgen}:~/"
+  "/tmp/toudai-${revision}.tar.gz" "${loadgen}:~/"
 gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command \
-  "mkdir -p ~/lighthouse && tar -xzf ~/lighthouse-${revision}.tar.gz -C ~/lighthouse"
+  "mkdir -p ~/toudai && tar -xzf ~/toudai-${revision}.tar.gz -C ~/toudai"
 ----
 
 The preflight must show a ClickHouse version, a readable corpus listing, and a
@@ -74,9 +74,9 @@ gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command 
   "flox activate --dir /opt/lighthouse -- bash -lc '
      clickhouse local --version
      gcloud storage ls gs://lighthouse-508219-lighthouse-exp015/corpus/2026-08-01/ | head -2
-     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
-     LIGHTHOUSE_CLUSTER_LEAF_HOSTS=LEAF_IPS \
-       ~/lighthouse/benchmark/scripts/benchmark-clickhouse-remote-cluster status SHARDS'"
+     TOUDAI_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
+     TOUDAI_CLUSTER_LEAF_HOSTS=LEAF_IPS \
+       ~/toudai/benchmark/scripts/benchmark-clickhouse-remote-cluster status SHARDS'"
 ----
 
 Start the loader detached so an interrupted SSH session cannot kill it. The
@@ -87,11 +87,11 @@ recoverable rather than fatal:
 ----
 gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command \
   "flox activate --dir /opt/lighthouse -- bash -lc '
-     cd ~/lighthouse
-     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
-     LIGHTHOUSE_CLUSTER_LEAF_HOSTS=LEAF_IPS \
-     LIGHTHOUSE_GCP_LOAD_PARALLELISM=8 \
-     LIGHTHOUSE_BENCH_REVISION=${revision} \
+     cd ~/toudai
+     TOUDAI_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
+     TOUDAI_CLUSTER_LEAF_HOSTS=LEAF_IPS \
+     TOUDAI_GCP_LOAD_PARALLELISM=8 \
+     TOUDAI_BENCH_REVISION=${revision} \
      setsid nohup benchmark/scripts/benchmark-load-distributed SHARDS LOAD_RUN \
        > ~/load.log 2>&1 < /dev/null &'"
 ----
@@ -103,12 +103,12 @@ Launch the guarded continuation the same way. It waits for the loader's
 ----
 gcloud compute ssh --tunnel-through-iap --zone "${zone}" "${loadgen}" --command \
   "flox activate --dir /opt/lighthouse -- bash -lc '
-     cd ~/lighthouse
-     LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
-     LIGHTHOUSE_CLUSTER_LEAF_HOSTS=LEAF_IPS \
-     LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=LOAD_RUN \
-     LIGHTHOUSE_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs \
-     LIGHTHOUSE_BENCH_REVISION=${revision} \
+     cd ~/toudai
+     TOUDAI_CLUSTER_COORDINATOR_HOST=COORDINATOR_IP \
+     TOUDAI_CLUSTER_LEAF_HOSTS=LEAF_IPS \
+     TOUDAI_DISTRIBUTED_LOAD_RUN=LOAD_RUN \
+     TOUDAI_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs \
+     TOUDAI_BENCH_REVISION=${revision} \
      setsid nohup benchmark/scripts/benchmark-run-distributed-stage SHARDS STAGE_RUN \
        > ~/stage.log 2>&1 < /dev/null &'"
 ----

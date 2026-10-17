@@ -14,11 +14,11 @@
 mod common;
 
 use common::*;
-use lighthouse::query::{
+use serde_json::Value;
+use toudai::query::{
     Aggregate, AttrRef, CmpOp, Predicate, Query, QueryError, ValueType, plan,
     value::Literal::{self as L},
 };
-use serde_json::Value;
 
 const I64_MAX: i64 = i64::MAX;
 
@@ -467,13 +467,13 @@ fn scope_and_time_bounds_are_enforced() {
     let mut q = logs_query();
     q.scope.workspace_id = WS_B.into();
     q.filters = vec![cmp(
-        AttrRef::resource("lighthouse.workspace_id"),
+        AttrRef::resource("toudai.workspace_id"),
         CmpOp::Eq,
         L::String(WS_B.into()),
     )];
     assert_eq!(events(ch, q.clone()), 27);
     q.filters = vec![cmp(
-        AttrRef::resource("lighthouse.workspace_id"),
+        AttrRef::resource("toudai.workspace_id"),
         CmpOp::Eq,
         L::String(WS_A.into()),
     )];
@@ -482,7 +482,7 @@ fn scope_and_time_bounds_are_enforced() {
     let mut q = spans_query();
     q.scope.workspace_id = WS_B.into();
     q.filters = vec![cmp(
-        AttrRef::resource("lighthouse.workspace_id"),
+        AttrRef::resource("toudai.workspace_id"),
         CmpOp::Eq,
         L::String(WS_B.into()),
     )];
@@ -852,7 +852,7 @@ fn rejected_requests_fail_during_planning() {
 
 #[test]
 fn string_parameters_survive_the_wire_encoding() {
-    use lighthouse::query::Param;
+    use toudai::query::Param;
     let Some(ch) = clickhouse() else { return };
     for text in [
         "plain",

@@ -10,12 +10,12 @@ creates and removes one 8 GiB file on each configured storage tier. ClickHouse
 and other storage-heavy workloads must be stopped before running it.
 
 Environment:
-  LIGHTHOUSE_BENCH_RUNS_ROOT  Result root (default: /mnt/fast-storage/lighthouse/runs)
-  LIGHTHOUSE_OS_TEST_ROOT     OS NVMe test directory (default: repository .tmp)
-  LIGHTHOUSE_FAST_TEST_ROOT   SSD ZFS test directory
-  LIGHTHOUSE_BULK_TEST_ROOT   HDD ZFS test directory
-  LIGHTHOUSE_FIO_SIZE         Test file size (default: 8G)
-  LIGHTHOUSE_FIO_RUNTIME      Random-read duration in seconds (default: 30)
+  TOUDAI_BENCH_RUNS_ROOT  Result root (default: /mnt/fast-storage/lighthouse/runs)
+  TOUDAI_OS_TEST_ROOT     OS NVMe test directory (default: repository .tmp)
+  TOUDAI_FAST_TEST_ROOT   SSD ZFS test directory
+  TOUDAI_BULK_TEST_ROOT   HDD ZFS test directory
+  TOUDAI_FIO_SIZE         Test file size (default: 8G)
+  TOUDAI_FIO_RUNTIME      Random-read duration in seconds (default: 30)
 EOF
 }
 
@@ -30,15 +30,15 @@ if ! command -v fio >/dev/null 2>&1; then
 fi
 
 run_id="$1"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-/mnt/fast-storage/lighthouse/runs}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-/mnt/fast-storage/lighthouse/runs}"
 run_dir="${runs_root}/${run_id}"
-size="${LIGHTHOUSE_FIO_SIZE:-8G}"
-runtime="${LIGHTHOUSE_FIO_RUNTIME:-30}"
+size="${TOUDAI_FIO_SIZE:-8G}"
+runtime="${TOUDAI_FIO_RUNTIME:-30}"
 
 declare -A roots=(
-  [os-nvme]="${LIGHTHOUSE_OS_TEST_ROOT:-${PWD}/.tmp/host-storage-baseline}"
-  [fast-ssd-zfs]="${LIGHTHOUSE_FAST_TEST_ROOT:-/mnt/fast-storage/lighthouse/host-storage-baseline}"
-  [bulk-hdd-zfs]="${LIGHTHOUSE_BULK_TEST_ROOT:-/mnt/storage/lighthouse-bench/host-storage-baseline}"
+  [os-nvme]="${TOUDAI_OS_TEST_ROOT:-${PWD}/.tmp/host-storage-baseline}"
+  [fast-ssd-zfs]="${TOUDAI_FAST_TEST_ROOT:-/mnt/fast-storage/lighthouse/host-storage-baseline}"
+  [bulk-hdd-zfs]="${TOUDAI_BULK_TEST_ROOT:-/mnt/storage/lighthouse-bench/host-storage-baseline}"
 )
 
 if [[ -e "${run_dir}" ]]; then

@@ -12,7 +12,7 @@ set -Eeuo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 loader="${repo_root}/benchmark/scripts/benchmark-load-distributed"
 transform="${repo_root}/benchmark/clickhouse/gcp-parquet-to-events.sql"
-work="$(mktemp -d "${TMPDIR:-/tmp}/lighthouse-stage-b-loader-test.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/toudai-stage-b-loader-test.XXXXXX")"
 run_id="loader-test-1s"
 run_dir="${work}/runs/${run_id}"
 corpus="${work}/corpus"
@@ -204,8 +204,8 @@ done
 cat > "${shim}/gcloud" <<'SHIM'
 #!/usr/bin/env bash
 set -euo pipefail
-corpus_root="${LIGHTHOUSE_TEST_CORPUS_ROOT}"
-marker_root="${LIGHTHOUSE_TEST_MARKER_ROOT}"
+corpus_root="${TOUDAI_TEST_CORPUS_ROOT}"
+marker_root="${TOUDAI_TEST_MARKER_ROOT}"
 case "${1:-} ${2:-}" in
   "storage ls")
     target="$3"
@@ -238,16 +238,16 @@ esac
 SHIM
 chmod +x "${shim}/gcloud"
 
-export LIGHTHOUSE_TEST_CORPUS_ROOT="${corpus}"
-export LIGHTHOUSE_TEST_MARKER_ROOT="${markers}"
+export TOUDAI_TEST_CORPUS_ROOT="${corpus}"
+export TOUDAI_TEST_MARKER_ROOT="${markers}"
 export PATH="${shim}:${PATH}"
-export LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=127.0.0.1
-export LIGHTHOUSE_CLUSTER_LEAF_HOSTS=127.0.0.1
-export LIGHTHOUSE_BENCH_RUNS_ROOT="${work}/runs"
-export LIGHTHOUSE_GCP_CORPUS_BUCKET=gs://test
-export LIGHTHOUSE_GCP_CORPUS_INVENTORY="${inventory}"
-export LIGHTHOUSE_GCP_LOAD_PARALLELISM=2
-export LIGHTHOUSE_BENCH_REVISION=loader-test
+export TOUDAI_CLUSTER_COORDINATOR_HOST=127.0.0.1
+export TOUDAI_CLUSTER_LEAF_HOSTS=127.0.0.1
+export TOUDAI_BENCH_RUNS_ROOT="${work}/runs"
+export TOUDAI_GCP_CORPUS_BUCKET=gs://test
+export TOUDAI_GCP_CORPUS_INVENTORY="${inventory}"
+export TOUDAI_GCP_LOAD_PARALLELISM=2
+export TOUDAI_BENCH_REVISION=loader-test
 
 assert_day_rows() {
   [[ "$(clickhouse client --host 127.0.0.1 --port 9000 --query 'SELECT count() FROM benchmark_distributed.events FORMAT TSVRaw')" == "$1" ]] ||

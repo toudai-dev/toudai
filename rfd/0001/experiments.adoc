@@ -132,7 +132,7 @@ Relevant references:
 == Scuba product model
 
 Facebook's original Scuba system established the product and query model that
-Lighthouse is targeting: self-describing structured events, arbitrary
+Toudai is targeting: self-describing structured events, arbitrary
 slice-and-dice exploration, time series, histograms, percentiles, comparisons,
 and drill-down to individual events. Its shared-nothing query path scanned all
 time-relevant leaves, computed partial aggregates locally, and merged them
@@ -140,7 +140,7 @@ through a fanout tree. It intentionally used no general index beyond batch time
 ranges and accepted sampling, short retention, and incomplete results to reach
 sub-second latency.
 
-Lighthouse adopts Scuba's flexible event exploration and storage-node partial
+Toudai adopts Scuba's flexible event exploration and storage-node partial
 aggregation, but not Scuba's requirement choices around ingestion sampling,
 memory-primary serving, short retention, or best-effort incomplete results.
 Accepted events remain available at full resolution. If a bounded-latency query
@@ -154,13 +154,13 @@ Relevant references:
 
 == Supporting Meta-scale evidence
 
-Kraken is not the Lighthouse product model; it is supporting evidence about
+Kraken is not the Toudai product model; it is supporting evidence about
 operating a later-generation analytics data plane at Meta scale. Its published
 study ranged from 50 GB datasets with 1B records to a 150 TB dataset with 1.27T
 records, more than 3,500 columns, and 8,192 shards. Flash-backed columnar blocks,
 RAM caches, deterministic dataset partitions, and separation of storage
 management from query serving show plausible later optimizations, but do not
-establish that Lighthouse needs a custom virtual-partition control plane before
+establish that Toudai needs a custom virtual-partition control plane before
 standard ClickHouse distributed fanout is measured.
 
 Relevant reference:
@@ -239,7 +239,7 @@ The current 12-day corpus represents approximately 12.8 TB on this calibrated
 scale. It can supply natural subsets for the 1 TB and 10 TB tests. A 100 TB test
 will require roughly eight time-shifted passes over the corpus.
 
-== Lighthouse benchmark results to date
+== Toudai benchmark results to date
 
 The architecture in this plan is grounded in the completed experiments, not
 only in the Scuba workload model:

@@ -2,17 +2,17 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 shards="${1:-}"
 run_id="${2:-}"
-repetitions="${LIGHTHOUSE_DISTRIBUTED_REPETITIONS:-3}"
-cache_mode_spec="${LIGHTHOUSE_DISTRIBUTED_CACHE_MODES:-clickhouse-cold,warm}"
-range_spec="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h}"
-fixture_filter="${LIGHTHOUSE_DISTRIBUTED_FIXTURES:-}"
-expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
-load_run="${LIGHTHOUSE_DISTRIBUTED_LOAD_RUN:-experiment-014-distributed-day-v1-${shards}s}"
-query_max_memory="${LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY:-8589934592}"
+repetitions="${TOUDAI_DISTRIBUTED_REPETITIONS:-3}"
+cache_mode_spec="${TOUDAI_DISTRIBUTED_CACHE_MODES:-clickhouse-cold,warm}"
+range_spec="${TOUDAI_DISTRIBUTED_RANGES:-5m,1h,6h,24h}"
+fixture_filter="${TOUDAI_DISTRIBUTED_FIXTURES:-}"
+expected_rows="${TOUDAI_BENCH_EXPECTED_ROWS:-547356173}"
+load_run="${TOUDAI_DISTRIBUTED_LOAD_RUN:-experiment-014-distributed-day-v1-${shards}s}"
+query_max_memory="${TOUDAI_DISTRIBUTED_QUERY_MAX_MEMORY:-8589934592}"
 
 if [[ -z "${shards}" || -z "${run_id}" ]]; then
   echo "usage: $0 SHARDS RUN_ID" >&2
@@ -27,11 +27,11 @@ if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 2
 fi
 if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "LIGHTHOUSE_DISTRIBUTED_REPETITIONS must be a positive integer" >&2
+  echo "TOUDAI_DISTRIBUTED_REPETITIONS must be a positive integer" >&2
   exit 2
 fi
 if [[ ! "${query_max_memory}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY must be a positive integer" >&2
+  echo "TOUDAI_DISTRIBUTED_QUERY_MAX_MEMORY must be a positive integer" >&2
   exit 2
 fi
 if [[ "$(cat "${runs_root}/${load_run}/status" 2>/dev/null || true)" != "completed" ]]; then
@@ -47,7 +47,7 @@ fi
 mkdir -p "${run_dir}"/{evidence,plans/coordinator,plans/leaves,queries,results}
 echo "starting" > "${run_dir}/status"
 
-cluster=("${LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND:-${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster}")
+cluster=("${TOUDAI_DISTRIBUTED_CLUSTER_COMMAND:-${repo_root}/benchmark/scripts/benchmark-clickhouse-cluster}")
 completed=0
 sampler_pid=""
 stop_sampler() {
@@ -100,13 +100,13 @@ for range_name in "${ranges[@]}"; do
   range_seconds "${range_name}" >/dev/null
 done
 
-day_end="${LIGHTHOUSE_DISTRIBUTED_DAY_END:-2026-08-06 04:00:00}"
-service="${LIGHTHOUSE_BENCH_SERVICE:-executor}"
-severity="${LIGHTHOUSE_BENCH_SEVERITY:-ERROR}"
-dynamic_value="${LIGHTHOUSE_BENCH_DYNAMIC_VALUE:-event_lifecycle}"
+day_end="${TOUDAI_DISTRIBUTED_DAY_END:-2026-08-06 04:00:00}"
+service="${TOUDAI_BENCH_SERVICE:-executor}"
+severity="${TOUDAI_BENCH_SEVERITY:-ERROR}"
+dynamic_value="${TOUDAI_BENCH_DYNAMIC_VALUE:-event_lifecycle}"
 safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
 query_prefix="lighthouse_${safe_run_id}"
-revision="${LIGHTHOUSE_BENCH_REVISION:-$(jj log -r @- --no-graph -T 'commit_id' 2>/dev/null || echo unknown)}"
+revision="${TOUDAI_BENCH_REVISION:-$(jj log -r @- --no-graph -T 'commit_id' 2>/dev/null || echo unknown)}"
 date -u +%FT%TZ > "${run_dir}/started-at"
 
 cat > "${run_dir}/manifest.json" <<EOF
@@ -147,7 +147,7 @@ for index in $(seq 1 "${shards}"); do
     WHERE active AND database = 'benchmark_distributed' AND table = 'events_local'
     ORDER BY partition, name FORMAT JSONEachRow" > "${run_dir}/evidence/leaf-${index}-parts.jsonl"
 done
-if [[ "${LIGHTHOUSE_DISTRIBUTED_HOST_SAMPLER:-1}" == "1" ]]; then
+if [[ "${TOUDAI_DISTRIBUTED_HOST_SAMPLER:-1}" == "1" ]]; then
   "${repo_root}/benchmark/scripts/benchmark-host-sampler" "${run_dir}/evidence/host-samples" &
   sampler_pid=$!
 fi

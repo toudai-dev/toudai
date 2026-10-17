@@ -14,24 +14,24 @@ run_prefix="${2:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 stage_run="${3:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 load_run="${4:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 
-region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
+region="${TOUDAI_AWS_REGION:-us-west-2}"
 profile_args=()
-if [[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]]; then
-  profile_args=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
+if [[ -n "${TOUDAI_AWS_PROFILE:-}" ]]; then
+  profile_args=(--profile "${TOUDAI_AWS_PROFILE}")
   # OpenTofu cannot consume the AWS CLI's --profile arguments, so export the
   # same profile or terminal-status teardown can leave the fleet billing.
-  export AWS_PROFILE="${LIGHTHOUSE_AWS_PROFILE}"
+  export AWS_PROFILE="${TOUDAI_AWS_PROFILE}"
 fi
 aws_cmd=(aws "${profile_args[@]}" --region "${region}")
-bucket="${LIGHTHOUSE_CORPUS_BUCKET:-s3://lighthouse-exp015-benchmark-828361646739}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-/home/lighthouse/lighthouse-stage-b/runs}"
-poll_seconds="${LIGHTHOUSE_PHASE_POLL_SECONDS:-600}"
+bucket="${TOUDAI_CORPUS_BUCKET:-s3://lighthouse-exp015-benchmark-828361646739}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-/home/lighthouse/lighthouse-stage-b/runs}"
+poll_seconds="${TOUDAI_PHASE_POLL_SECONDS:-600}"
 # Default to the topology's own ceiling less an hour, so this never destroys a
 # run the node timer would have allowed to finish.
-lifetime_hours="${LIGHTHOUSE_PHASE_LIFETIME_HOURS:-24}"
-max_wait_seconds="${LIGHTHOUSE_PHASE_MAX_WAIT_SECONDS:-$(((lifetime_hours - 1) * 3600))}"
+lifetime_hours="${TOUDAI_PHASE_LIFETIME_HOURS:-24}"
+max_wait_seconds="${TOUDAI_PHASE_MAX_WAIT_SECONDS:-$(((lifetime_hours - 1) * 3600))}"
 stage_dir="benchmark/cloud/aws/stage-b"
-out_dir="${LIGHTHOUSE_PHASE_OUT_DIR:-${HOME}/lighthouse-benchmark/phases/${stage_run}}"
+out_dir="${TOUDAI_PHASE_OUT_DIR:-${HOME}/lighthouse-benchmark/phases/${stage_run}}"
 
 mkdir -p "${out_dir}"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "${out_dir}/phase.log"; }
@@ -96,11 +96,11 @@ log "phase outcome: ${outcome}"
 # Export while the instances still exist: the cost collector reads the live
 # inventory, and the evidence collector needs the nodes reachable.
 log "collecting node evidence"
-LIGHTHOUSE_AWS_REGION="${region}" \
+TOUDAI_AWS_REGION="${region}" \
   "${repo_root}/benchmark/scripts/benchmark-collect-aws-stage-b-evidence" "${stage_run}" "${out_dir}/nodes" \
   >> "${out_dir}/phase.log" 2>&1 || log "evidence collection failed; continuing"
 log "collecting metered cost"
-LIGHTHOUSE_AWS_REGION="${region}" \
+TOUDAI_AWS_REGION="${region}" \
   "${repo_root}/benchmark/scripts/benchmark-aws-stage-b-cost" "${stage_run}" "${out_dir}/cost" \
   >> "${out_dir}/phase.log" 2>&1 || log "cost collection failed; continuing"
 

@@ -1,4 +1,4 @@
-//! Lighthouse query service.
+//! Toudai query service.
 //!
 //! The query layer enforces the PoC typed-value contract of RFD 0001
 //! (`product-contract.adoc`, "PoC typed-value contract") on top of the

@@ -10,12 +10,12 @@
 #
 # S3 credentials and region come from the normal AWS resolution chain, which on
 # a benchmark node is the instance profile plus instance metadata. Set
-# LIGHTHOUSE_AWS_PROFILE and LIGHTHOUSE_AWS_REGION to override them.
+# TOUDAI_AWS_PROFILE and TOUDAI_AWS_REGION to override them.
 
 _object_store_aws() {
   local args=(aws)
-  [[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]] && args+=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
-  [[ -n "${LIGHTHOUSE_AWS_REGION:-}" ]] && args+=(--region "${LIGHTHOUSE_AWS_REGION}")
+  [[ -n "${TOUDAI_AWS_PROFILE:-}" ]] && args+=(--profile "${TOUDAI_AWS_PROFILE}")
+  [[ -n "${TOUDAI_AWS_REGION:-}" ]] && args+=(--region "${TOUDAI_AWS_REGION}")
   "${args[@]}" "${@}"
 }
 

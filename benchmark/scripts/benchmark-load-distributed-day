@@ -2,12 +2,12 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
-source_run="${LIGHTHOUSE_DISTRIBUTED_SOURCE_RUN:-experiment-017-rebuild-007-map-v1}"
-source_table="${LIGHTHOUSE_DISTRIBUTED_SOURCE_TABLE:-benchmark.events_map}"
-expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
-min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_run="${TOUDAI_DISTRIBUTED_SOURCE_RUN:-experiment-017-rebuild-007-map-v1}"
+source_table="${TOUDAI_DISTRIBUTED_SOURCE_TABLE:-benchmark.events_map}"
+expected_rows="${TOUDAI_BENCH_EXPECTED_ROWS:-547356173}"
+min_free_bytes="${TOUDAI_BENCH_MIN_FREE_BYTES:-107374182400}"
 shards="${1:-}"
 run_id="${2:-}"
 

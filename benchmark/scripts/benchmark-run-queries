@@ -2,16 +2,16 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
-source_path="${LIGHTHOUSE_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet}"
-candidate_order="${LIGHTHOUSE_BENCH_CANDIDATES:-json,map,typed}"
-target_table="${LIGHTHOUSE_BENCH_TARGET_TABLE:-}"
-expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-3629077}"
-cache_modes="${LIGHTHOUSE_BENCH_CACHE_MODES:-clickhouse-cold,warm}"
-repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-3}"
-fixture_filter="${LIGHTHOUSE_BENCH_FIXTURES:-}"
-gcp_bytes_per_event="${LIGHTHOUSE_GCP_BYTES_PER_EVENT:-1900}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_path="${TOUDAI_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet}"
+candidate_order="${TOUDAI_BENCH_CANDIDATES:-json,map,typed}"
+target_table="${TOUDAI_BENCH_TARGET_TABLE:-}"
+expected_rows="${TOUDAI_BENCH_EXPECTED_ROWS:-3629077}"
+cache_modes="${TOUDAI_BENCH_CACHE_MODES:-clickhouse-cold,warm}"
+repetitions="${TOUDAI_BENCH_REPETITIONS:-3}"
+fixture_filter="${TOUDAI_BENCH_FIXTURES:-}"
+gcp_bytes_per_event="${TOUDAI_GCP_BYTES_PER_EVENT:-1900}"
 run_id="${1:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -19,19 +19,19 @@ if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 2
 fi
 if [[ ! "${repetitions}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "LIGHTHOUSE_BENCH_REPETITIONS must be a positive integer" >&2
+  echo "TOUDAI_BENCH_REPETITIONS must be a positive integer" >&2
   exit 2
 fi
 if [[ ! "${gcp_bytes_per_event}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "LIGHTHOUSE_GCP_BYTES_PER_EVENT must be a positive integer" >&2
+  echo "TOUDAI_GCP_BYTES_PER_EVENT must be a positive integer" >&2
   exit 2
 fi
 if [[ -n "${target_table}" && ! "${target_table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-  echo "LIGHTHOUSE_BENCH_TARGET_TABLE must be an unqualified table name" >&2
+  echo "TOUDAI_BENCH_TARGET_TABLE must be an unqualified table name" >&2
   exit 2
 fi
 if [[ ! "${expected_rows}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "LIGHTHOUSE_BENCH_EXPECTED_ROWS must be a positive integer" >&2
+  echo "TOUDAI_BENCH_EXPECTED_ROWS must be a positive integer" >&2
   exit 2
 fi
 
@@ -85,9 +85,9 @@ else
     WHERE database = 'benchmark'
       AND name IN ('events_json', 'events_map', 'events_typed')
     FORMAT TSVRaw")"
-  if [[ "${table_state}" != $'3\t1\t3629077' && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
+  if [[ "${table_state}" != $'3\t1\t3629077' && "${TOUDAI_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
     echo "expected three candidate tables with 3,629,077 rows; found: ${table_state}" >&2
-    echo "set LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS=1 for an intentional alternate dataset" >&2
+    echo "set TOUDAI_BENCH_ALLOW_OTHER_ROWS=1 for an intentional alternate dataset" >&2
     exit 1
   fi
 fi
@@ -95,8 +95,8 @@ fi
 rows="$("${client[@]}" --query "SELECT count() FROM ${reference_table} FORMAT TSVRaw")"
 start="$("${client[@]}" --query "SELECT min(timestamp) FROM ${reference_table} FORMAT TSVRaw")"
 end="$("${client[@]}" --query "SELECT max(timestamp) FROM ${reference_table} FORMAT TSVRaw")"
-service="${LIGHTHOUSE_BENCH_SERVICE:-}"
-severity="${LIGHTHOUSE_BENCH_SEVERITY:-}"
+service="${TOUDAI_BENCH_SERVICE:-}"
+severity="${TOUDAI_BENCH_SEVERITY:-}"
 if [[ -z "${service}" || -z "${severity}" ]]; then
   IFS=$'\t' read -r service severity < <("${client[@]}" --query "
     SELECT service_name, severity
@@ -106,8 +106,8 @@ if [[ -z "${service}" || -z "${severity}" ]]; then
     ORDER BY count() DESC, service_name, severity
     LIMIT 1 FORMAT TSVRaw")
 fi
-dynamic_low_value="${LIGHTHOUSE_BENCH_DYNAMIC_LOW_VALUE:-}"
-caller="${LIGHTHOUSE_BENCH_CALLER:-}"
+dynamic_low_value="${TOUDAI_BENCH_DYNAMIC_LOW_VALUE:-}"
+caller="${TOUDAI_BENCH_CALLER:-}"
 if [[ -z "${dynamic_low_value}" || -z "${caller}" ]]; then
   IFS=$'\t' read -r dynamic_low_value caller < <("${client[@]}" --query "
     SELECT attributes['type'], attributes['caller']
@@ -117,7 +117,7 @@ if [[ -z "${dynamic_low_value}" || -z "${caller}" ]]; then
     ORDER BY count() DESC, attributes['type'], attributes['caller']
     LIMIT 1 FORMAT TSVRaw")
 fi
-dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-}"
+dynamic_high_value="${TOUDAI_BENCH_DYNAMIC_HIGH_VALUE:-}"
 if [[ -z "${dynamic_high_value}" ]]; then
   dynamic_high_value="$("${client[@]}" --query "
     SELECT attributes['workspace_id']
@@ -127,7 +127,7 @@ if [[ -z "${dynamic_high_value}" ]]; then
     ORDER BY count() DESC, attributes['workspace_id']
     LIMIT 1 FORMAT TSVRaw")"
 fi
-body_term="${LIGHTHOUSE_BENCH_BODY_TERM:-error}"
+body_term="${TOUDAI_BENCH_BODY_TERM:-error}"
 logical_input_bytes="$((rows * gcp_bytes_per_event))"
 
 revision_rev="@"

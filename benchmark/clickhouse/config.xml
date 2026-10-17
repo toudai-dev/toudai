@@ -28,10 +28,10 @@
     <storage_configuration>
         <disks>
             <os_overflow>
-                <path replace="1" from_env="LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH">/mnt/fast-storage/lighthouse/clickhouse/os-overflow/</path>
+                <path replace="1" from_env="TOUDAI_CLICKHOUSE_OVERFLOW_PATH">/mnt/fast-storage/lighthouse/clickhouse/os-overflow/</path>
             </os_overflow>
             <bulk_archive>
-                <path replace="1" from_env="LIGHTHOUSE_CLICKHOUSE_ARCHIVE_PATH">/mnt/fast-storage/lighthouse/clickhouse/archive/</path>
+                <path replace="1" from_env="TOUDAI_CLICKHOUSE_ARCHIVE_PATH">/mnt/fast-storage/lighthouse/clickhouse/archive/</path>
             </bulk_archive>
         </disks>
         <policies>

@@ -12,15 +12,15 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${repo_root}/benchmark/scripts/lib/object-store.sh"
 shards="${1:-}"
 run_id="${2:-}"
-coordinator="${LIGHTHOUSE_CLUSTER_COORDINATOR_HOST:-}"
-leaf_spec="${LIGHTHOUSE_CLUSTER_LEAF_HOSTS:-}"
-# LIGHTHOUSE_CORPUS_BUCKET is the cloud-neutral name; the GCP-specific name is
+coordinator="${TOUDAI_CLUSTER_COORDINATOR_HOST:-}"
+leaf_spec="${TOUDAI_CLUSTER_LEAF_HOSTS:-}"
+# TOUDAI_CORPUS_BUCKET is the cloud-neutral name; the GCP-specific name is
 # still read so recorded runbooks keep working unchanged.
-bucket="${LIGHTHOUSE_CORPUS_BUCKET:-${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
-revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
-parallelism="${LIGHTHOUSE_LOAD_PARALLELISM:-${LIGHTHOUSE_GCP_LOAD_PARALLELISM:-2}}"
-inventory="${LIGHTHOUSE_CORPUS_INVENTORY:-${LIGHTHOUSE_GCP_CORPUS_INVENTORY:-${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv}}"
+bucket="${TOUDAI_CORPUS_BUCKET:-${TOUDAI_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
+revision="${TOUDAI_BENCH_REVISION:-unknown}"
+parallelism="${TOUDAI_LOAD_PARALLELISM:-${TOUDAI_GCP_LOAD_PARALLELISM:-2}}"
+inventory="${TOUDAI_CORPUS_INVENTORY:-${TOUDAI_GCP_CORPUS_INVENTORY:-${repo_root}/benchmark/cloud/gcp/stage-b/corpus.tsv}}"
 transform="${repo_root}/benchmark/clickhouse/gcp-parquet-to-events.sql"
 structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullable(Int64), receive_timestamp Nullable(DateTime64(6, 'UTC')), receive_timestamp_unix_nanos Nullable(Int64), severity Nullable(String), severity_number Nullable(Int64), log_name Nullable(String), resource_type Nullable(String), resource_labels Nullable(String), labels Nullable(String), insert_id Nullable(String), trace Nullable(String), span_id Nullable(String), trace_sampled Nullable(Bool), raw_entry Nullable(String)"
 
@@ -28,14 +28,14 @@ structure="timestamp Nullable(DateTime64(6, 'UTC')), timestamp_unix_nanos Nullab
 object_store_check "${bucket}"
 
 usage() {
-  echo "usage: LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=IP LIGHTHOUSE_CLUSTER_LEAF_HOSTS=IP,... $0 SHARDS RUN_ID" >&2
+  echo "usage: TOUDAI_CLUSTER_COORDINATOR_HOST=IP TOUDAI_CLUSTER_LEAF_HOSTS=IP,... $0 SHARDS RUN_ID" >&2
   exit 2
 }
 [[ -n "${shards}" && -n "${run_id}" && -n "${coordinator}" && -n "${leaf_spec}" ]] || usage
 case "${shards}" in 1|2|4) ;; *) usage ;; esac
 [[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || usage
 if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 16 ]]; then
-  echo "LIGHTHOUSE_LOAD_PARALLELISM must be between 1 and 16" >&2
+  echo "TOUDAI_LOAD_PARALLELISM must be between 1 and 16" >&2
   exit 2
 fi
 IFS=',' read -r -a leaves <<< "${leaf_spec}"
@@ -171,7 +171,7 @@ expected_state() {
 load_object() (
   local object="$1"
   local attempt object_file temp_dir
-  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/lighthouse-stage-b.XXXXXX")"
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/toudai-stage-b.XXXXXX")"
   object_file="${temp_dir}/object.parquet"
   trap 'rm -rf "${temp_dir}"' EXIT
 

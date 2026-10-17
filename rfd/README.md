@@ -1,6 +1,6 @@
 # Requests for Discussion
 
-Lighthouse uses the [Textbin RFD
+Toudai uses the [Textbin RFD
 format](https://github.com/chaba-dev/textbin/tree/main/rfd) to keep architecture,
 decision context, implementation progress, and measured experiments together.
 

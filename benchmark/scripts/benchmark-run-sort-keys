@@ -2,17 +2,17 @@
 set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
-source_table="${LIGHTHOUSE_BENCH_SOURCE_TABLE:-events_map_hot}"
-source_day="${LIGHTHOUSE_BENCH_SOURCE_DAY:-2026-08-05}"
-expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-548954103}"
-repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-3}"
-min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
-dynamic_value="${LIGHTHOUSE_BENCH_DYNAMIC_VALUE:-event_lifecycle}"
-candidate_spec="${LIGHTHOUSE_BENCH_CANDIDATES:-hour_service time hour_time}"
-reference_run="${LIGHTHOUSE_BENCH_REFERENCE_RUN:-}"
-reference_candidate="${LIGHTHOUSE_BENCH_REFERENCE_CANDIDATE:-time}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_table="${TOUDAI_BENCH_SOURCE_TABLE:-events_map_hot}"
+source_day="${TOUDAI_BENCH_SOURCE_DAY:-2026-08-05}"
+expected_rows="${TOUDAI_BENCH_EXPECTED_ROWS:-548954103}"
+repetitions="${TOUDAI_BENCH_REPETITIONS:-3}"
+min_free_bytes="${TOUDAI_BENCH_MIN_FREE_BYTES:-107374182400}"
+dynamic_value="${TOUDAI_BENCH_DYNAMIC_VALUE:-event_lifecycle}"
+candidate_spec="${TOUDAI_BENCH_CANDIDATES:-hour_service time hour_time}"
+reference_run="${TOUDAI_BENCH_REFERENCE_RUN:-}"
+reference_candidate="${TOUDAI_BENCH_REFERENCE_CANDIDATE:-time}"
 run_id="${1:-}"
 read -r -a candidates <<< "${candidate_spec}"
 ranges=(5m 1h 6h 24h)
@@ -27,15 +27,15 @@ if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 2
 fi
 if [[ ! "${source_table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-  echo "LIGHTHOUSE_BENCH_SOURCE_TABLE must be an unqualified table name" >&2
+  echo "TOUDAI_BENCH_SOURCE_TABLE must be an unqualified table name" >&2
   exit 2
 fi
 if [[ ! "${source_day}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-  echo "LIGHTHOUSE_BENCH_SOURCE_DAY must use YYYY-MM-DD" >&2
+  echo "TOUDAI_BENCH_SOURCE_DAY must use YYYY-MM-DD" >&2
   exit 2
 fi
 if [[ "${#candidates[@]}" == "0" ]]; then
-  echo "LIGHTHOUSE_BENCH_CANDIDATES must select at least one candidate" >&2
+  echo "TOUDAI_BENCH_CANDIDATES must select at least one candidate" >&2
   exit 2
 fi
 for candidate in "${candidates[@]}"; do
@@ -113,8 +113,8 @@ config=$(printf 'source_table=%s\nsource_day=%s\nexpected_rows=%s\nrepetitions=%
   "${source_table}" "${source_day}" "${expected_rows}" "${repetitions}" "${dynamic_value}" \
   "${candidate_spec}" "${reference_run}" "${reference_candidate}")
 if [[ ! -e "${run_dir}" ]]; then
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
-    echo "a new sort-key run requires LIGHTHOUSE_BENCH_RESET=1" >&2
+  if [[ "${TOUDAI_BENCH_RESET:-0}" != "1" ]]; then
+    echo "a new sort-key run requires TOUDAI_BENCH_RESET=1" >&2
     exit 1
   fi
   mkdir -p "${state_dir}/windows" "${run_dir}/evidence" "${run_dir}/queries" "${run_dir}/results"
@@ -126,7 +126,7 @@ if [[ ! -e "${run_dir}" ]]; then
   done
   "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/sort-key-candidates.sql"
 else
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" == "1" ]]; then
+  if [[ "${TOUDAI_BENCH_RESET:-0}" == "1" ]]; then
     echo "refusing to reset existing resumable run: ${run_dir}" >&2
     exit 1
   fi

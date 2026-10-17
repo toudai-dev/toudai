@@ -48,7 +48,7 @@ scope. Historical benchmark `tenant_id` columns are not evidence of account-leve
 authorization: implementation must map that scope to a globally unique workspace
 ID (or explicitly migrate the column). Do not reuse an account ID as `tenant_id`.
 The corpus's ordinary `workspace_id` attribute is source telemetry, not a trusted
-Lighthouse workspace identifier. Benchmark schemas and results stay unchanged.
+Toudai workspace identifier. Benchmark schemas and results stay unchanged.
 
 == Cardinality and multi-tenancy
 
@@ -113,7 +113,7 @@ tenant telemetry to an independent operational path.
 == Canonical content, retention, and deletion
 
 "Exact payload" means semantic reconstruction of the policy-approved canonical
-event received by Lighthouse after declared transformations, not the original
+event received by Toudai after declared transformations, not the original
 unredacted request or original protobuf wire encoding. Preserve its types and
 record the mapping/policy version. Redacted values must not survive in a second
 raw-body copy, overflow object, diagnostic log, or derived field. Tests use known
@@ -189,7 +189,7 @@ must be designed before broad producer adoption. Arbitrary headers, request
 bodies, SQL parameters, and authentication material are rejected or redacted by
 default rather than relying on short retention after collection.
 
-Lighthouse must expose telemetry outside its own serving path for at least:
+Toudai must expose telemetry outside its own serving path for at least:
 
 * events received, accepted, rejected, dropped, and upstream-sampled;
 * bytes and field counts by tenant and dataset;
@@ -202,4 +202,4 @@ Lighthouse must expose telemetry outside its own serving path for at least:
 * response freshness, shard coverage, accuracy mode, and partial-result rate.
 
 The telemetry system will become production-critical, so its minimum health,
-durability, and alerting signals cannot depend exclusively on Lighthouse.
+durability, and alerting signals cannot depend exclusively on Toudai.

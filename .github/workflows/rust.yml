@@ -81,8 +81,8 @@ jobs:
       - name: Test
         # Fail instead of skipping the ClickHouse-backed fixture tests.
         env:
-          LIGHTHOUSE_REQUIRE_CLICKHOUSE: "1"
+          TOUDAI_REQUIRE_CLICKHOUSE: "1"
         run: |
-          export LIGHTHOUSE_CLICKHOUSE_BIN="${HOME}/clickhouse/clickhouse"
-          "${LIGHTHOUSE_CLICKHOUSE_BIN}" --version
+          export TOUDAI_CLICKHOUSE_BIN="${HOME}/clickhouse/clickhouse"
+          "${TOUDAI_CLICKHOUSE_BIN}" --version
           cargo test --all-targets

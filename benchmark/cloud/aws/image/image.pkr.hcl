@@ -35,7 +35,7 @@ source "amazon-ebs" "benchmark" {
   ssh_username  = var.ssh_username
 
   ami_name        = "lighthouse-benchmark-{{isotime \"20060102-150405\"}}"
-  ami_description = "Lighthouse Experiment 015 benchmark dependencies with the Flox-pinned ClickHouse 26.8.2.7 closure"
+  ami_description = "Toudai Experiment 015 benchmark dependencies with the Flox-pinned ClickHouse 26.8.2.7 closure"
 
   source_ami_filter {
     filters = {
@@ -92,17 +92,17 @@ build {
 
   provisioner "file" {
     source      = ".flox/env/manifest.toml"
-    destination = "/tmp/lighthouse-manifest.toml"
+    destination = "/tmp/toudai-manifest.toml"
   }
 
   provisioner "file" {
     source      = ".flox/env/manifest.lock"
-    destination = "/tmp/lighthouse-manifest.lock"
+    destination = "/tmp/toudai-manifest.lock"
   }
 
   provisioner "file" {
     source      = ".flox/env.json"
-    destination = "/tmp/lighthouse-env.json"
+    destination = "/tmp/toudai-env.json"
   }
 
   provisioner "shell" {

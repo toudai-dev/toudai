@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 run_id="${1:-}"
 
 if [[ -z "${run_id}" ]]; then
@@ -14,8 +14,8 @@ if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
   exit 2
 fi
-if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
-  echo "split-event rebuild requires LIGHTHOUSE_BENCH_RESET=1" >&2
+if [[ "${TOUDAI_BENCH_RESET:-0}" != "1" ]]; then
+  echo "split-event rebuild requires TOUDAI_BENCH_RESET=1" >&2
   exit 1
 fi
 
@@ -30,7 +30,7 @@ echo "initializing" > "${run_dir}/status"
 client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 "${client[@]}" --query "SELECT 1" >/dev/null
 rows="$("${client[@]}" --query "SELECT count() FROM benchmark.events_map FORMAT TSVRaw")"
-if [[ "${rows}" != "547356173" && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
+if [[ "${rows}" != "547356173" && "${TOUDAI_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
   echo "expected 547,356,173 Map rows; found ${rows}" >&2
   exit 1
 fi

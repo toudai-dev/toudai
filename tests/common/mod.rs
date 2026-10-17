@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
-use lighthouse::query::{Aggregate, Query, Scope, ServingTables, Signal, SqlStatement, TimeRange};
 use serde_json::Value;
+use toudai::query::{Aggregate, Query, Scope, ServingTables, Signal, SqlStatement, TimeRange};
 
 pub const WS_A: &str = "11111111-1111-4111-8111-111111111111";
 pub const WS_B: &str = "22222222-2222-4222-8222-222222222222";
@@ -89,15 +89,15 @@ impl ClickHouse {
 }
 
 /// The fixture database, or `None` when no ClickHouse binary is available.
-/// Set `LIGHTHOUSE_REQUIRE_CLICKHOUSE=1` to fail instead of skipping, and
-/// `LIGHTHOUSE_CLICKHOUSE_BIN` to choose the binary (default: `clickhouse` on
+/// Set `TOUDAI_REQUIRE_CLICKHOUSE=1` to fail instead of skipping, and
+/// `TOUDAI_CLICKHOUSE_BIN` to choose the binary (default: `clickhouse` on
 /// `PATH`, provided by the Nix development shell).
 pub fn clickhouse() -> Option<&'static ClickHouse> {
     static INSTANCE: OnceLock<Option<ClickHouse>> = OnceLock::new();
     INSTANCE
         .get_or_init(|| {
             let binary =
-                std::env::var("LIGHTHOUSE_CLICKHOUSE_BIN").unwrap_or_else(|_| "clickhouse".into());
+                std::env::var("TOUDAI_CLICKHOUSE_BIN").unwrap_or_else(|_| "clickhouse".into());
             let available = Command::new(&binary)
                 .arg("--version")
                 .stdout(Stdio::null())
@@ -106,8 +106,8 @@ pub fn clickhouse() -> Option<&'static ClickHouse> {
                 .is_ok_and(|s| s.success());
             if !available {
                 assert!(
-                    std::env::var_os("LIGHTHOUSE_REQUIRE_CLICKHOUSE").is_none(),
-                    "LIGHTHOUSE_REQUIRE_CLICKHOUSE is set but `{binary}` is not runnable"
+                    std::env::var_os("TOUDAI_REQUIRE_CLICKHOUSE").is_none(),
+                    "TOUDAI_REQUIRE_CLICKHOUSE is set but `{binary}` is not runnable"
                 );
                 eprintln!("skipping fixture tests: `{binary}` is not runnable");
                 return None;

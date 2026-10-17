@@ -10,8 +10,8 @@
 mod common;
 
 use common::*;
-use lighthouse::query::value::Literal as L;
-use lighthouse::query::{
+use toudai::query::value::Literal as L;
+use toudai::query::{
     Aggregate, AttrRef, CmpOp, GroupValue, Operation, Predicate, Query, QueryError, QueryResult,
     Sum, TypedValue, UnsupportedValue, ValueType, interpret, plan,
 };
@@ -48,7 +48,7 @@ fn sum(attr: AttrRef, value_type: ValueType) -> Aggregate {
     Aggregate::Sum { attr, value_type }
 }
 
-fn single(result: QueryResult) -> lighthouse::query::ResultRow {
+fn single(result: QueryResult) -> toudai::query::ResultRow {
     assert_eq!(result.rows.len(), 1);
     result.rows.into_iter().next().unwrap()
 }
