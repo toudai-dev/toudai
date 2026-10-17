@@ -9,8 +9,8 @@ which stays in place as evidence.
 |===
 | File | Creates | Notes
 
-| `schema/001-database.sql` | `lighthouse` database |
-| `schema/002-canonical-events.sql` | `canonical_events` | Payload table (D3) on the `lighthouse_payload` storage policy; the TTL moves partitions older than two days to the S3-backed `object` volume. Sorted for `(tenant_id, dataset, event_id)` lookup.
+| `schema/001-database.sql` | `toudai` database |
+| `schema/002-canonical-events.sql` | `canonical_events` | Payload table (D3) on the `toudai_payload` storage policy; the TTL moves partitions older than two days to the S3-backed `object` volume. Sorted for `(tenant_id, dataset, event_id)` lookup.
 | `schema/003-serving-logs.sql` | `serving_logs` | Hybrid typed-Map layout (D1)
 | `schema/004-serving-spans.sql` | `serving_spans` | Same, with span timing diagnostics
 |===
@@ -23,7 +23,7 @@ The query service still targets Experiment 021's `workspace_id` and `ts`
 columns. Align its schema constants and SQL tests with `tenant_id` and
 `timestamp` before connecting it to these tables.
 
-`config.d/lighthouse-storage.xml` defines the disks and the `lighthouse_payload` policy the
+`config.d/toudai-storage.xml` defines the disks and the `toudai_payload` policy the
 payload table names. Its S3 endpoint and cache size are placeholders for the deployment.
 
 Apply the files in order with `clickhouse-client --multiquery < schema/NNN-name.sql`; every

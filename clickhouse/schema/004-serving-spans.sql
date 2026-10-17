@@ -1,6 +1,6 @@
 -- Decision 0001 D1/D2/D4: serving rows for spans. Same key, partition, epoch, and
 -- identifier rules as serving_logs.
-CREATE TABLE IF NOT EXISTS lighthouse.serving_spans
+CREATE TABLE IF NOT EXISTS toudai.serving_spans
 (
     tenant_id String,
     dataset LowCardinality(String),

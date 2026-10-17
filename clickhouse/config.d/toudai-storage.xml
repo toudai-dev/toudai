@@ -10,34 +10,34 @@
 <clickhouse>
     <storage_configuration>
         <disks>
-            <payload_local>
-                <path>/var/lib/clickhouse/disks/payload_local/</path>
-            </payload_local>
-            <payload_s3>
+            <toudai_payload_local>
+                <path>/var/lib/clickhouse/disks/toudai_payload_local/</path>
+            </toudai_payload_local>
+            <toudai_payload_s3>
                 <type>s3</type>
-                <endpoint>https://s3.example.invalid/lighthouse-payload/data/</endpoint>
+                <endpoint>https://s3.example.invalid/toudai-payload/data/</endpoint>
                 <use_environment_credentials>true</use_environment_credentials>
-                <metadata_path>/var/lib/clickhouse/disks/payload_s3/</metadata_path>
-            </payload_s3>
-            <payload_s3_cached>
+                <metadata_path>/var/lib/clickhouse/disks/toudai_payload_s3/</metadata_path>
+            </toudai_payload_s3>
+            <toudai_payload_s3_cached>
                 <type>cache</type>
-                <disk>payload_s3</disk>
-                <path>/var/lib/clickhouse/disks/payload_s3_cache/</path>
+                <disk>toudai_payload_s3</disk>
+                <path>/var/lib/clickhouse/disks/toudai_payload_s3_cache/</path>
                 <max_size>10Gi</max_size>
-            </payload_s3_cached>
+            </toudai_payload_s3_cached>
         </disks>
         <policies>
-            <lighthouse_payload>
+            <toudai_payload>
                 <volumes>
                     <!-- Volume names are referenced by the table TTL. -->
                     <cache>
-                        <disk>payload_local</disk>
+                        <disk>toudai_payload_local</disk>
                     </cache>
                     <object>
-                        <disk>payload_s3_cached</disk>
+                        <disk>toudai_payload_s3_cached</disk>
                     </object>
                 </volumes>
-            </lighthouse_payload>
+            </toudai_payload>
         </policies>
     </storage_configuration>
 </clickhouse>

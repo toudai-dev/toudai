@@ -9,7 +9,7 @@
 -- map for the canonical-only kinds (bytes, array, map) and explicit empty.
 -- Resource and scope attributes are one string Map plus a companion type Map
 -- (Experiment 020).
-CREATE TABLE IF NOT EXISTS lighthouse.serving_logs
+CREATE TABLE IF NOT EXISTS toudai.serving_logs
 (
     tenant_id String,
     dataset LowCardinality(String),
