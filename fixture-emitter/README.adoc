@@ -7,7 +7,7 @@ sample through the standard OpenTelemetry Rust SDK and `opentelemetry-otlp`
 computed from its own model. It is a standalone crate: it is not a member of the
 root Cargo workspace.
 
-Recorded run: link:../rfd/0001/experiments/022-fixture-emitter-run.adoc[Experiment 022].
+Recorded run: link:../rfd/0001/experiments/023-fixture-emitter-run.adoc[Experiment 023].
 
 == Commands
 

@@ -1,0 +1,206 @@
+= Experiment 023: Deterministic OTLP fixture emitter
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed
+- *Run:* 2026-10-17 (orb sandbox, 2 vCPU, Linux 6.1.158)
+- *Source mutation:* None; loopback only, no Collector, no ClickHouse, no production data
+- *Base:* `f87020d` (`origin/main`); crate `fixture-emitter/` (standalone, not a workspace member)
+- *Toolchain:* Rust 1.97.1, `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp`/`opentelemetry-proto` 0.33.1, `tonic` 0.14.6, `reqwest` 0.13.5 (pinned by `fixture-emitter/Cargo.lock`)
+- *Evidence:* link:023-fixture-emitter-run/expected.jsonl[`023-fixture-emitter-run/expected.jsonl`]
+- *Result:* 45 expected events; the wire contents decoded by a loopback receiver equal the expected contents byte for byte over gRPC and over HTTP on two runs each, and two runs with one seed produce byte-identical expected files
+
+== Question
+
+Can one small producer, using only the standard OpenTelemetry Rust SDK and OTLP
+exporters, emit the RFD 0001 fixture (two tenants with colliding dataset names;
+logs, spans with span events, application events, and a native-metric sample;
+invalid and edge records) so that
+
+. every timestamp and identifier is fixed by a seed, so a run reproduces its
+  expected contents exactly;
+. the expected per-event serving values and payload checksums come from the
+  emitter's own model rather than from any downstream store; and
+. the SDK and exporters demonstrably put that modelled content on the wire,
+  without any proprietary batch identifier or receipt?
+
+== Hypothesis
+
+Written before the run:
+
+* The SDK can express everything except what its types cannot: an explicit empty
+  `AnyValue`, and bytes or maps in span attributes.
+* The wire contents of a run equal the model, so expected rows computed from the
+  decoded requests equal the rows computed from the model.
+* A metric data point's timestamps are stamped by the SDK at collection and
+  cannot be fixed, so the metric is the one event whose expected contents cannot
+  include time.
+
+== Environment
+
+Orb sandbox, 2 vCPU, Linux 6.1.158. Rust 1.97.1 from the Nix development shell;
+`jq` 1.8.2 and GNU `sha256sum` for the independent checksum recomputation. No
+network service is used: the receiver is part of the crate and binds loopback
+ports.
+
+== Fixture
+
+See link:../../../fixture-emitter/README.adoc[the crate README] for the full
+inventory. Both tenants (workspace `11111111-1111-4111-8111-111111111111` and
+`22222222-2222-4222-8222-222222222222`) use dataset `checkout`. Per tenant:
+14 log records (5 valid including two application events, 3 boundary, 4
+unsupported, 1 policy, 1 rejected) and 8 spans (3 valid, 4 boundary, 1
+unsupported); tenant A also has one counter sample. The invalid and edge records
+cover bytes, arrays, maps, NaN and infinities and negative zero, integers above
+2^53 and the `Int64` extrema, empty string/bytes/array/map versus never-sent keys,
+a duplicate key, and a producer attempt to override the trusted scope. Spans
+cover a normal trace with two span events, a valid zero duration, an unset start,
+an unset end, both unset, and an end before the start.
+
+Application events are standard OTLP log records with `event_name` set (the
+event type), an optional body, and typed record attributes; the serving `kind`
+is `event`. That is the encoding exercised here; the RFD's acceptance item that
+fixes the final encoding stays open.
+
+== Method
+
+The model (`model.rs`) defines every event once. Two consumers read it:
+
+* `emit.rs` replays it through `SdkTracerProvider`, `SdkLoggerProvider`, and
+  `SdkMeterProvider` with batch/periodic exporters from `opentelemetry-otlp`
+  (`--protocol grpc|http`). A queued `IdGenerator` hands the SDK the seeded
+  identifiers; start and end times are passed explicitly (an end of epoch 0 is
+  the OTLP encoding of "unset").
+* `expected.rs` computes each event's expected `serving_logs`/`serving_spans`
+  values and canonical payload, hashes the payload with SHA-256, and writes one
+  JSON line per event.
+
+`selfcheck` starts a loopback OTLP receiver (tonic gRPC server and a minimal
+HTTP/1.1 protobuf listener), emits to it, decodes the received requests back into
+records (`observe.rs`), applies the same expected-contents computation to them,
+and compares every row field. `check-reproducible.sh` additionally recomputes
+every checksum with `jq` and `sha256sum`, compares two runs, compares a different
+seed, and compares the committed `expected.jsonl`.
+
+== Commands
+
+[source,sh]
+----
+make build-fixture-emitter
+cargo run --manifest-path fixture-emitter/Cargo.toml -- expected --seed 20260901 \
+  --out rfd/0001/experiments/023-fixture-emitter-run/expected.jsonl
+cargo run --manifest-path fixture-emitter/Cargo.toml -- selfcheck --protocol grpc
+cargo run --manifest-path fixture-emitter/Cargo.toml -- selfcheck --protocol http
+fixture-emitter/check-reproducible.sh
+----
+
+== Results
+
+Expected (computed from the model):
+
+[options="header",cols="3,1,1,1,1,1,1"]
+|===
+|Tenant / signal |valid |boundary |unsupported |policy |rejected |native-metric
+
+|A logs |5 |3 |4 |1 |1 |
+|A spans |3 |4 |1 | | |
+|A metric | | | | | |1
+|B logs |5 |3 |4 |1 |1 |
+|B spans |3 |4 |1 | | |
+|===
+
+`expected.jsonl`: 45 lines, 119798 bytes, SHA-256
+`8a21932875b8a021573e0270eb7d4dbe2c50f5de9c15a9699b7947c243b3e2e1`; 43 lines carry
+a payload and checksum (the rejected record has none; the metric has a payload
+but no serving row).
+
+Observed (`fixture-emitter/check-reproducible.sh`):
+
+----
+ok: expected file is byte-identical across runs (45 events) and changes with the seed
+ok: matches the committed expected file
+ok: 43 payload checksums recomputed with sha256sum
+selfcheck ok over Grpc: 45 expected events, 45 observed, 0 mismatches
+selfcheck ok over Grpc: 45 expected events, 45 observed, 0 mismatches
+selfcheck ok over Http: 45 expected events, 45 observed, 0 mismatches
+selfcheck ok over Http: 45 expected events, 45 observed, 0 mismatches
+ok: wire contents equal expected contents over gRPC and HTTP on two runs each
+----
+
+Selected expected values that the wire reproduced (all from `expected.jsonl`):
+
+[options="header",cols="3,4"]
+|===
+|Event |Expected serving values
+
+|`span.root` (A)
+|`duration_ns` `"1500000"`, `span_timing_status` `ok`, status 1, two span events (`cart.loaded`, `exception`) in the payload
+
+|`span.zero-duration`
+|`duration_ns` `"0"`, `ok`
+
+|`span.missing-start`, `span.missing-end`, `span.missing-both`
+|`duration_ns` null, `missing`
+
+|`span.reversed`
+|`duration_ns` null, `end_before_start`, both supplied timestamps kept
+
+|`invalid.bigint`
+|`record_int` `int.2p53plus1` `"9007199254740993"`, `int.min` `"-9223372036854775808"`; `record_double` `double.2p53` `"9.007199254740992e+15"`
+
+|`invalid.nonfinite`
+|`record_double` `"nan"`, `"inf"`, `"-inf"`, `"-0.0"`; `unsupported_keys` lists the three non-finite keys
+
+|`invalid.empty-vs-missing`
+|`record_string` `empty.string` `""`; `record_other` `bytes`/`array`/`map`; `record_int` `zero.int` `"0"`; `missing.key` absent
+
+|`invalid.duplicate-key`
+|`disposition` `reject`, no serving row, no payload
+
+|`log.spoofed-scope`
+|`dropped_keys` `toudai.dataset`, `toudai.workspace_id`; stored under tenant A
+
+|`log.collision`
+|identical serving values in both tenants apart from `tenant_id`/`resource`; different checksums
+
+|`event.checkout.completed`
+|`kind` `event`, `event_name` `checkout.completed`, empty body
+|===
+
+Unit and tamper tests (`cargo test`, 21 tests): for 17 plausible wire-level
+corruptions (integer turned into a string, an integer above 2^53 rounded through
+a double, NaN or negative zero collapsed, an empty string treated as missing,
+bytes stringified, a reversed span repaired, a missing start filled, a span event
+or trace context lost, a swapped tenant, a duplicated or dropped record, a
+surviving duplicate key), the comparison reports the specific field.
+
+== Interpretation
+
+The hypothesis held. The SDK carries the whole modelled surface except the two
+gaps predicted: the Rust SDK has no empty `AnyValue`, and its span value type has
+no bytes or map kind. Those cases are exercised on log records, and "empty
+versus missing" is covered by empty strings, bytes, arrays, and maps against
+never-sent keys; an OTLP `AnyValue` with no value remains covered only by
+Experiment 021's raw-OTLP fixture. The metric's expected contents carry no
+timestamps, as predicted.
+
+This run shows that the producer is deterministic and that its expected contents
+are internally consistent with its wire output. It does not show that any
+downstream component stores these values: no Collector, owned exporter, or
+ClickHouse was involved, and the owned exporter still derives its `event_id`
+from content rather than the gateway-assigned identity of Decision 0001 D5, so
+only the identity-free parts of its payload can be compared by checksum.
+
+== Discrepancies and follow-ups
+
+* Experiment 021's exporter stores every log with `kind` `log`; the fixture
+  expects `event` for application events (`event_name` set). The mapping needs
+  that change, or the encoding needs a different discriminator.
+* The expected payload is the Experiment 021 encoding with `event_id` blanked and
+  span events added; 021's span payload omits events. Reconciling the two is part
+  of the trace-rendering item.
+* The expected reserved prefix is `toudai.`, following the product rename; the
+  021 exporter used `lighthouse.`.
+* Not exercised: a Collector or the owned exporter in the path, ClickHouse
+  loading the expected serving values, and query-time unsupported-operation
+  errors. They belong to the operator-workflow items that consume this fixture.

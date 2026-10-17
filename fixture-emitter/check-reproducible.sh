@@ -15,7 +15,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-committed="${FIXTURE_EXPECTED:-${here}/../rfd/0001/experiments/022-fixture-emitter-run/expected.jsonl}"
+committed="${FIXTURE_EXPECTED:-${here}/../rfd/0001/experiments/023-fixture-emitter-run/expected.jsonl}"
 seed="${SEED:-20260901}"
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
