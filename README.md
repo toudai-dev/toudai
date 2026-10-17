@@ -1,6 +1,6 @@
-# Lighthouse
+# Toudai
 
-Lighthouse is a Rust-based, ClickHouse-backed telemetry service under active
+Toudai is a Rust-based, ClickHouse-backed telemetry service under active
 design and benchmarking.
 
 ```sh
