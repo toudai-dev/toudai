@@ -1,0 +1,14 @@
+[package]
+name = "fixture-emitter"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone crate: the root Cargo.toml has no [workspace], and the empty table
+# below keeps Cargo from treating this directory as a member of it.
+[workspace]
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
