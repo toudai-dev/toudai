@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
-use lighthouse::query::{Aggregate, Query, Scope, ServingTables, Signal, SqlStatement, TimeRange};
 use serde_json::Value;
+use toudai::query::{Aggregate, Query, Scope, ServingTables, Signal, SqlStatement, TimeRange};
 
 pub const WS_A: &str = "11111111-1111-4111-8111-111111111111";
 pub const WS_B: &str = "22222222-2222-4222-8222-222222222222";

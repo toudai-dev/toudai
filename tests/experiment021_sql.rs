@@ -14,11 +14,11 @@
 mod common;
 
 use common::*;
-use lighthouse::query::{
+use serde_json::Value;
+use toudai::query::{
     Aggregate, AttrRef, CmpOp, Predicate, Query, QueryError, ValueType, plan,
     value::Literal::{self as L},
 };
-use serde_json::Value;
 
 const I64_MAX: i64 = i64::MAX;
 
@@ -852,7 +852,7 @@ fn rejected_requests_fail_during_planning() {
 
 #[test]
 fn string_parameters_survive_the_wire_encoding() {
-    use lighthouse::query::Param;
+    use toudai::query::Param;
     let Some(ch) = clickhouse() else { return };
     for text in [
         "plain",
