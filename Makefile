@@ -44,4 +44,4 @@ down:
 
 .PHONY: chcl
 chcl:
-	clickhouse-client --port 9000 --user admin --password admin -d lighthouse_dev
+	clickhouse-client --port 9000 --user admin --password admin -d toudai_dev

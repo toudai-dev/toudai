@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 checker="${repo_root}/scripts/check-rfd-status.sh"
-test_root="$(mktemp -d "${TMPDIR:-/tmp}/lighthouse-rfd-check.XXXXXX")"
+test_root="$(mktemp -d "${TMPDIR:-/tmp}/toudai-rfd-check.XXXXXX")"
 trap 'rm -rf "${test_root}"' EXIT
 
 write_valid() {

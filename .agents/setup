@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Orb setup for lighthouse.
+# Orb setup for toudai.
 #
 # Installs the pinned upstream stable Nix release from its versioned artifact
 # (single-user, so no system daemon has to stay alive across orb pause/resume),
@@ -30,6 +30,9 @@ nix_conf="${HOME}/.config/nix/nix.conf"
 bash_profile="${HOME}/.bash_profile"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 flake_lock="${repo_root}/flake.lock"
+# These markers keep the pre-rename product name on purpose: existing ~/.bash_profile
+# blocks are found by them, so renaming would orphan the old block and leave a
+# duplicate that still activates the shell.
 hook_begin="# lighthouse Nix development shell"
 hook_end="# end lighthouse Nix development shell"
 
@@ -156,17 +159,17 @@ render_hook_block() {
   # stop login shells started inside the development shell from re-activating.
   cat <<EOF
 ${hook_begin}
-if [[ -z "\${IN_NIX_SHELL:-}" && -z "\${LIGHTHOUSE_NIX_DEV_ENV:-}" && ( "\${PWD}" == "${repo_root}" || "\${PWD}" == "${repo_root}"/* ) ]]; then
+if [[ -z "\${IN_NIX_SHELL:-}" && -z "\${TOUDAI_NIX_DEV_ENV:-}" && ( "\${PWD}" == "${repo_root}" || "\${PWD}" == "${repo_root}"/* ) ]]; then
   if [[ -e "${nix_profile}/etc/profile.d/nix.sh" ]]; then
     . "${nix_profile}/etc/profile.d/nix.sh"
   fi
-  if __lighthouse_dev_env="\$("${nix_bin}" print-dev-env --no-update-lock-file "${repo_root}" 2>/dev/null)"; then
-    eval "\${__lighthouse_dev_env}"
-    export LIGHTHOUSE_NIX_DEV_ENV=1
+  if __toudai_dev_env="\$("${nix_bin}" print-dev-env --no-update-lock-file "${repo_root}" 2>/dev/null)"; then
+    eval "\${__toudai_dev_env}"
+    export TOUDAI_NIX_DEV_ENV=1
   else
-    printf 'lighthouse: could not load the Nix development shell\n' >&2
+    printf 'toudai: could not load the Nix development shell\n' >&2
   fi
-  unset __lighthouse_dev_env
+  unset __toudai_dev_env
 fi
 ${hook_end}
 EOF
@@ -234,7 +237,7 @@ verify_login_shell() {
   local report
   # shellcheck disable=SC2016  # the inner script must expand in the login shell
   if ! report="$(cd "${repo_root}" && env -i HOME="${HOME}" USER="${USER}" TERM=dumb /bin/bash -lc '
-    printf "marker:LIGHTHOUSE_NIX_DEV_ENV=%s IN_NIX_SHELL=%s\n" "${LIGHTHOUSE_NIX_DEV_ENV:-unset}" "${IN_NIX_SHELL:-unset}"
+    printf "marker:TOUDAI_NIX_DEV_ENV=%s IN_NIX_SHELL=%s\n" "${TOUDAI_NIX_DEV_ENV:-unset}" "${IN_NIX_SHELL:-unset}"
     printf "nix-bin:%s\n" "$(command -v nix 2>/dev/null || echo missing)"
     printf "path-head:%s\n" "${PATH%%:*}"
     for tool in cargo rustc cargo-clippy clippy-driver rustfmt rust-analyzer clickhouse goose buf protoc git-cliff asciidoctor docker-compose docker-buildx fio jq tofu packer sar iostat mpstat; do
@@ -257,7 +260,7 @@ verify_login_shell() {
     "$(printf '%s\n' "${report}" | grep -c '^nix-tool:')"
 
   local failed=0
-  if [[ "${report}" != *"marker:LIGHTHOUSE_NIX_DEV_ENV=1 "* ]] || [[ "${report}" == *"IN_NIX_SHELL=unset"* ]]; then
+  if [[ "${report}" != *"marker:TOUDAI_NIX_DEV_ENV=1 "* ]] || [[ "${report}" == *"IN_NIX_SHELL=unset"* ]]; then
     printf '[setup] ERROR: login shell did not activate the development shell\n' >&2
     failed=1
   fi

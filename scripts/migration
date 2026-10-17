@@ -5,7 +5,7 @@
 
 export GOOSE_DRIVER="clickhouse"
 export GOOSE_TABLE="migrations"
-export GOOSE_DBSTRING="${GOOSE_DBSTRING:-clickhouse://admin:admin@127.0.0.1:9000/lighthouse_dev}"
+export GOOSE_DBSTRING="${GOOSE_DBSTRING:-clickhouse://admin:admin@127.0.0.1:9000/toudai_dev}"
 export GOOSE_MIGRATION_DIR="${GOOSE_MIGRATION_DIR:-migrations}"
 
 COMMAND="$1"
