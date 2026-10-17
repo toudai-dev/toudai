@@ -13,8 +13,8 @@ use serde_json::Value;
 
 use crate::query::SqlStatement;
 
-/// Settings that choose between failing and silently truncating a result or
-/// its inputs when a limit is hit.
+/// Overflow modes that choose between failing and silently truncating a result
+/// or its inputs when a limit is hit.
 const OVERFLOW_MODES: [&str; 10] = [
     "result_overflow_mode",
     "read_overflow_mode",
@@ -28,6 +28,28 @@ const OVERFLOW_MODES: [&str; 10] = [
     // not override them.
     "read_overflow_mode_leaf",
     "timeout_overflow_mode_leaf",
+];
+
+/// Settings that a user profile (or the server defaults) could use to change
+/// what a statement returns or how the reply is encoded without failing it:
+/// an outer row cap or offset, a result filter, a rewritten select, sort, or
+/// order, background execution that replies with an empty body, and an output
+/// format that overrides the statement's `FORMAT`. Pinned on every request so
+/// the generated SQL alone decides the answer.
+const NEUTRAL_SETTINGS: [(&str, &str); 11] = [
+    ("limit", "0"),
+    ("offset", "0"),
+    ("page", "0"),
+    // An empty `filter` is not "unset": 26.8 compiles it to `WHERE tuple()` and
+    // fails every statement. `1` keeps every row.
+    ("filter", "1"),
+    ("select", ""),
+    ("sort", ""),
+    ("order", ""),
+    ("additional_result_filter", ""),
+    ("additional_table_filters", "{}"),
+    ("run_query_in_background", "0"),
+    ("output_format", "JSONEachRow"),
 ];
 
 #[derive(Debug, Clone)]
@@ -106,13 +128,17 @@ impl ClickHouse {
         // Buffer the whole result before replying so a failure mid-query is an
         // HTTP error status, not a truncated body behind a 200.
         args.push(("wait_end_of_query".into(), "1".into()));
-        // Every result is complete or an error. A `break` or `any` overflow
-        // policy (from the service user's profile, say) would return a valid
-        // truncated answer behind a 200, which this service would report as an
-        // exact one. If the profile forbids changing these settings ClickHouse
-        // rejects the request, which also fails closed.
+        // Every result is exactly what the generated SQL says or an error. A
+        // `break` or `any` overflow policy, a profile-level cap, filter, or
+        // output format (from the service user's profile, say) would return a
+        // valid but different answer behind a 200, which this service would
+        // report as an exact one. If a profile forbids changing these settings
+        // ClickHouse rejects the request, which also fails closed.
         for setting in OVERFLOW_MODES {
             args.push((setting.into(), "throw".into()));
+        }
+        for (setting, value) in NEUTRAL_SETTINGS {
+            args.push((setting.into(), value.into()));
         }
         args.push((
             "max_execution_time".into(),

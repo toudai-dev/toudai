@@ -97,6 +97,23 @@ async fn parameters_travel_beside_the_sql_never_inside_it() {
         .collect();
     assert_eq!(overflow.len(), OVERFLOW_MODES.len());
     assert!(overflow.iter().all(|(_, value)| value == "throw"));
+    // Profile settings cannot reshape the answer or its encoding.
+    for (name, value) in [
+        ("limit", "0"),
+        ("offset", "0"),
+        ("filter", "1"),
+        ("additional_result_filter", ""),
+        ("run_query_in_background", "0"),
+        ("output_format", "JSONEachRow"),
+    ] {
+        assert!(args.iter().any(|(n, v)| n == name && v == value), "{name}");
+    }
+    // Operator limits stay in force: only their overflow policy is pinned.
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.starts_with("max_") && *n != "max_execution_time")
+    );
     // Leaf limits are separate settings that the ordinary modes do not override.
     for leaf in ["read_overflow_mode_leaf", "timeout_overflow_mode_leaf"] {
         assert!(overflow.iter().any(|(name, _)| name == leaf), "{leaf}");
