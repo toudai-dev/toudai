@@ -9,7 +9,7 @@ authorization precede both acceptance and query execution; workload-isolation
 tests follow the working raw and accelerated paths.
 
 * [ ] Define account/workspace/dataset records and workspace-scoped ingestion keys, including multiple keys per workspace, rotation, revocation/cache-expiry behavior, and separate write/read/admin permissions.
-* [ ] Implement key-derived trusted workspace scope before Collector batching; verify dataset routing stays within it, unknown datasets fail, and producer scope attributes cannot override ownership or leak credentials.
+* [x] Implement key-derived trusted workspace scope before Collector batching; verify dataset routing stays within it, unknown datasets fail, and producer scope attributes cannot override ownership or leak credentials.
 +
 Experiment 018 implemented a *static* credential-to-workspace binding with the
 tested stock components (`routing` connector on the `Authorization` header plus a
@@ -44,6 +44,27 @@ of the write is a query-layer question that remains open, and catch-up provenanc
 tested. Key-derived resolution, rotation/revocation, and dataset routing
 rejection remain out of scope. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
++
+Experiment 024 closes this item for a *static* key file. The product tree
+(https://github.com/toudai-dev/collector[toudai-dev/collector]) now has a
+`toudaiauth` extension that validates an ingestion key header against a key file
+mapping each key to one workspace, its allowed datasets, and write permission,
+and a `toudaigateway` processor that injects `toudai.workspace_id`,
+`toudai.dataset`, and the scope marker from that key ahead of the exporter's
+queue batching; the static `resource` processors and the `routing` connector are
+gone from the product gateway config. Run through that config unmodified against
+ClickHouse 26.8.2.7-lts: dataset selection that left the key's list failed with
+403 and wrote nothing, a resource carrying a forged `toudai.workspace_id`,
+`toudai.dataset`, or scope marker failed with 400, missing/unknown/read-only keys
+failed with 401, record-level `toudai.*` attributes were dropped, and the key
+text appeared in no stored row, query-log entry, response body, or Collector log.
+This supersedes Experiment 021's limitation that a producer could forge the
+scope marker: the gateway rejects every producer `toudai.*` resource attribute.
+Still open: dynamic resolution, rotation/revocation and cache expiry (the
+workspace-scoped key item above), the `workspace_id` provenance of replayed or
+overflow objects, and a network control keeping the exporter's ClickHouse endpoint
+reachable only through the gateway. See
+link:experiments/024-key-derived-trusted-scope.adoc[Experiment 024].
 
 * [ ] Test workspace authorization across ingestion, queries, metadata, and exact payload retrieval using sibling workspaces in one account and a workspace in another account with colliding dataset/event/trace names and IDs; reject cross-workspace access on every path the slice provides, including shared downstream batches; repeat for overflow and catch-up when those paths exist in qualification.
 
