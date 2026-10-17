@@ -7,7 +7,7 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Source mutation:* None; a disposable loopback ClickHouse server and the synthetic Experiment 021 fixture only
 - *Base:* `f87020d` (`origin/main`); the service under test is the head of the Track A pull request
 - *Harness:* `tests/e2e/` (server lifecycle in `server.rs`, scenarios in `main.rs`), `tests/fixtures/021/`, `tests/fixtures/e2e/`, `scripts/export-fixture021-canonical.py`
-- *Result:* 1 end-to-end test passed (the scenario sections below), after the four mutations listed under Results each made it fail.
+- *Result:* 1 end-to-end test passed (the scenario sections below), after the five mutations listed under Results each made it fail.
 
 == Question
 
@@ -44,7 +44,7 @@ test of the object-backed payload volume.
 
 - Serving rows: `tests/fixtures/021/serving_logs.jsonl` (54 rows: 27 per workspace) and `serving_spans.jsonl` (18 rows: 9 per workspace), exported from the Experiment 021 verifier's expectations by `scripts/export-fixture021-rows.py`.
 - Canonical rows: `tests/fixtures/021/canonical_events.jsonl` (13 rows), written by `scripts/export-fixture021-canonical.py`. The payloads are hand-authored type-preserving JSON, not Collector output; the exporter owns the real encoding, and retrieval treats a payload as opaque JSON text. `payload_sha256` is computed by the generator, independently of the service. The rows separate the lookup key's parts: `typed-1` exists for both workspaces and in a second dataset (three distinct payloads), `only-b` belongs to workspace B alone, `dup-1` is stored twice with one payload (an at-least-once replay), `conflict-1` twice with two payloads, `conflict-3` with two copies of the payload whose hash sorts first plus one different payload, and one ID contains `/`, a space, `é`, `+`, and `%`.
-- Rows the test adds: a workspace-B-only dataset `b-only`, and one workspace-A event in dataset `special` whose attribute key is `k +%&=<TAB> é\'"` and whose value contains a backslash, quote, and newline, plus an int attribute keyed `a' OR 1=1 --`.
+- Rows the test adds: a workspace-B-only dataset `b-only`, and 200,000 workspace-A rows in dataset `bulk` (so a leaf read limit has more than one block to cut), one workspace-A event in dataset `special` whose attribute key is `k +%&=<TAB> é\'"` and whose value contains a backslash, quote, and newline, plus an int attribute keyed `a' OR 1=1 --`.
 - Credentials: `tests/fixtures/e2e/read-keys.txt` binds `test-key-workspace-a` and `test-key-workspace-b` to the two workspace IDs. The key file is a placeholder for the tenant-policy registry.
 
 Limits: the fixture is small and single-node; the canonical payload encoding is not the exporter's; there is one dataset per signal under query.
@@ -140,8 +140,8 @@ TOUDAI_E2E_RUNTIME=docker cargo test --test e2e   # clickhouse/clickhouse-server
 |Events `conflict-1` and `conflict-3`
 |500 `event_conflict`, no payload chosen (replays of one payload do not hide the other)
 
-|Query as a user whose profile has `max_result_rows=1`, `result_overflow_mode=break`
-|502 `clickhouse_error` and no rows: the service forces every `*_overflow_mode` setting to `throw`; the same user queried directly gets one truncated row
+|Query as a user whose profile has `max_result_rows=1`, `result_overflow_mode=break`; query over 200,000 `bulk` rows as a user with `max_rows_to_read_leaf=1`, `read_overflow_mode_leaf=break`
+|502 `clickhouse_error` and no rows for each: the service forces the ordinary and `_leaf` overflow-mode settings (result, read, group by, sort, timeout, set, join, distinct) to `throw`. The same users queried directly get truncated results (1 of 5 rows; fewer than 200,000), and the unrestricted service counts all 200,000
 |===
 
 == Results
@@ -172,8 +172,12 @@ test run each time; each failed at the intended assertion and was reverted:
   (`Param::wire_value`): the special-key scenario returned 502 `clickhouse_error`.
 . The event lookup without `LIMIT 1 BY payload_sha256`: `conflict-3` returned 200
   with the replayed payload instead of `event_conflict`.
-. The client without the `*_overflow_mode=throw` settings: the limited user's
-  group-by returned 200 with one row and `approximation=exact`.
+. The client without the `*_overflow_mode=throw` settings: the result-limited
+  user's group-by returned 200 with one row and `approximation=exact`.
+. The client without only the two `_leaf` settings: the leaf-limited user's
+  filtered count returned 200 with 8,192 of 200,000 events and
+  `approximation=exact` (found by the oracle review; the ordinary
+  `read_overflow_mode` does not override the leaf limit).
 
 Two defects surfaced without mutation. During development, a body
 `{"kind":"count","tenant_id":"x"}` was accepted because serde ignores unknown

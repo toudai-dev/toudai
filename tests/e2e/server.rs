@@ -21,13 +21,20 @@ use std::time::{Duration, Instant};
 
 pub const USER: &str = "toudai";
 pub const PASSWORD: &str = "toudai-test";
-/// A second user whose profile silently truncates results (`break` overflow
-/// mode), to prove the service refuses to report a truncated answer as exact.
-pub const LIMITED_USER: &str = "limited";
-const LIMITED_PROFILE: &str = "<limited><max_result_rows>1</max_result_rows>\
-    <result_overflow_mode>break</result_overflow_mode><max_block_size>1</max_block_size></limited>";
-const LIMITED_USER_XML: &str = "<limited><password>toudai-test</password>\
-    <networks><ip>::/0</ip></networks><profile>limited</profile><quota>default</quota></limited>";
+/// Users whose profiles silently truncate (`break` overflow modes), to prove
+/// the service refuses to report a truncated answer as exact: one limits the
+/// result, the other the rows a leaf reads (a separate setting family).
+pub const LIMITED_USERS: [&str; 2] = ["limited_result", "limited_leaf"];
+const LIMITED_PROFILES: &str = "\
+    <limited_result><max_result_rows>1</max_result_rows>\
+    <result_overflow_mode>break</result_overflow_mode><max_block_size>1</max_block_size></limited_result>\
+    <limited_leaf><max_rows_to_read_leaf>1</max_rows_to_read_leaf>\
+    <read_overflow_mode_leaf>break</read_overflow_mode_leaf><max_block_size>1</max_block_size></limited_leaf>";
+const LIMITED_USERS_XML: &str = "\
+    <limited_result><password>toudai-test</password>\
+    <networks><ip>::/0</ip></networks><profile>limited_result</profile><quota>default</quota></limited_result>\
+    <limited_leaf><password>toudai-test</password>\
+    <networks><ip>::/0</ip></networks><profile>limited_leaf</profile><quota>default</quota></limited_leaf>";
 const DEFAULT_IMAGE: &str = "clickhouse/clickhouse-server:26.8.2.7";
 const STORAGE_TEMPLATE: &str = include_str!("../fixtures/e2e/storage-test.xml");
 
@@ -118,7 +125,7 @@ fn start_docker() -> ClickHouseServer {
     std::fs::write(
         &limited,
         format!(
-            "<clickhouse><profiles>{LIMITED_PROFILE}</profiles><users>{LIMITED_USER_XML}</users></clickhouse>"
+            "<clickhouse><profiles>{LIMITED_PROFILES}</profiles><users>{LIMITED_USERS_XML}</users></clickhouse>"
         ),
     )
     .expect("write limited user config");
@@ -193,7 +200,7 @@ fn start_native() -> ClickHouseServer {
     <tmp_path>{data}/tmp/</tmp_path>
     <user_files_path>{data}/user_files/</user_files_path>
     <default_profile>default</default_profile>
-    <profiles><default/>{LIMITED_PROFILE}</profiles>
+    <profiles><default/>{LIMITED_PROFILES}</profiles>
     <quotas><default/></quotas>
     <users>
         <{USER}>
@@ -202,7 +209,7 @@ fn start_native() -> ClickHouseServer {
             <profile>default</profile>
             <quota>default</quota>
         </{USER}>
-        {LIMITED_USER_XML}
+        {LIMITED_USERS_XML}
     </users>
 </clickhouse>
 "#,

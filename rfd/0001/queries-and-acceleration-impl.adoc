@@ -167,9 +167,12 @@ span durations, and the non-finite probe, plus the rejected and failed outcomes
 (`integer_overflow`, `incompatible_type`, `unsupported_operation`,
 `ordering_not_defined`, `invalid_time_range`, `aggregate_requires_spans`,
 `invalid_request`) and request text that needs URL, text-format, and SQL
-escaping. Time-series, heatmap, percentile, and raw-result shapes, diagnostics
-for rejected and failed requests, and a ClickHouse failure other than an
-unreachable backend remain open.
+escaping, and two real ClickHouse failures: a profile that would truncate the
+result and one that would truncate a leaf read both end in a 502 with no rows
+instead of a partial answer reported as exact. Time-series, heatmap,
+percentile, and raw-result shapes, diagnostics for rejected and failed requests,
+and backend failures beyond an unreachable server and enforced overflow
+limits (timeouts, memory limits, mid-query errors) remain open.
 
 == PoC-required: minimal acceleration
 

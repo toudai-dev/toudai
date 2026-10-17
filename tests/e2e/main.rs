@@ -36,6 +36,9 @@ const CANONICAL_ROWS: &str = include_str!("../fixtures/021/canonical_events.json
 
 /// The attribute key and values that stress every escaping layer between the
 /// request and ClickHouse: URL, text format, quoting, and non-ASCII.
+/// Rows in the `bulk` dataset the truncation scenario reads.
+const BULK_ROWS: u64 = 200_000;
+
 const SPECIAL_KEY: &str = "k +%&=\t é\\'\"";
 const SPECIAL_VALUE: &str = "v \\ ' \n";
 const INJECTION_KEY: &str = "a' OR 1=1 --";
@@ -219,40 +222,74 @@ async fn query_service_end_to_end() {
     query_failures(&api).await;
     scope_and_escaping(&api).await;
     event_retrieval(&api).await;
-    truncating_profile_is_an_error(&clickhouse).await;
+    truncating_profiles_are_errors(&clickhouse, &api).await;
 }
 
-/// A ClickHouse profile that truncates results with `break` must not turn an
-/// exact query into a successful partial answer.
-async fn truncating_profile_is_an_error(clickhouse: &ClickHouseServer) {
-    // Precondition: left alone, this user's profile really does truncate.
-    let direct = server::execute_as(
-        clickhouse,
-        server::LIMITED_USER,
-        "SELECT number FROM numbers(5) SETTINGS max_block_size = 1 FORMAT JSONEachRow",
-        None,
-    )
-    .await;
-    assert_eq!(
-        direct.lines().count(),
-        1,
-        "the limited profile must truncate: {direct}"
+/// A ClickHouse profile that truncates with `break` must not turn an exact
+/// query into a successful partial answer, whichever limit family it uses.
+async fn truncating_profiles_are_errors(clickhouse: &ClickHouseServer, api: &Api) {
+    // Enough rows in one dataset for a leaf read limit to bite (the fixture is a
+    // single block).
+    let bulk = format!(
+        "INSERT INTO toudai.serving_logs (tenant_id, dataset, event_id, routing_epoch, timestamp) \
+         SELECT '{WS_A}', 'bulk', toString(number), 1, toDateTime64('{TS_TEXT}', 9) \
+         FROM numbers({BULK_ROWS})"
     );
+    server::execute(clickhouse, &bulk, None).await;
+    // An attribute filter forces row reads; a bare count is answered from the
+    // primary index without reading any.
+    let bulk_count = query_body(
+        "bulk",
+        "logs",
+        json!([{"kind": "absent", "attr": metric()}]),
+        json!([]),
+        json!({"kind": "count"}),
+    );
+    let (status, response) = api.query(Some(KEY_A), &bulk_count).await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["rows"][0]["events"], count_json(BULK_ROWS));
 
-    let service = spawn_service(clickhouse, server::LIMITED_USER);
-    let api = Api {
-        client: reqwest::Client::new(),
-        base: service.base.clone(),
-    };
-    // Nine groups are needed; the profile would keep one.
-    let body = logs(ints_filter(), json!([metric()]), json!({"kind": "count"}));
-    let (status, response) = api.query(Some(KEY_A), &body).await;
-    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response}");
-    assert_eq!(response["error"]["code"], "clickhouse_error");
-    assert!(
-        response.get("rows").is_none(),
-        "no partial rows: {response}"
-    );
+    // (user, a request its profile would truncate, a query to show it does)
+    let nine_groups = logs(ints_filter(), json!([metric()]), json!({"kind": "count"}));
+    let cases = [
+        (
+            server::LIMITED_USERS[0],
+            nine_groups,
+            "SELECT number FROM numbers(5) FORMAT JSONEachRow",
+            5,
+        ),
+        (
+            server::LIMITED_USERS[1],
+            bulk_count,
+            "SELECT count() AS n FROM toudai.serving_logs WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow",
+            BULK_ROWS,
+        ),
+    ];
+    for (user, body, probe, complete) in cases {
+        // Precondition: left alone, this user's profile really does truncate.
+        let direct = server::execute_as(clickhouse, user, probe, None).await;
+        let got = match direct.lines().next().map(serde_json::from_str::<Value>) {
+            Some(Ok(row)) if row.get("n").is_some() => match &row["n"] {
+                Value::String(n) => n.parse::<u64>().unwrap(),
+                other => other.as_u64().unwrap(),
+            },
+            _ => direct.lines().count() as u64,
+        };
+        assert!(got < complete, "{user} must truncate: {got} of {complete}");
+
+        let service = spawn_service(clickhouse, user);
+        let limited = Api {
+            client: reqwest::Client::new(),
+            base: service.base.clone(),
+        };
+        let (status, response) = limited.query(Some(KEY_A), &body).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{user}: {response}");
+        assert_eq!(response["error"]["code"], "clickhouse_error", "{user}");
+        assert!(
+            response.get("rows").is_none(),
+            "{user}: no partial rows: {response}"
+        );
+    }
 }
 
 async fn health_and_authentication(api: &Api) {
