@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2154  # extra_env and the LIGHTHOUSE_* names are substituted by OpenTofu
+# shellcheck disable=SC2154  # extra_env and the TOUDAI_* names are substituted by OpenTofu
 # AWS user-data wrapper for the Stage B benchmark nodes.
 #
 # The node logic stays in a plain shell script and is written to disk before
@@ -10,14 +10,14 @@
 set -Eeuo pipefail
 
 install -d -m 0755 /var/lib/lighthouse-stage-b
-cat > /var/lib/lighthouse-stage-b/startup-node.sh <<'LIGHTHOUSE_STAGE_B_NODE_SCRIPT'
+cat > /var/lib/lighthouse-stage-b/startup-node.sh <<'TOUDAI_STAGE_B_NODE_SCRIPT'
 ${startup_script}
-LIGHTHOUSE_STAGE_B_NODE_SCRIPT
+TOUDAI_STAGE_B_NODE_SCRIPT
 chmod 0755 /var/lib/lighthouse-stage-b/startup-node.sh
 
-export LIGHTHOUSE_CLICKHOUSE_CONFIG_B64='${clickhouse_config}'
-export LIGHTHOUSE_CLICKHOUSE_USERS_B64='${clickhouse_users}'
-export LIGHTHOUSE_MAX_LIFETIME_MINUTES='${max_lifetime_minutes}'
+export TOUDAI_CLICKHOUSE_CONFIG_B64='${clickhouse_config}'
+export TOUDAI_CLICKHOUSE_USERS_B64='${clickhouse_users}'
+export TOUDAI_MAX_LIFETIME_MINUTES='${max_lifetime_minutes}'
 ${extra_env}
 
 exec /var/lib/lighthouse-stage-b/startup-node.sh

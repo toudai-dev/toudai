@@ -2,14 +2,14 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 run_id="${1:-}"
-repetitions="${LIGHTHOUSE_BENCH_REPETITIONS:-1}"
-min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
-reuse_accelerations="${LIGHTHOUSE_BENCH_REUSE_ACCELERATIONS:-0}"
-target_table="${LIGHTHOUSE_BENCH_TARGET_TABLE:-events_map}"
-expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-547356173}"
+repetitions="${TOUDAI_BENCH_REPETITIONS:-1}"
+min_free_bytes="${TOUDAI_BENCH_MIN_FREE_BYTES:-107374182400}"
+reuse_accelerations="${TOUDAI_BENCH_REUSE_ACCELERATIONS:-0}"
+target_table="${TOUDAI_BENCH_TARGET_TABLE:-events_map}"
+expected_rows="${TOUDAI_BENCH_EXPECTED_ROWS:-547356173}"
 
 if [[ -z "${run_id}" ]]; then
   echo "usage: $0 RUN_ID" >&2
@@ -26,15 +26,15 @@ for value in "${repetitions}" "${min_free_bytes}" "${reuse_accelerations}"; do
   fi
 done
 if [[ "${repetitions}" == "0" ]]; then
-  echo "LIGHTHOUSE_BENCH_REPETITIONS must be positive" >&2
+  echo "TOUDAI_BENCH_REPETITIONS must be positive" >&2
   exit 2
 fi
 if [[ ! "${target_table}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-  echo "LIGHTHOUSE_BENCH_TARGET_TABLE must be an unqualified table name" >&2
+  echo "TOUDAI_BENCH_TARGET_TABLE must be an unqualified table name" >&2
   exit 2
 fi
 if [[ ! "${expected_rows}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "LIGHTHOUSE_BENCH_EXPECTED_ROWS must be a positive integer" >&2
+  echo "TOUDAI_BENCH_EXPECTED_ROWS must be a positive integer" >&2
   exit 2
 fi
 
@@ -44,11 +44,11 @@ if [[ -e "${run_dir}" ]]; then
   exit 1
 fi
 if [[ "${reuse_accelerations}" != "0" && "${reuse_accelerations}" != "1" ]]; then
-  echo "LIGHTHOUSE_BENCH_REUSE_ACCELERATIONS must be 0 or 1" >&2
+  echo "TOUDAI_BENCH_REUSE_ACCELERATIONS must be 0 or 1" >&2
   exit 2
 fi
-if [[ "${reuse_accelerations}" != "1" && "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
-  echo "acceleration rebuild requires LIGHTHOUSE_BENCH_RESET=1" >&2
+if [[ "${reuse_accelerations}" != "1" && "${TOUDAI_BENCH_RESET:-0}" != "1" ]]; then
+  echo "acceleration rebuild requires TOUDAI_BENCH_RESET=1" >&2
   exit 1
 fi
 
@@ -65,14 +65,14 @@ client=("${repo_root}/benchmark/scripts/benchmark-clickhouse" client)
 
 source_table="benchmark.${target_table}"
 rows="$("${client[@]}" --query "SELECT count() FROM ${source_table} FORMAT TSVRaw")"
-if [[ "${rows}" != "${expected_rows}" && "${LIGHTHOUSE_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
+if [[ "${rows}" != "${expected_rows}" && "${TOUDAI_BENCH_ALLOW_OTHER_ROWS:-0}" != "1" ]]; then
   echo "expected ${source_table} to contain ${expected_rows} rows; found ${rows}" >&2
   exit 1
 fi
 start="$("${client[@]}" --query "SELECT min(timestamp) FROM ${source_table} FORMAT TSVRaw")"
 end="$("${client[@]}" --query "SELECT max(timestamp) FROM ${source_table} FORMAT TSVRaw")"
-dynamic_low_value="${LIGHTHOUSE_BENCH_DYNAMIC_LOW_VALUE:-event_lifecycle}"
-dynamic_high_value="${LIGHTHOUSE_BENCH_DYNAMIC_HIGH_VALUE:-306e56de-c041-4b4d-9a62-d59e742bf58b}"
+dynamic_low_value="${TOUDAI_BENCH_DYNAMIC_LOW_VALUE:-event_lifecycle}"
+dynamic_high_value="${TOUDAI_BENCH_DYNAMIC_HIGH_VALUE:-306e56de-c041-4b4d-9a62-d59e742bf58b}"
 
 safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
 query_prefix="lighthouse_accel_${safe_run_id}"

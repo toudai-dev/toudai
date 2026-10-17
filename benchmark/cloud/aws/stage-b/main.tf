@@ -246,8 +246,8 @@ resource "aws_instance" "loadgen" {
     clickhouse_users     = local.users_config_b64
     max_lifetime_minutes = local.max_lifetime_minutes
     extra_env = join("\n", [
-      "export LIGHTHOUSE_COORDINATOR_IP='${aws_instance.coordinator.private_ip}'",
-      "export LIGHTHOUSE_LEAF_IPS='${join(",", aws_instance.leaf[*].private_ip)}'",
+      "export TOUDAI_COORDINATOR_IP='${aws_instance.coordinator.private_ip}'",
+      "export TOUDAI_LEAF_IPS='${join(",", aws_instance.leaf[*].private_ip)}'",
     ])
     startup_script = trimspace(file("${path.module}/startup-loadgen.sh"))
   })

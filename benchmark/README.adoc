@@ -2,7 +2,7 @@
 
 The performance harness runs the Nix-pinned native ClickHouse server separately
 from development services. It uses ports `19000` and `18123` and stores all
-runtime state below `LIGHTHOUSE_BENCH_ROOT`.
+runtime state below `TOUDAI_BENCH_ROOT`.
 
 == One-time storage setup
 
@@ -45,7 +45,7 @@ benchmark/scripts/benchmark-clickhouse client --query 'SELECT version()'
 benchmark/scripts/benchmark-clickhouse stop
 ----
 
-Set `LIGHTHOUSE_CLICKHOUSE_OVERFLOW_PATH` when a capacity experiment needs a
+Set `TOUDAI_CLICKHOUSE_OVERFLOW_PATH` when a capacity experiment needs a
 second local ClickHouse disk. Tables remain on the primary disk unless their
 storage policy is explicitly changed to `benchmark_overflow` and parts are
 moved to `os_overflow`.
@@ -74,7 +74,7 @@ to non-empty calibration tables. To deliberately replace a prior run:
 
 [source,shell]
 ----
-LIGHTHOUSE_BENCH_RESET=1 benchmark/scripts/benchmark-load-gcp \
+TOUDAI_BENCH_RESET=1 benchmark/scripts/benchmark-load-gcp \
   /mnt/storage/lighthouse/2026-08-01/compact-0000.parquet 10000
 ----
 
@@ -103,9 +103,9 @@ Useful overrides:
 
 [source,shell]
 ----
-LIGHTHOUSE_BENCH_REPETITIONS=1 \
-LIGHTHOUSE_BENCH_CACHE_MODES=warm \
-LIGHTHOUSE_BENCH_CANDIDATES=map,typed,json \
+TOUDAI_BENCH_REPETITIONS=1 \
+TOUDAI_BENCH_CACHE_MODES=warm \
+TOUDAI_BENCH_CANDIDATES=map,typed,json \
 nix develop --command benchmark/scripts/benchmark-run-queries experiment-005-order-b
 ----
 
@@ -113,7 +113,7 @@ Run artifacts are immutable directories below
 `/mnt/fast-storage/lighthouse/runs` by default. Each contains the manifest,
 rendered SQL, raw results, wall timings, ClickHouse query log, settings, active
 parts, hardware details, and ZFS properties. Set
-`LIGHTHOUSE_BENCH_RUNS_ROOT` to place artifacts elsewhere.
+`TOUDAI_BENCH_RUNS_ROOT` to place artifacts elsewhere.
 
 == Resumable day-scale load
 
@@ -123,15 +123,15 @@ Stage one natural Parquet day and load Map and native JSON in hourly windows:
 ----
 nix develop --command benchmark/scripts/benchmark-clickhouse start
 
-LIGHTHOUSE_BENCH_RESET=1 \
-LIGHTHOUSE_BENCH_EXPECTED_ROWS=547356173 \
+TOUDAI_BENCH_RESET=1 \
+TOUDAI_BENCH_EXPECTED_ROWS=547356173 \
 nix develop --command benchmark/scripts/benchmark-load-day \
   /mnt/storage/lighthouse/2026-08-05 \
   experiment-006-1tb
 ----
 
 The initial invocation deliberately truncates all calibration tables. If it is
-interrupted, rerun the same command without `LIGHTHOUSE_BENCH_RESET`; completed
+interrupted, rerun the same command without `TOUDAI_BENCH_RESET`; completed
 files and hourly candidate windows are skipped after row-count and content
 checksum validation. The loader deliberately stops if an interrupted insert
 left a partial unit rather than silently duplicating or mutating benchmark data.
@@ -144,9 +144,9 @@ input without changing production defaults:
 
 [source,shell]
 ----
-LIGHTHOUSE_BENCH_MAX_FILES=1 \
-LIGHTHOUSE_BENCH_ROW_LIMIT_PER_FILE=10000 \
-LIGHTHOUSE_BENCH_RESET=1 \
+TOUDAI_BENCH_MAX_FILES=1 \
+TOUDAI_BENCH_ROW_LIMIT_PER_FILE=10000 \
+TOUDAI_BENCH_RESET=1 \
 nix develop --command benchmark/scripts/benchmark-load-day \
   /mnt/storage/lighthouse/2026-08-05 \
   day-loader-smoke
@@ -156,13 +156,13 @@ Override the root or ports for an isolated run:
 
 [source,shell]
 ----
-LIGHTHOUSE_BENCH_ROOT=/mnt/fast-storage/lighthouse/run-001 \
-LIGHTHOUSE_CLICKHOUSE_TCP_PORT=19001 \
-LIGHTHOUSE_CLICKHOUSE_HTTP_PORT=18124 \
+TOUDAI_BENCH_ROOT=/mnt/fast-storage/lighthouse/run-001 \
+TOUDAI_CLICKHOUSE_TCP_PORT=19001 \
+TOUDAI_CLICKHOUSE_HTTP_PORT=18124 \
 benchmark/scripts/benchmark-clickhouse smoke
 ----
 
-Do not point `LIGHTHOUSE_BENCH_ROOT` at the Parquet source directory. Benchmark
+Do not point `TOUDAI_BENCH_ROOT` at the Parquet source directory. Benchmark
 results must record the ClickHouse version, configuration revision, dataset
 properties, and effective environment overrides.
 
@@ -174,9 +174,9 @@ hour/timestamp alternatives over one natural day retained in
 
 [source,shell]
 ----
-LIGHTHOUSE_BENCH_RESET=1 \
-LIGHTHOUSE_BENCH_SOURCE_DAY=2026-08-05 \
-LIGHTHOUSE_BENCH_EXPECTED_ROWS=548954103 \
+TOUDAI_BENCH_RESET=1 \
+TOUDAI_BENCH_SOURCE_DAY=2026-08-05 \
+TOUDAI_BENCH_EXPECTED_ROWS=548954103 \
 benchmark/scripts/benchmark-run-sort-keys experiment-013-sort-keys-v1
 ----
 
@@ -223,7 +223,7 @@ leaf, then run the accelerated distributed query matrix:
 
 [source,shell]
 ----
-LIGHTHOUSE_BENCH_RESET=1 \
+TOUDAI_BENCH_RESET=1 \
 benchmark/scripts/benchmark-run-distributed-accelerations \
   2 experiment-014-distributed-acceleration-v1-2s
 ----
@@ -266,10 +266,10 @@ local experiments and inserts into the coordinator's `Distributed` table:
 
 [source,shell]
 ----
-LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=10.142.0.10 \
-LIGHTHOUSE_CLUSTER_LEAF_HOSTS=10.142.0.11,10.142.0.12 \
-LIGHTHOUSE_BENCH_RUNS_ROOT="$HOME/lighthouse-stage-b/runs" \
-LIGHTHOUSE_BENCH_REVISION="$(jj log -r @- --no-graph -T commit_id)" \
+TOUDAI_CLUSTER_COORDINATOR_HOST=10.142.0.10 \
+TOUDAI_CLUSTER_LEAF_HOSTS=10.142.0.11,10.142.0.12 \
+TOUDAI_BENCH_RUNS_ROOT="$HOME/lighthouse-stage-b/runs" \
+TOUDAI_BENCH_REVISION="$(jj log -r @- --no-graph -T commit_id)" \
 benchmark/scripts/benchmark-load-distributed \
   2 experiment-015-stage-b-load-v1-2s
 ----
@@ -280,7 +280,7 @@ resumes at a validated day boundary. A partial source batch is refused instead
 of being deleted, because a source directory can overlap adjacent event-time
 partitions and only source provenance could bound the removal. Completed-day
 markers and final run evidence are copied to the private experiment bucket.
-`LIGHTHOUSE_GCP_CORPUS_INVENTORY` overrides the committed inventory path. Each
+`TOUDAI_GCP_CORPUS_INVENTORY` overrides the committed inventory path. Each
 batch gate pays one checksum scan of the accumulated corpus; the pre-batch probe
 is a metadata-only row count, so a run does not pay two full-table scans per
 day. `benchmark/scripts/benchmark-load-distributed-test` exercises the
@@ -293,14 +293,14 @@ when given the compatible adapter. A Stage B run sets the exact load/run IDs,
 
 [source,shell]
 ----
-export LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND="$PWD/benchmark/scripts/benchmark-clickhouse-remote-cluster"
-export LIGHTHOUSE_BENCH_ROOT="$HOME/lighthouse-stage-b"
-export LIGHTHOUSE_BENCH_RUNS_ROOT="$LIGHTHOUSE_BENCH_ROOT/runs"
-export LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=experiment-015-stage-b-load-v1-2s
-export LIGHTHOUSE_BENCH_EXPECTED_ROWS=5689254359
-export LIGHTHOUSE_DISTRIBUTED_DAY_END='2026-08-11 04:00:00'
-export LIGHTHOUSE_DISTRIBUTED_RANGES=5m,1h,6h,24h,10d
-export LIGHTHOUSE_DISTRIBUTED_HOST_SAMPLER=0
+export TOUDAI_DISTRIBUTED_CLUSTER_COMMAND="$PWD/benchmark/scripts/benchmark-clickhouse-remote-cluster"
+export TOUDAI_BENCH_ROOT="$HOME/lighthouse-stage-b"
+export TOUDAI_BENCH_RUNS_ROOT="$TOUDAI_BENCH_ROOT/runs"
+export TOUDAI_DISTRIBUTED_LOAD_RUN=experiment-015-stage-b-load-v1-2s
+export TOUDAI_BENCH_EXPECTED_ROWS=5689254359
+export TOUDAI_DISTRIBUTED_DAY_END='2026-08-11 04:00:00'
+export TOUDAI_DISTRIBUTED_RANGES=5m,1h,6h,24h,10d
+export TOUDAI_DISTRIBUTED_HOST_SAMPLER=0
 benchmark/scripts/benchmark-run-distributed-queries \
   2 experiment-015-stage-b-query-v1-2s
 ----

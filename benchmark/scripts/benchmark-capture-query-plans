@@ -15,8 +15,8 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BENCHMARK_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_ROOT", "/mnt/fast-storage/lighthouse"))
-RUNS_ROOT = Path(os.environ.get("LIGHTHOUSE_BENCH_RUNS_ROOT", BENCHMARK_ROOT / "runs"))
+BENCHMARK_ROOT = Path(os.environ.get("TOUDAI_BENCH_ROOT", "/mnt/fast-storage/lighthouse"))
+RUNS_ROOT = Path(os.environ.get("TOUDAI_BENCH_RUNS_ROOT", BENCHMARK_ROOT / "runs"))
 CLIENT = REPO_ROOT / "benchmark/scripts/benchmark-clickhouse"
 SOURCE_RUNS = {
     "011": ("experiment-011-ten-day-raw-controlled-v1", "evidence/parts-after.jsonl"),

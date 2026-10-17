@@ -2,16 +2,16 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
 source_dir="${1:-}"
 run_id="${2:-}"
-candidate_order="${LIGHTHOUSE_BENCH_CANDIDATES:-map,json}"
-expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-}"
-max_files="${LIGHTHOUSE_BENCH_MAX_FILES:-0}"
-row_limit_per_file="${LIGHTHOUSE_BENCH_ROW_LIMIT_PER_FILE:-0}"
-gcp_bytes_per_event="${LIGHTHOUSE_GCP_BYTES_PER_EVENT:-1900}"
-min_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
+candidate_order="${TOUDAI_BENCH_CANDIDATES:-map,json}"
+expected_rows="${TOUDAI_BENCH_EXPECTED_ROWS:-}"
+max_files="${TOUDAI_BENCH_MAX_FILES:-0}"
+row_limit_per_file="${TOUDAI_BENCH_ROW_LIMIT_PER_FILE:-0}"
+gcp_bytes_per_event="${TOUDAI_GCP_BYTES_PER_EVENT:-1900}"
+min_free_bytes="${TOUDAI_BENCH_MIN_FREE_BYTES:-107374182400}"
 
 if [[ -z "${source_dir}" || -z "${run_id}" ]]; then
   echo "usage: $0 PARQUET_DAY_DIRECTORY RUN_ID" >&2
@@ -32,7 +32,7 @@ for value in "${max_files}" "${row_limit_per_file}" "${gcp_bytes_per_event}" "${
   fi
 done
 if [[ -n "${expected_rows}" && ! "${expected_rows}" =~ ^[0-9]+$ ]]; then
-  echo "LIGHTHOUSE_BENCH_EXPECTED_ROWS must be a non-negative integer" >&2
+  echo "TOUDAI_BENCH_EXPECTED_ROWS must be a non-negative integer" >&2
   exit 2
 fi
 
@@ -91,8 +91,8 @@ build_inventory() {
 }
 
 if [[ ! -e "${run_dir}" ]]; then
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
-    echo "a new day-scale run requires LIGHTHOUSE_BENCH_RESET=1" >&2
+  if [[ "${TOUDAI_BENCH_RESET:-0}" != "1" ]]; then
+    echo "a new day-scale run requires TOUDAI_BENCH_RESET=1" >&2
     exit 1
   fi
   mkdir -p "${staged_dir}" "${run_dir}/state/windows" "${run_dir}/evidence"
@@ -104,7 +104,7 @@ if [[ ! -e "${run_dir}" ]]; then
     "${client[@]}" --query "TRUNCATE TABLE benchmark.${table}"
   done
 else
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" == "1" ]]; then
+  if [[ "${TOUDAI_BENCH_RESET:-0}" == "1" ]]; then
     echo "refusing to reset existing resumable run: ${run_dir}" >&2
     exit 1
   fi

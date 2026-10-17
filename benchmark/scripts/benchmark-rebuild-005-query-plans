@@ -2,14 +2,14 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
-source_path="${LIGHTHOUSE_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+source_path="${TOUDAI_BENCH_SOURCE:-/mnt/storage/lighthouse/2026-08-01/compact-0000.parquet}"
 historical_revision="e1a2fc8b3ba3d4a84017f3b3d7838528fa595c4b"
 expected_version="26.3.17.110"
 expected_rows="3629077"
 run_id="${1:-experiment-017-rebuild-005-v1}"
-resume="${LIGHTHOUSE_BENCH_RESUME:-0}"
+resume="${TOUDAI_BENCH_RESUME:-0}"
 
 if [[ ! "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "run ID may contain only letters, numbers, dots, underscores, and hyphens" >&2
@@ -87,8 +87,8 @@ if [[ "${resume}" != "1" ]]; then
     WHERE database = 'benchmark'
       AND name IN ('gcp_source', 'events_json', 'events_map', 'events_typed')
     FORMAT TSVRaw")"
-  if [[ "${existing_rows}" != "0" && "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
-    fail "historical candidate tables contain ${existing_rows} rows; set LIGHTHOUSE_BENCH_RESET=1 to replace them"
+  if [[ "${existing_rows}" != "0" && "${TOUDAI_BENCH_RESET:-0}" != "1" ]]; then
+    fail "historical candidate tables contain ${existing_rows} rows; set TOUDAI_BENCH_RESET=1 to replace them"
   fi
 
   "${client[@]}" --multiquery --query "

@@ -7,8 +7,8 @@
 # size and timestamp already match, so a re-run continues rather than restarts.
 set -Eeuo pipefail
 
-if [[ "${LIGHTHOUSE_AWS_UPLOAD_APPROVED:-}" != "1" ]]; then
-  echo "set LIGHTHOUSE_AWS_UPLOAD_APPROVED=1 after approving the cloud upload" >&2
+if [[ "${TOUDAI_AWS_UPLOAD_APPROVED:-}" != "1" ]]; then
+  echo "set TOUDAI_AWS_UPLOAD_APPROVED=1 after approving the cloud upload" >&2
   exit 1
 fi
 
@@ -17,10 +17,10 @@ inventory="${2:?usage: benchmark-upload-aws-corpus CORPUS_ROOT INVENTORY_TSV BUC
 bucket_uri="${3:?usage: benchmark-upload-aws-corpus CORPUS_ROOT INVENTORY_TSV BUCKET_URI RUN_ID}"
 run_id="${4:?usage: benchmark-upload-aws-corpus CORPUS_ROOT INVENTORY_TSV BUCKET_URI RUN_ID}"
 
-aws_profile="${LIGHTHOUSE_AWS_PROFILE:-default}"
-region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
-parallelism="${LIGHTHOUSE_AWS_UPLOAD_PARALLELISM:-4}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS:-${HOME}/lighthouse-benchmark/runs}"
+aws_profile="${TOUDAI_AWS_PROFILE:-default}"
+region="${TOUDAI_AWS_REGION:-us-west-2}"
+parallelism="${TOUDAI_AWS_UPLOAD_PARALLELISM:-4}"
+runs_root="${TOUDAI_BENCH_RUNS:-${HOME}/lighthouse-benchmark/runs}"
 run_dir="${runs_root}/${run_id}"
 manifest="${run_dir}/corpus-sha256.tsv"
 

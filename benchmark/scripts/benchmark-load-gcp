@@ -29,8 +29,8 @@ existing_rows="$("${client[@]}" --query \
   "SELECT sum(total_rows) FROM system.tables WHERE database = 'benchmark' AND name IN ('gcp_source', 'events_json', 'events_map', 'events_typed')")"
 
 if [[ "${existing_rows}" != "0" ]]; then
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
-    echo "benchmark tables contain ${existing_rows} rows; set LIGHTHOUSE_BENCH_RESET=1 to replace them" >&2
+  if [[ "${TOUDAI_BENCH_RESET:-0}" != "1" ]]; then
+    echo "benchmark tables contain ${existing_rows} rows; set TOUDAI_BENCH_RESET=1 to replace them" >&2
     exit 1
   fi
 

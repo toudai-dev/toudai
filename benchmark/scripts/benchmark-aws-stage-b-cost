@@ -7,18 +7,18 @@
 # from that inventory.
 set -Eeuo pipefail
 
-region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
+region="${TOUDAI_AWS_REGION:-us-west-2}"
 profile_args=()
-[[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]] && profile_args=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
-instance_filter="${LIGHTHOUSE_AWS_INSTANCE_FILTER:-Name=tag:experiment,Values=015 Name=tag:stage,Values=b Name=instance-state-name,Values=running,pending}"
-bucket="${LIGHTHOUSE_CORPUS_BUCKET:-s3://lighthouse-exp015-benchmark-828361646739}"
+[[ -n "${TOUDAI_AWS_PROFILE:-}" ]] && profile_args=(--profile "${TOUDAI_AWS_PROFILE}")
+instance_filter="${TOUDAI_AWS_INSTANCE_FILTER:-Name=tag:experiment,Values=015 Name=tag:stage,Values=b Name=instance-state-name,Values=running,pending}"
+bucket="${TOUDAI_CORPUS_BUCKET:-s3://lighthouse-exp015-benchmark-828361646739}"
 
 run_id="${1:-}"
 out_dir="${2:-}"
 if [[ -z "${run_id}" || -z "${out_dir}" ]]; then
   echo "usage: $0 RUN_ID OUTPUT_DIR" >&2
-  echo "env: LIGHTHOUSE_AWS_PROFILE, LIGHTHOUSE_AWS_REGION, LIGHTHOUSE_CORPUS_BUCKET," >&2
-  echo "     LIGHTHOUSE_AWS_INSTANCE_FILTER, LIGHTHOUSE_AWS_PRICES_FILE" >&2
+  echo "env: TOUDAI_AWS_PROFILE, TOUDAI_AWS_REGION, TOUDAI_CORPUS_BUCKET," >&2
+  echo "     TOUDAI_AWS_INSTANCE_FILTER, TOUDAI_AWS_PRICES_FILE" >&2
   exit 2
 fi
 [[ "${run_id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid run ID: ${run_id}" >&2; exit 2; }
@@ -34,9 +34,9 @@ storage_txt="${out_dir}/bucket-storage.txt"
 # catalog is authoritative but only published as multi-hundred-megabyte bulk
 # files, so the extracted rates are pinned here and snapshotted with every run:
 # a later price change cannot silently alter a recorded result. Override the
-# whole table with LIGHTHOUSE_AWS_PRICES_FILE when re-verifying.
-if [[ -n "${LIGHTHOUSE_AWS_PRICES_FILE:-}" ]]; then
-  cp "${LIGHTHOUSE_AWS_PRICES_FILE}" "${prices_tsv}"
+# whole table with TOUDAI_AWS_PRICES_FILE when re-verifying.
+if [[ -n "${TOUDAI_AWS_PRICES_FILE:-}" ]]; then
+  cp "${TOUDAI_AWS_PRICES_FILE}" "${prices_tsv}"
 else
   cat > "${prices_tsv}" <<'PRICES'
 # sku	instance_type_or_class	unit_price_usd	unit

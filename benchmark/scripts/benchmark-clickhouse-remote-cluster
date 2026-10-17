@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-coordinator="${LIGHTHOUSE_CLUSTER_COORDINATOR_HOST:-}"
-leaf_spec="${LIGHTHOUSE_CLUSTER_LEAF_HOSTS:-}"
+coordinator="${TOUDAI_CLUSTER_COORDINATOR_HOST:-}"
+leaf_spec="${TOUDAI_CLUSTER_LEAF_HOSTS:-}"
 [[ -n "${coordinator}" && -n "${leaf_spec}" ]] || {
-  echo "LIGHTHOUSE_CLUSTER_COORDINATOR_HOST and LIGHTHOUSE_CLUSTER_LEAF_HOSTS are required" >&2
+  echo "TOUDAI_CLUSTER_COORDINATOR_HOST and TOUDAI_CLUSTER_LEAF_HOSTS are required" >&2
   exit 2
 }
 IFS=',' read -r -a leaves <<< "${leaf_spec}"

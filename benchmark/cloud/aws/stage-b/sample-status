@@ -13,15 +13,15 @@ run_prefix="${2:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 stage_run="${3:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 load_run="${4:?usage: $0 SHARDS RUN_PREFIX STAGE_RUN LOAD_RUN}"
 
-region="${LIGHTHOUSE_AWS_REGION:-us-west-2}"
+region="${TOUDAI_AWS_REGION:-us-west-2}"
 profile_args=()
-[[ -n "${LIGHTHOUSE_AWS_PROFILE:-}" ]] && profile_args=(--profile "${LIGHTHOUSE_AWS_PROFILE}")
+[[ -n "${TOUDAI_AWS_PROFILE:-}" ]] && profile_args=(--profile "${TOUDAI_AWS_PROFILE}")
 aws_cmd=(aws "${profile_args[@]}" --region "${region}")
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-/home/lighthouse/lighthouse-stage-b/runs}"
-interval="${LIGHTHOUSE_SAMPLE_SECONDS:-300}"
-log_file="${LIGHTHOUSE_SAMPLE_LOG:-${HOME}/lighthouse-benchmark/status-${stage_run}.tsv}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-/home/lighthouse/lighthouse-stage-b/runs}"
+interval="${TOUDAI_SAMPLE_SECONDS:-300}"
+log_file="${TOUDAI_SAMPLE_LOG:-${HOME}/lighthouse-benchmark/status-${stage_run}.tsv}"
 
-[[ "${interval}" =~ ^[1-9][0-9]*$ ]] || { echo "LIGHTHOUSE_SAMPLE_SECONDS must be a positive integer" >&2; exit 2; }
+[[ "${interval}" =~ ^[1-9][0-9]*$ ]] || { echo "TOUDAI_SAMPLE_SECONDS must be a positive integer" >&2; exit 2; }
 mkdir -p "$(dirname -- "${log_file}")"
 
 # The load generator holds the run state, so its instance ID is both what

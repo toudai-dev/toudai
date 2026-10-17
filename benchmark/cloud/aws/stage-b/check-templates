@@ -50,8 +50,8 @@ sys.exit(0 if hosts == ["10.60.1.10", "10.60.1.11", "10.60.1.12", "10.60.1.13"] 
 
 for role in leaf coordinator loadgen; do
   case "${role}" in
-    coordinator) extra='"export LIGHTHOUSE_COORDINATOR_IP=\u002710.60.1.20\u0027"' ;;
-    loadgen) extra='join("\n", ["export LIGHTHOUSE_COORDINATOR_IP=\u002710.60.1.20\u0027", "export LIGHTHOUSE_LEAF_IPS=\u002710.60.1.10,10.60.1.11\u0027"])' ;;
+    coordinator) extra='"export TOUDAI_COORDINATOR_IP=\u002710.60.1.20\u0027"' ;;
+    loadgen) extra='join("\n", ["export TOUDAI_COORDINATOR_IP=\u002710.60.1.20\u0027", "export TOUDAI_LEAF_IPS=\u002710.60.1.10,10.60.1.11\u0027"])' ;;
     *) extra='""' ;;
   esac
   render "base64encode(templatefile(\"\${path.module}/startup-wrapper.sh.tftpl\", { clickhouse_config = local.leaf_config_b64, clickhouse_users = local.users_config_b64, max_lifetime_minutes = 1800, extra_env = ${extra}, startup_script = trimspace(file(\"\${path.module}/startup-${role}.sh\")) }))" \
@@ -59,21 +59,21 @@ for role in leaf coordinator loadgen; do
   check "${role} wrapper parses as bash" bash -n "/tmp/lighthouse-wrapper-${role}.sh"
   # The node body is handed to a child shell through a quoted here-document, so
   # extracting it and comparing proves the delivered script is the committed one.
-  awk "/<<'LIGHTHOUSE_STAGE_B_NODE_SCRIPT'/{flag=1; next} /^LIGHTHOUSE_STAGE_B_NODE_SCRIPT\$/{flag=0} flag" \
+  awk "/<<'TOUDAI_STAGE_B_NODE_SCRIPT'/{flag=1; next} /^TOUDAI_STAGE_B_NODE_SCRIPT\$/{flag=0} flag" \
     "/tmp/lighthouse-wrapper-${role}.sh" > "/tmp/lighthouse-node-${role}.sh"
   check "${role} node body is byte-identical to the source" diff -q "startup-${role}.sh" "/tmp/lighthouse-node-${role}.sh"
-  check "${role} wrapper schedules the lifetime halt" grep -q 'shutdown -h "+\${LIGHTHOUSE_MAX_LIFETIME_MINUTES}"' "/tmp/lighthouse-wrapper-${role}.sh"
+  check "${role} wrapper schedules the lifetime halt" grep -q 'shutdown -h "+\${TOUDAI_MAX_LIFETIME_MINUTES}"' "/tmp/lighthouse-wrapper-${role}.sh"
 done
 
 check "leaf wrapper injects the committed config" python3 -c '
 import base64, re, sys
 wrapper = open("/tmp/lighthouse-wrapper-leaf.sh").read()
-match = re.search(r"^export LIGHTHOUSE_CLICKHOUSE_CONFIG_B64=.([A-Za-z0-9+/=]+).$", wrapper, re.M)
+match = re.search(r"^export TOUDAI_CLICKHOUSE_CONFIG_B64=.([A-Za-z0-9+/=]+).$", wrapper, re.M)
 if not match:
     sys.exit(1)
 sys.exit(0 if base64.b64decode(match.group(1)).decode() == open("clickhouse-leaf.xml").read() else 1)
 '
-check "loadgen wrapper injects the endpoint map" grep -q "export LIGHTHOUSE_LEAF_IPS='10.60.1.10,10.60.1.11'" /tmp/lighthouse-wrapper-loadgen.sh
+check "loadgen wrapper injects the endpoint map" grep -q "export TOUDAI_LEAF_IPS='10.60.1.10,10.60.1.11'" /tmp/lighthouse-wrapper-loadgen.sh
 
 if (( failures > 0 )); then
   echo "${failures} template check(s) failed" >&2

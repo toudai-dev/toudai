@@ -13,26 +13,26 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${repo_root}/benchmark/scripts/lib/object-store.sh"
 shards="${1:-}"
 run_prefix="${2:-}"
-coordinator="${LIGHTHOUSE_CLUSTER_COORDINATOR_HOST:-}"
-leaves="${LIGHTHOUSE_CLUSTER_LEAF_HOSTS:-}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
-load_run="${LIGHTHOUSE_DISTRIBUTED_LOAD_RUN:-}"
-# LIGHTHOUSE_CORPUS_BUCKET is the cloud-neutral name; the GCP-specific name is
+coordinator="${TOUDAI_CLUSTER_COORDINATOR_HOST:-}"
+leaves="${TOUDAI_CLUSTER_LEAF_HOSTS:-}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${HOME}/lighthouse-stage-b/runs}"
+load_run="${TOUDAI_DISTRIBUTED_LOAD_RUN:-}"
+# TOUDAI_CORPUS_BUCKET is the cloud-neutral name; the GCP-specific name is
 # still read so recorded runbooks keep working unchanged.
-bucket="${LIGHTHOUSE_CORPUS_BUCKET:-${LIGHTHOUSE_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}}"
-expected_rows="${LIGHTHOUSE_BENCH_EXPECTED_ROWS:-5689254359}"
-day_end="${LIGHTHOUSE_DISTRIBUTED_DAY_END:-2026-08-11 04:00:00}"
-ranges="${LIGHTHOUSE_DISTRIBUTED_RANGES:-5m,1h,6h,24h,10d}"
-query_max_memory="${LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY:-17179869184}"
-revision="${LIGHTHOUSE_BENCH_REVISION:-unknown}"
-poll_seconds="${LIGHTHOUSE_STAGE_POLL_SECONDS:-60}"
-max_wait_seconds="${LIGHTHOUSE_STAGE_MAX_WAIT_SECONDS:-129600}"
+bucket="${TOUDAI_CORPUS_BUCKET:-${TOUDAI_GCP_CORPUS_BUCKET:-gs://lighthouse-508219-lighthouse-exp015}}"
+expected_rows="${TOUDAI_BENCH_EXPECTED_ROWS:-5689254359}"
+day_end="${TOUDAI_DISTRIBUTED_DAY_END:-2026-08-11 04:00:00}"
+ranges="${TOUDAI_DISTRIBUTED_RANGES:-5m,1h,6h,24h,10d}"
+query_max_memory="${TOUDAI_DISTRIBUTED_QUERY_MAX_MEMORY:-17179869184}"
+revision="${TOUDAI_BENCH_REVISION:-unknown}"
+poll_seconds="${TOUDAI_STAGE_POLL_SECONDS:-60}"
+max_wait_seconds="${TOUDAI_STAGE_MAX_WAIT_SECONDS:-129600}"
 
 # Fail before any cluster work if the configured object store is unreachable.
 object_store_check "${bucket}"
 
 usage() {
-  echo "usage: LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=RUN $0 SHARDS RUN_PREFIX" >&2
+  echo "usage: TOUDAI_DISTRIBUTED_LOAD_RUN=RUN $0 SHARDS RUN_PREFIX" >&2
   exit 2
 }
 [[ -n "${shards}" && -n "${run_prefix}" && -n "${coordinator}" && -n "${leaves}" && -n "${load_run}" ]] || usage
@@ -125,17 +125,17 @@ done
 
 common_env=(
   env
-  "LIGHTHOUSE_CLUSTER_COORDINATOR_HOST=${coordinator}"
-  "LIGHTHOUSE_CLUSTER_LEAF_HOSTS=${leaves}"
-  "LIGHTHOUSE_DISTRIBUTED_CLUSTER_COMMAND=${cluster_command}"
-  "LIGHTHOUSE_BENCH_RUNS_ROOT=${runs_root}"
-  "LIGHTHOUSE_DISTRIBUTED_LOAD_RUN=${load_run}"
-  "LIGHTHOUSE_BENCH_EXPECTED_ROWS=${expected_rows}"
-  "LIGHTHOUSE_DISTRIBUTED_DAY_END=${day_end}"
-  "LIGHTHOUSE_DISTRIBUTED_RANGES=${ranges}"
-  "LIGHTHOUSE_DISTRIBUTED_QUERY_MAX_MEMORY=${query_max_memory}"
-  "LIGHTHOUSE_DISTRIBUTED_HOST_SAMPLER=0"
-  "LIGHTHOUSE_BENCH_REVISION=${revision}"
+  "TOUDAI_CLUSTER_COORDINATOR_HOST=${coordinator}"
+  "TOUDAI_CLUSTER_LEAF_HOSTS=${leaves}"
+  "TOUDAI_DISTRIBUTED_CLUSTER_COMMAND=${cluster_command}"
+  "TOUDAI_BENCH_RUNS_ROOT=${runs_root}"
+  "TOUDAI_DISTRIBUTED_LOAD_RUN=${load_run}"
+  "TOUDAI_BENCH_EXPECTED_ROWS=${expected_rows}"
+  "TOUDAI_DISTRIBUTED_DAY_END=${day_end}"
+  "TOUDAI_DISTRIBUTED_RANGES=${ranges}"
+  "TOUDAI_DISTRIBUTED_QUERY_MAX_MEMORY=${query_max_memory}"
+  "TOUDAI_DISTRIBUTED_HOST_SAMPLER=0"
+  "TOUDAI_BENCH_REVISION=${revision}"
 )
 
 echo raw-queries > "${stage_dir}/status"
@@ -144,8 +144,8 @@ echo raw-queries > "${stage_dir}/status"
 
 echo accelerations > "${stage_dir}/status"
 "${common_env[@]}" \
-  "LIGHTHOUSE_BENCH_RESET=1" \
-  "LIGHTHOUSE_DISTRIBUTED_RAW_RUN=${raw_run}" \
+  "TOUDAI_BENCH_RESET=1" \
+  "TOUDAI_DISTRIBUTED_RAW_RUN=${raw_run}" \
   "${repo_root}/benchmark/scripts/benchmark-run-distributed-accelerations" \
   "${shards}" "${acceleration_run}"
 

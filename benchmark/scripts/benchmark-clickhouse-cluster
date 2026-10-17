@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-cluster_root="${LIGHTHOUSE_CLUSTER_ROOT:-${benchmark_root}/cluster}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
-tcp_base="${LIGHTHOUSE_CLUSTER_TCP_BASE:-19200}"
-http_base="${LIGHTHOUSE_CLUSTER_HTTP_BASE:-18300}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+cluster_root="${TOUDAI_CLUSTER_ROOT:-${benchmark_root}/cluster}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+tcp_base="${TOUDAI_CLUSTER_TCP_BASE:-19200}"
+http_base="${TOUDAI_CLUSTER_HTTP_BASE:-18300}"
 active_file="${cluster_root}/active-topology"
 
 usage() {

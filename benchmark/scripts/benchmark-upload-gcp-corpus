@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${LIGHTHOUSE_GCP_UPLOAD_APPROVED:-}" != "1" ]]; then
-  echo "set LIGHTHOUSE_GCP_UPLOAD_APPROVED=1 after approving the cloud upload" >&2
+if [[ "${TOUDAI_GCP_UPLOAD_APPROVED:-}" != "1" ]]; then
+  echo "set TOUDAI_GCP_UPLOAD_APPROVED=1 after approving the cloud upload" >&2
   exit 1
 fi
 
 source_dir="${1:?usage: benchmark-upload-gcp-corpus SOURCE_DIR BUCKET_URI [RUN_ID]}"
 bucket_uri="${2:?usage: benchmark-upload-gcp-corpus SOURCE_DIR BUCKET_URI [RUN_ID]}"
 run_id="${3:-experiment-015-corpus-$(date -u +%Y%m%dT%H%M%SZ)}"
-expected_files="${LIGHTHOUSE_EXPECTED_FILES:-238}"
-expected_bytes="${LIGHTHOUSE_EXPECTED_BYTES:-115853143188}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS:-/mnt/fast-storage/lighthouse/runs}"
+expected_files="${TOUDAI_EXPECTED_FILES:-238}"
+expected_bytes="${TOUDAI_EXPECTED_BYTES:-115853143188}"
+runs_root="${TOUDAI_BENCH_RUNS:-/mnt/fast-storage/lighthouse/runs}"
 run_dir="${runs_root}/${run_id}"
 manifest="${run_dir}/corpus-sha256.tsv"
 object_prefix="${bucket_uri%/}/corpus/$(basename "${source_dir}")"

@@ -53,7 +53,7 @@ natural day before provisioning benchmark VMs:
 
 [source,shell]
 ----
-LIGHTHOUSE_GCP_UPLOAD_APPROVED=1 \
+TOUDAI_GCP_UPLOAD_APPROVED=1 \
 flox activate -- benchmark/scripts/benchmark-upload-gcp-corpus \
   /mnt/storage/lighthouse/2026-08-05 \
   gs://lighthouse-508219-lighthouse-exp015 \

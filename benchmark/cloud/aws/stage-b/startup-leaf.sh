@@ -14,7 +14,7 @@ state=/var/lib/lighthouse-stage-b
 # bounds the cost of a node that never becomes healthy; the topology sets
 # `instance_initiated_shutdown_behavior = "terminate"`, so the halt also deletes
 # the instance and its root volume.
-shutdown -h "+${LIGHTHOUSE_MAX_LIFETIME_MINUTES}" "lighthouse experiment 015 stage B lifetime reached"
+shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "lighthouse experiment 015 stage B lifetime reached"
 
 install -d -m 0755 "${state}" /etc/clickhouse-server
 
@@ -50,8 +50,8 @@ install -d -o lighthouse -g lighthouse /mnt/disks/clickhouse
 mountpoint -q /mnt/disks/clickhouse || mount -o noatime,nodiratime "${disk}" /mnt/disks/clickhouse
 chown lighthouse:lighthouse /mnt/disks/clickhouse
 
-printf '%s' "${LIGHTHOUSE_CLICKHOUSE_CONFIG_B64}" | base64 -d > /etc/clickhouse-server/config.xml
-printf '%s' "${LIGHTHOUSE_CLICKHOUSE_USERS_B64}" | base64 -d > /etc/clickhouse-server/clickhouse-users.xml
+printf '%s' "${TOUDAI_CLICKHOUSE_CONFIG_B64}" | base64 -d > /etc/clickhouse-server/config.xml
+printf '%s' "${TOUDAI_CLICKHOUSE_USERS_B64}" | base64 -d > /etc/clickhouse-server/clickhouse-users.xml
 chown -R lighthouse:lighthouse /etc/clickhouse-server
 
 # Resolve the ClickHouse binary once, before the server starts. Two concurrent

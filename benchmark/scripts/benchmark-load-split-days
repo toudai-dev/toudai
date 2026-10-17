@@ -2,15 +2,15 @@
 set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-benchmark_root="${LIGHTHOUSE_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
-runs_root="${LIGHTHOUSE_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
-archive_root="${LIGHTHOUSE_CLICKHOUSE_ARCHIVE_PATH:-/mnt/storage/lighthouse-bench/archive}"
+benchmark_root="${TOUDAI_BENCH_ROOT:-/mnt/fast-storage/lighthouse}"
+runs_root="${TOUDAI_BENCH_RUNS_ROOT:-${benchmark_root}/runs}"
+archive_root="${TOUDAI_CLICKHOUSE_ARCHIVE_PATH:-/mnt/storage/lighthouse-bench/archive}"
 source_root="${1:-}"
 run_id="${2:-}"
-day_count="${LIGHTHOUSE_BENCH_DAY_COUNT:-10}"
-gcp_bytes_per_event="${LIGHTHOUSE_GCP_BYTES_PER_EVENT:-1900}"
-min_hot_free_bytes="${LIGHTHOUSE_BENCH_MIN_FREE_BYTES:-107374182400}"
-min_archive_free_bytes="${LIGHTHOUSE_BENCH_MIN_ARCHIVE_FREE_BYTES:-214748364800}"
+day_count="${TOUDAI_BENCH_DAY_COUNT:-10}"
+gcp_bytes_per_event="${TOUDAI_GCP_BYTES_PER_EVENT:-1900}"
+min_hot_free_bytes="${TOUDAI_BENCH_MIN_FREE_BYTES:-107374182400}"
+min_archive_free_bytes="${TOUDAI_BENCH_MIN_ARCHIVE_FREE_BYTES:-214748364800}"
 
 if [[ -z "${source_root}" || -z "${run_id}" ]]; then
   echo "usage: $0 PARQUET_ROOT RUN_ID" >&2
@@ -31,7 +31,7 @@ for value in "${day_count}" "${gcp_bytes_per_event}" "${min_hot_free_bytes}" "${
   fi
 done
 if [[ "${day_count}" == "0" ]]; then
-  echo "LIGHTHOUSE_BENCH_DAY_COUNT must be positive" >&2
+  echo "TOUDAI_BENCH_DAY_COUNT must be positive" >&2
   exit 2
 fi
 
@@ -104,8 +104,8 @@ trap on_exit EXIT
 safe_run_id="$(tr '.-' '__' <<< "${run_id}")"
 query_prefix="lighthouse_split_days_${safe_run_id}_"
 if [[ ! -e "${run_dir}" ]]; then
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" != "1" ]]; then
-    echo "a new split-day run requires LIGHTHOUSE_BENCH_RESET=1" >&2
+  if [[ "${TOUDAI_BENCH_RESET:-0}" != "1" ]]; then
+    echo "a new split-day run requires TOUDAI_BENCH_RESET=1" >&2
     exit 1
   fi
   mkdir -p "${run_dir}/days" "${run_dir}/evidence"
@@ -123,7 +123,7 @@ if [[ ! -e "${run_dir}" ]]; then
   "${client[@]}" --multiquery < "${repo_root}/benchmark/clickhouse/event-payloads.sql"
 else
   exec > >(tee -a "${run_dir}/loader.log") 2>&1
-  if [[ "${LIGHTHOUSE_BENCH_RESET:-0}" == "1" ]]; then
+  if [[ "${TOUDAI_BENCH_RESET:-0}" == "1" ]]; then
     echo "refusing to reset existing resumable run: ${run_dir}" >&2
     exit 1
   fi
