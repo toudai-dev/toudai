@@ -96,7 +96,7 @@ remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
 Product tree: the Decision 0001 DDL is in `clickhouse/schema` (`tenant_id`, `timestamp`,
-`routing_epoch`, and a payload table on the S3-backed `lighthouse_payload` storage
+`routing_epoch`, and a payload table on the S3-backed `toudai_payload` storage
 policy); the owned exporter that writes it lives in
 https://github.com/toudai-dev/collector[toudai-dev/collector]. Scratch runs of that
 exporter against ClickHouse 26.8.2.7 with an S3 emulator inserted typed log and span
