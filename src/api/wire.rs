@@ -493,6 +493,40 @@ mod tests {
         }
     }
 
+    /// The request is parsed from text, as on the wire: `from_value` would skip
+    /// the number parser. Without `float_roundtrip`, serde_json reads
+    /// `900719925474099.5` (exact in binary64) as `900719925474099.625`.
+    #[test]
+    fn double_literals_parse_correctly_rounded() {
+        let cases = [
+            "900719925474099.5",
+            "0.1",
+            "1e23",
+            "5e-324",
+            "-2.2250738585072014e-308",
+        ];
+        for text in cases {
+            let request = format!(
+                r#"{{"dataset":"d","signal":"logs","time":{{"start_ns":1,"end_ns":2}},
+                    "filters":[{{"kind":"compare","op":"eq",
+                      "attr":{{"namespace":"record","key":"k"}},
+                      "value":{{"type":"double","value":{text}}}}}],
+                    "aggregate":{{"kind":"count"}}}}"#
+            );
+            let parsed: QueryRequest = serde_json::from_str(&request).unwrap();
+            let query = parsed.into_query(&TenantId::new(TENANT));
+            let Predicate::Compare {
+                value: Literal::Double(got),
+                ..
+            } = &query.filters[0]
+            else {
+                panic!("not a double comparison")
+            };
+            let expected: f64 = text.parse().unwrap();
+            assert_eq!(got.to_bits(), expected.to_bits(), "{text}");
+        }
+    }
+
     #[test]
     fn malformed_requests() {
         let cases = [

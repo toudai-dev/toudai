@@ -8,7 +8,7 @@ publish = false
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 
 [dev-dependencies]
