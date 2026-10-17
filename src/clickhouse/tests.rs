@@ -88,10 +88,15 @@ async fn parameters_travel_beside_the_sql_never_inside_it() {
         })
         .collect();
     let names: Vec<&str> = args.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(
-        names,
-        ["param_p0", "wait_end_of_query", "max_execution_time"]
-    );
+    assert_eq!(&names[..2], ["param_p0", "wait_end_of_query"]);
+    assert!(names.contains(&"max_execution_time"));
+    // No limit can turn into a truncated, successful answer.
+    let overflow: Vec<_> = args
+        .iter()
+        .filter(|(name, _)| name.ends_with("_overflow_mode"))
+        .collect();
+    assert_eq!(overflow.len(), OVERFLOW_MODES.len());
+    assert!(overflow.iter().all(|(_, value)| value == "throw"));
     // The URL value decodes back to the text-format escaped parameter.
     let decoded = url_decode(&args[0].1);
     assert_eq!(decoded, "a' OR 1=1 --\\t\\\\ &x=1 %41+ é\\n");

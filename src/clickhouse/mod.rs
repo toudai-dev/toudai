@@ -13,6 +13,19 @@ use serde_json::Value;
 
 use crate::query::SqlStatement;
 
+/// Settings that choose between failing and silently truncating a result or
+/// its inputs when a limit is hit.
+const OVERFLOW_MODES: [&str; 8] = [
+    "result_overflow_mode",
+    "read_overflow_mode",
+    "group_by_overflow_mode",
+    "sort_overflow_mode",
+    "timeout_overflow_mode",
+    "set_overflow_mode",
+    "join_overflow_mode",
+    "distinct_overflow_mode",
+];
+
 #[derive(Debug, Clone)]
 pub struct ClickHouseConfig {
     /// Base URL of the HTTP interface, for example `http://127.0.0.1:8123`.
@@ -89,6 +102,14 @@ impl ClickHouse {
         // Buffer the whole result before replying so a failure mid-query is an
         // HTTP error status, not a truncated body behind a 200.
         args.push(("wait_end_of_query".into(), "1".into()));
+        // Every result is complete or an error. A `break` or `any` overflow
+        // policy (from the service user's profile, say) would return a valid
+        // truncated answer behind a 200, which this service would report as an
+        // exact one. If the profile forbids changing these settings ClickHouse
+        // rejects the request, which also fails closed.
+        for setting in OVERFLOW_MODES {
+            args.push((setting.into(), "throw".into()));
+        }
         args.push((
             "max_execution_time".into(),
             self.config.timeout.as_secs().max(1).to_string(),
