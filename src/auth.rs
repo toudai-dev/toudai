@@ -19,6 +19,10 @@ use std::fmt;
 pub struct TenantId(String);
 
 impl TenantId {
+    pub fn new(id: impl Into<String>) -> TenantId {
+        TenantId(id.into())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
