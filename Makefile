@@ -10,17 +10,29 @@ build-release:
 dev:
 	cargo run
 
+# The fixture emitter is a standalone crate (not a workspace member), so each
+# quality target covers it explicitly.
+FIXTURE_EMITTER := fixture-emitter/Cargo.toml
+
+.PHONY: build-fixture-emitter
+build-fixture-emitter:
+	cargo build --release --manifest-path $(FIXTURE_EMITTER)
+
 .PHONY: test
 test:
 	cargo test --all-targets
+	cargo test --all-targets --manifest-path $(FIXTURE_EMITTER)
+	fixture-emitter/check-reproducible.sh
 
 .PHONY: lint
 lint:
 	cargo clippy --all-targets --all-features -- -D warnings
+	cargo clippy --all-targets --all-features --manifest-path $(FIXTURE_EMITTER) -- -D warnings
 
 .PHONY: fmt
 fmt:
 	cargo fmt --check
+	cargo fmt --check --manifest-path $(FIXTURE_EMITTER)
 
 .PHONY: check-rfds
 check-rfds:
