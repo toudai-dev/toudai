@@ -23,9 +23,11 @@ checksums computed from its own model. Experiment 023 recorded the run: the
 expected file is byte-identical across runs with one seed, every checksum
 recomputes with `sha256sum`, and a loopback receiver decodes the wire contents to
 the same rows over both transports, with no proprietary batch receipt. The Rust
-SDK cannot send an explicit empty `AnyValue` or span bytes/maps, so those cases
-are covered on log records; a Collector, the owned exporter, and ClickHouse were
-not in the path. See link:experiments/023-fixture-emitter-run.adoc[Experiment 023].
+SDK cannot send an explicit empty `AnyValue` and cannot put bytes or maps on
+spans, so bytes and maps are covered on log records and an explicit empty
+`AnyValue` stays covered by Experiment 021's raw-OTLP fixture only; a Collector,
+the owned exporter, and ClickHouse were not in the path, and the payload
+checksum is the fixture's own, not comparable to a stored payload. See link:experiments/023-fixture-emitter-run.adoc[Experiment 023].
 
 * [ ] Prove logs, spans, and application events can be queried together.
 

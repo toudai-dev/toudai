@@ -8,7 +8,7 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Base:* `f87020d` (`origin/main`); crate `fixture-emitter/` (standalone, not a workspace member)
 - *Toolchain:* Rust 1.97.1, `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp`/`opentelemetry-proto` 0.33.1, `tonic` 0.14.6, `reqwest` 0.13.5 (pinned by `fixture-emitter/Cargo.lock`)
 - *Evidence:* link:023-fixture-emitter-run/expected.jsonl[`023-fixture-emitter-run/expected.jsonl`]
-- *Result:* 45 expected events; the wire contents decoded by a loopback receiver equal the expected contents byte for byte over gRPC and over HTTP on two runs each, and two runs with one seed produce byte-identical expected files
+- *Result:* 45 expected events; expected rows computed from the OTLP a loopback receiver decoded equal the model's expected rows byte for byte over gRPC and over HTTP on two runs each, a refused export fails the run, and two runs with one seed produce byte-identical expected files
 
 == Question
 
@@ -17,8 +17,8 @@ exporters, emit the RFD 0001 fixture (two tenants with colliding dataset names;
 logs, spans with span events, application events, and a native-metric sample;
 invalid and edge records) so that
 
-. every timestamp and identifier is fixed by a seed, so a run reproduces its
-  expected contents exactly;
+. every identifier and every log, span, and event timestamp is fixed by a seed,
+  so a run reproduces its expected contents exactly;
 . the expected per-event serving values and payload checksums come from the
   emitter's own model rather than from any downstream store; and
 . the SDK and exporters demonstrably put that modelled content on the wire,
@@ -34,7 +34,8 @@ Written before the run:
   decoded requests equal the rows computed from the model.
 * A metric data point's timestamps are stamped by the SDK at collection and
   cannot be fixed, so the metric is the one event whose expected contents cannot
-  include time.
+  include time, and raw OTLP bytes are not reproducible (only the decoded
+  contents are).
 
 == Environment
 
@@ -74,6 +75,10 @@ The model (`model.rs`) defines every event once. Two consumers read it:
 * `expected.rs` computes each event's expected `serving_logs`/`serving_spans`
   values and canonical payload, hashes the payload with SHA-256, and writes one
   JSON line per event.
+
+The SDK's batch processors only log a failed export, so each exporter is wrapped
+(`delivery.rs`) to count the items whose export call succeeded; `emit` fails
+unless the counts equal the model's. That is OTLP acceptance, not storage.
 
 `selfcheck` starts a loopback OTLP receiver (tonic gRPC server and a minimal
 HTTP/1.1 protobuf listener), emits to it, decodes the received requests back into
@@ -167,7 +172,9 @@ Selected expected values that the wire reproduced (all from `expected.jsonl`):
 |`kind` `event`, `event_name` `checkout.completed`, empty body
 |===
 
-Unit and tamper tests (`cargo test`, 21 tests): for 17 plausible wire-level
+Unit and tamper tests (`cargo test`, 22 tests): a receiver that refuses one
+signal (logs, spans, or metrics, over gRPC and HTTP) fails the run naming the
+signal while the other signals are still received; and for 17 plausible wire-level
 corruptions (integer turned into a string, an integer above 2^53 rounded through
 a double, NaN or negative zero collapsed, an empty string treated as missing,
 bytes stringified, a reversed span repaired, a missing start filled, a span event
@@ -187,9 +194,12 @@ timestamps, as predicted.
 This run shows that the producer is deterministic and that its expected contents
 are internally consistent with its wire output. It does not show that any
 downstream component stores these values: no Collector, owned exporter, or
-ClickHouse was involved, and the owned exporter still derives its `event_id`
-from content rather than the gateway-assigned identity of Decision 0001 D5, so
-only the identity-free parts of its payload can be compared by checksum.
+ClickHouse was involved. The expected payload checksum is the fixture's own: the
+payload schema, `event` kind, reserved prefix, span events, and blank `event_id`
+all differ from what the Experiment 021 exporter stores, so a stored
+`payload_sha256` is not comparable to it until a normalizer or a shared payload
+schema exists. The serving values are what a downstream store can be compared
+against today.
 
 == Discrepancies and follow-ups
 

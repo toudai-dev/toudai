@@ -31,8 +31,18 @@ fixture-emitter/check-reproducible.sh    # reproducibility and independence chec
 
 `--endpoint` is the base URL: the HTTP transport appends `/v1/logs`, `/v1/traces`,
 and `/v1/metrics`. `--seed` fixes every trace and span identifier and the few
-generated values; all timestamps are fixed offsets from 2026-09-01T07:00:00Z, so
-no run reads a clock.
+generated values. Log, application-event, span, and span-event timestamps are
+fixed offsets from 2026-09-01T07:00:00Z, so those never read a clock. The metric
+data point is the exception: the SDK stamps its start and end time at collection.
+Determinism is claimed for the expected-contents file and for the decoded
+contents of the stream, not for the raw OTLP bytes (the SDK may batch a signal
+into several requests, and nested map entries have no fixed order on the wire).
+
+`emit` and `selfcheck` exit non-zero unless every exported item was accepted:
+the SDK's batch processors only log a failed export, so each exporter is wrapped
+to count the items whose export succeeded, and the totals must equal the model's.
+Acceptance is the destination answering the OTLP request with success, not proof
+that anything was stored.
 
 == Fixture
 
@@ -106,11 +116,16 @@ RFD 0001 acceptance item that fixes the final encoding remains open.
   the gateway-owned `event_id` and `routing_epoch`. Integers and doubles are
   decimal strings in canonical form (`"9007199254740993"`, `"nan"`, `"-0.0"`)
   so no JSON reader rounds them; timestamps are `YYYY-MM-DD HH:MM:SS.nnnnnnnnn`;
-* `payload`: the canonical payload text and `payload_sha256`, its SHA-256. The
-  payload is the Experiment 021 type-tagged encoding with `event_id` blanked
-  (the gateway assigns it) and span events added, so a downstream payload with
-  its identity blanked can be compared by checksum. A rejected record has no
-  serving row and no payload.
+* `payload`: the fixture's canonical payload text and `payload_sha256`, its
+  SHA-256. The payload (schema `toudai.fixture.payload/1`) reuses the Experiment
+  021 type-tagged node encoding, with `event_id` blank because the gateway assigns
+  it, span events added, `event` as a log kind, and the `toudai.` reserved prefix.
+  It is not the encoding the Experiment 021 exporter stores (schema
+  `lighthouse.canonical.event/1`, no span events, no `event` kind), so this
+  checksum is the fixture's own and is not comparable to a stored
+  `payload_sha256` until a normalizer or a shared payload schema exists. The
+  serving values are what a downstream store can be compared against today. A
+  rejected record has no serving row and no payload.
 
 Rules the expected values apply (Experiments 019-021 and `product-contract.adoc`):
 types are never inferred from text; missing, empty, `false`, and zero are
@@ -125,10 +140,11 @@ the data point when it collects.
 
 == Limits
 
-* The Rust SDK cannot send an explicit empty `AnyValue`, and its span attributes
-  cannot carry bytes or maps, so those cases are on log records; empty versus
-  missing is covered with empty strings, bytes, arrays, and maps against keys that
-  are never sent.
+* The Rust SDK cannot send an explicit empty `AnyValue` at all, and its span
+  attributes cannot carry bytes or maps, so only bytes and maps move to log
+  records. Empty versus missing is covered with empty strings, bytes, arrays,
+  and maps against keys that are never sent; an OTLP `AnyValue` with no value set
+  stays covered only by Experiment 021's raw-OTLP fixture.
 * The resource omits `telemetry.sdk.*` and host attributes, which vary by build
   and machine.
 * `selfcheck` proves the SDK and exporters put the modelled content on the wire.
