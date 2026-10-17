@@ -27,5 +27,6 @@ columns. Align its schema constants and SQL tests with `tenant_id` and
 payload table names. Its S3 endpoint and cache size are placeholders for the deployment.
 
 Apply the files in order with `clickhouse-client --multiquery < schema/NNN-name.sql`; every
-statement is `IF NOT EXISTS`. The owned exporter in `collector/` names these columns in its
-`INSERT` statements, and `collector/lighthouseexporter/schema_test.go` fails when they drift.
+statement is `IF NOT EXISTS`. The owned exporter in
+https://github.com/toudai-dev/collector[toudai-dev/collector] names these columns in its
+`INSERT` statements, so a change to a table here needs the matching change there.

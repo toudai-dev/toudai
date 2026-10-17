@@ -19,12 +19,11 @@ mapping is not satisfied. These are characterization measurements against the
 pinned components, not checklist completion. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +
-Product tree: the Collector distribution and its pins now live in `collector/`
-(dependency requirements and `go.sum` unchanged from Experiment 021, with only the
-main module path changed); ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`.
-Still open: there is no product gateway configuration yet, the owned exporter does
-not map native metrics, and no standard-OTLP run of the product build is recorded as
-an experiment.
+Product tree: the owned exporter and the Collector distribution live in
+https://github.com/toudai-dev/collector[toudai-dev/collector], which owns the
+component pins; ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`. Still open:
+there is no product gateway configuration yet, the owned exporter does not map native
+metrics, and no standard-OTLP run of the product build is recorded as an experiment.
 
 * [ ] Define application-event encoding and internal identity assignment without requiring proprietary producer batch IDs; verify what survives SDK retries and Collector rebatching.
 +
@@ -47,9 +46,9 @@ notification-driven or proprietary batch ID is involved. Cross-workspace query
 isolation and the final application-event encoding remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
-Product tree: the exporter's `event_id` is still the content-derived Experiment 021
+Product tree: the owned exporter's `event_id` is still the content-derived Experiment 021
 identity. Decision 0001 D5 assigns `event_id` at the gateway before batching, which the
-exporter lift does not implement.
+exporter does not implement yet.
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
 +
@@ -96,12 +95,13 @@ Long-term component boundary, dataset routing, and retained-scale qualification
 remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
-Product tree: the owned exporter now lives in `collector/lighthouseexporter` and writes
-the Decision 0001 DDL in `clickhouse/schema` (`tenant_id`, `timestamp`, `routing_epoch`,
-and a payload table on the S3-backed `lighthouse_payload` storage policy). Scratch runs
-of the product build against ClickHouse 26.8.2.7 with an S3 emulator inserted typed log
-and span rows, stamped the epoch, moved an old payload partition to the S3 disk by TTL,
-and retrieved it by `(tenant_id, dataset, event_id)`. Those runs are not recorded as an
+Product tree: the Decision 0001 DDL is in `clickhouse/schema` (`tenant_id`, `timestamp`,
+`routing_epoch`, and a payload table on the S3-backed `lighthouse_payload` storage
+policy); the owned exporter that writes it lives in
+https://github.com/toudai-dev/collector[toudai-dev/collector]. Scratch runs of that
+exporter against ClickHouse 26.8.2.7 with an S3 emulator inserted typed log and span
+rows, stamped the epoch, moved an old payload partition to the S3 disk by TTL, and
+retrieved it by `(tenant_id, dataset, event_id)`. Those runs are not recorded as an
 experiment, and dataset routing still comes from a static `resource` processor, so the
 item stays open.
 
