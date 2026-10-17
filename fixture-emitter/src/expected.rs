@@ -18,8 +18,10 @@ use crate::model::{
 use crate::value::{Attrs, Val, double_text, nodes, timestamp_text};
 
 pub const ROW_SCHEMA: &str = "toudai.fixture.expected/1";
-/// The canonical payload is the Experiment 021 node encoding with the event
-/// identity blanked (the gateway assigns `event_id`), extended with span events.
+/// The fixture's own canonical payload: the Experiment 021 node encoding with
+/// the event identity blanked (the gateway assigns `event_id`), span events
+/// added, and `event` as a log kind. Its checksum is not comparable to a stored
+/// Experiment 021 payload without a normalizer.
 pub const PAYLOAD_SCHEMA: &str = "toudai.fixture.payload/1";
 
 /// A decoded fixture event, from the model or from the wire.

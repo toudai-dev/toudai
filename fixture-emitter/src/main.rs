@@ -7,6 +7,7 @@
 //! ```
 
 mod check;
+mod delivery;
 mod emit;
 mod expected;
 mod model;

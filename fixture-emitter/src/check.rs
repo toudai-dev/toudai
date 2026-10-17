@@ -26,22 +26,30 @@ pub fn selfcheck(seed: u64, transport: Transport) -> Result<(Vec<Row>, Outcome),
     let rows = expected::rows(&fixture.logs, &fixture.spans, &fixture.metrics)?;
     let rt = runtime()?;
     let receiver = Receiver::start(rt.handle())?;
-    let endpoint = match transport {
-        Transport::Grpc => format!("http://{}", receiver.grpc),
-        Transport::Http => format!("http://{}", receiver.http),
-    };
-    {
-        // The tonic exporter needs a runtime context; the blocking HTTP client
-        // must not be built inside one.
-        let _enter = (transport == Transport::Grpc).then(|| rt.enter());
-        emit::emit(&fixture, transport, &endpoint)?;
-    }
+    send(&rt, &receiver, transport, &fixture)?;
     let observed = {
         let received = receiver.shared.lock().unwrap();
         observe::observe(&received)?
     };
     let outcome = compare(&rows, &observed);
     Ok((rows, outcome))
+}
+
+/// Emit the fixture to `receiver`, failing if any export was not accepted.
+fn send(
+    rt: &tokio::runtime::Runtime,
+    receiver: &Receiver,
+    transport: Transport,
+    fixture: &model::Fixture,
+) -> Result<(), String> {
+    let endpoint = match transport {
+        Transport::Grpc => format!("http://{}", receiver.grpc),
+        Transport::Http => format!("http://{}", receiver.http),
+    };
+    // The tonic exporter needs a runtime context; the blocking HTTP client
+    // must not be built inside one.
+    let _enter = (transport == Transport::Grpc).then(|| rt.enter());
+    emit::emit(fixture, transport, &endpoint)
 }
 
 pub struct Outcome {
@@ -179,6 +187,7 @@ fn annotation_problems(key: &str, want: &Row, got: &Row) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receiver::Rejects;
     use crate::value::Val;
 
     fn rows_and_observed() -> (Vec<Row>, Observed) {
@@ -418,6 +427,58 @@ mod tests {
             let (rows, outcome) = selfcheck(3, transport).unwrap();
             assert_eq!(outcome.problems, Vec::<String>::new(), "{transport:?}");
             assert_eq!(outcome.rows.len(), rows.len(), "{transport:?}");
+        }
+    }
+
+    /// The SDK's batch processors swallow export failures; a destination that
+    /// refuses one signal must still fail the run, naming the signal.
+    #[test]
+    fn a_refused_signal_fails_the_run() {
+        let cases = [
+            (
+                "logs",
+                Rejects {
+                    logs: true,
+                    ..Rejects::default()
+                },
+            ),
+            (
+                "spans",
+                Rejects {
+                    traces: true,
+                    ..Rejects::default()
+                },
+            ),
+            (
+                "metrics",
+                Rejects {
+                    metrics: true,
+                    ..Rejects::default()
+                },
+            ),
+        ];
+        let fixture = model::build(9);
+        for transport in [Transport::Grpc, Transport::Http] {
+            for (signal, rejects) in cases {
+                let rt = runtime().unwrap();
+                let receiver = Receiver::start_rejecting(rt.handle(), rejects).unwrap();
+                let err = send(&rt, &receiver, transport, &fixture).expect_err(&format!(
+                    "{transport:?} {signal} was refused but the run succeeded"
+                ));
+                assert!(err.contains(signal), "{transport:?} {signal}: {err}");
+                // The other signals were still accepted.
+                let received = receiver.shared.lock().unwrap();
+                assert_eq!(
+                    received.logs.is_empty(),
+                    signal == "logs",
+                    "{transport:?} {signal}"
+                );
+                assert_eq!(
+                    received.traces.is_empty(),
+                    signal == "spans",
+                    "{transport:?} {signal}"
+                );
+            }
         }
     }
 

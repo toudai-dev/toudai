@@ -41,8 +41,21 @@ pub struct Received {
 
 pub type Shared = Arc<Mutex<Received>>;
 
+/// Signals the receiver refuses (gRPC `INVALID_ARGUMENT`, HTTP 400), so a test
+/// can check that a rejected export is not reported as delivered.
+#[derive(Clone, Copy, Default)]
+pub struct Rejects {
+    pub logs: bool,
+    pub traces: bool,
+    pub metrics: bool,
+}
+
 #[derive(Clone)]
-struct Sink(Shared);
+struct Sink(Shared, Rejects);
+
+fn refuse(signal: &str) -> Status {
+    Status::invalid_argument(format!("{signal} rejected by the test receiver"))
+}
 
 #[tonic::async_trait]
 impl LogsService for Sink {
@@ -50,6 +63,9 @@ impl LogsService for Sink {
         &self,
         request: Request<ExportLogsServiceRequest>,
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
+        if self.1.logs {
+            return Err(refuse("logs"));
+        }
         self.0.lock().unwrap().logs.push(request.into_inner());
         Ok(Response::new(ExportLogsServiceResponse::default()))
     }
@@ -61,6 +77,9 @@ impl TraceService for Sink {
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
+        if self.1.traces {
+            return Err(refuse("traces"));
+        }
         self.0.lock().unwrap().traces.push(request.into_inner());
         Ok(Response::new(ExportTraceServiceResponse::default()))
     }
@@ -72,6 +91,9 @@ impl MetricsService for Sink {
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
+        if self.1.metrics {
+            return Err(refuse("metrics"));
+        }
         self.0.lock().unwrap().metrics.push(request.into_inner());
         Ok(Response::new(ExportMetricsServiceResponse::default()))
     }
@@ -89,8 +111,15 @@ impl Receiver {
     /// Bind both listeners on ephemeral loopback ports. The gRPC server runs
     /// on `handle`'s runtime; the HTTP listener runs on its own threads.
     pub fn start(handle: &tokio::runtime::Handle) -> Result<Receiver, String> {
+        Self::start_rejecting(handle, Rejects::default())
+    }
+
+    pub fn start_rejecting(
+        handle: &tokio::runtime::Handle,
+        rejects: Rejects,
+    ) -> Result<Receiver, String> {
         let shared: Shared = Arc::default();
-        let sink = Sink(shared.clone());
+        let sink = Sink(shared.clone(), rejects);
 
         let _enter = handle.enter();
         let incoming =
@@ -123,7 +152,7 @@ impl Receiver {
                 if let Ok(stream) = stream {
                     let store = store.clone();
                     thread::spawn(move || {
-                        if let Err(e) = serve_http(stream, &store) {
+                        if let Err(e) = serve_http(stream, &store, rejects) {
                             eprintln!("HTTP receiver connection: {e}");
                         }
                     });
@@ -154,7 +183,7 @@ impl Drop for Receiver {
 
 /// Serve OTLP/HTTP on one connection (keep-alive), accepting protobuf bodies
 /// with a Content-Length or chunked framing.
-fn serve_http(stream: TcpStream, store: &Shared) -> Result<(), String> {
+fn serve_http(stream: TcpStream, store: &Shared, rejects: Rejects) -> Result<(), String> {
     let mut writer = stream.try_clone().map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stream);
     loop {
@@ -196,7 +225,7 @@ fn serve_http(stream: TcpStream, store: &Shared) -> Result<(), String> {
             body
         };
         let status = if method == "POST" {
-            ingest(&path, &body, store)
+            ingest(&path, &body, store, rejects)
         } else {
             405
         };
@@ -229,7 +258,16 @@ fn read_chunked(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>, String> {
     }
 }
 
-fn ingest(path: &str, body: &[u8], store: &Shared) -> u16 {
+fn ingest(path: &str, body: &[u8], store: &Shared, rejects: Rejects) -> u16 {
+    let refused = match path {
+        "/v1/logs" => rejects.logs,
+        "/v1/traces" => rejects.traces,
+        "/v1/metrics" => rejects.metrics,
+        _ => false,
+    };
+    if refused {
+        return 400;
+    }
     let mut received = store.lock().unwrap();
     match path {
         "/v1/logs" => match ExportLogsServiceRequest::decode(body) {

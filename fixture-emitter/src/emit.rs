@@ -21,6 +21,7 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::{IdGenerator, SdkTracerProvider};
 
+use crate::delivery::{CountedLogs, CountedMetrics, CountedSpans, Tally};
 use crate::model::{Ctx, Fixture, SpanKind, SpanRec, Status, WORKSPACE_ATTR};
 use crate::value::{Attrs, Val};
 
@@ -280,10 +281,14 @@ fn emit_tenant(
     let mut errors = Vec::new();
     if let Some(first) = spans.first() {
         let queued = Arc::new(Queued::default());
+        let tally = Arc::new(Tally::default());
         let provider = SdkTracerProvider::builder()
             .with_id_generator(QueuedIds(queued.clone()))
             .with_resource(resource(&first.ctx)?)
-            .with_batch_exporter(span_exporter(protocol, endpoint)?)
+            .with_batch_exporter(CountedSpans(
+                span_exporter(protocol, endpoint)?,
+                tally.clone(),
+            ))
             .build();
         for rec in &spans {
             emit_span(&provider, &queued, rec)?;
@@ -291,12 +296,17 @@ fn emit_tenant(
         if let Err(e) = provider.shutdown() {
             errors.push(format!("trace shutdown: {e}"));
         }
+        errors.extend(tally.verify("spans", spans.len()).err());
     }
 
     if let Some(first) = logs.first() {
+        let tally = Arc::new(Tally::default());
         let provider = SdkLoggerProvider::builder()
             .with_resource(resource(&first.ctx)?)
-            .with_batch_exporter(log_exporter(protocol, endpoint)?)
+            .with_batch_exporter(CountedLogs(
+                log_exporter(protocol, endpoint)?,
+                tally.clone(),
+            ))
             .build();
         let mut loggers = BTreeMap::new();
         for rec in &logs {
@@ -334,12 +344,17 @@ fn emit_tenant(
         if let Err(e) = provider.shutdown() {
             errors.push(format!("log shutdown: {e}"));
         }
+        errors.extend(tally.verify("logs", logs.len()).err());
     }
 
     if let Some(first) = metrics.first() {
+        let tally = Arc::new(Tally::default());
         let provider = SdkMeterProvider::builder()
             .with_resource(resource(&first.ctx)?)
-            .with_periodic_exporter(metric_exporter(protocol, endpoint)?)
+            .with_periodic_exporter(CountedMetrics(
+                metric_exporter(protocol, endpoint)?,
+                tally.clone(),
+            ))
             .build();
         for rec in &metrics {
             let meter = provider.meter_with_scope(scope(&rec.ctx)?);
@@ -355,6 +370,8 @@ fn emit_tenant(
         if let Err(e) = provider.shutdown() {
             errors.push(format!("metric shutdown: {e}"));
         }
+        // One export call carries every data point of the tenant.
+        errors.extend(tally.verify("metrics", 1).err());
     }
 
     if errors.is_empty() {
