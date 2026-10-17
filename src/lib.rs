@@ -7,4 +7,5 @@
 //! `sum(Int64)` wraps, so this crate decides what a query may mean and rejects
 //! the rest with an explicit error.
 
+pub mod clickhouse;
 pub mod query;
