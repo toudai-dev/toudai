@@ -1,0 +1,135 @@
+= Fixture emitter
+
+A deterministic OTLP producer for the RFD 0001 fixture. It sends two tenants'
+logs, spans (with span events), application events, and one native-metric
+sample through the standard OpenTelemetry Rust SDK and `opentelemetry-otlp`
+(gRPC or HTTP/protobuf), and writes an independent file of expected contents
+computed from its own model. It is a standalone crate: it is not a member of the
+root Cargo workspace.
+
+Recorded run: link:../rfd/0001/experiments/022-fixture-emitter-run.adoc[Experiment 022].
+
+== Commands
+
+[source,sh]
+----
+# Expected contents only; no network.
+cargo run --manifest-path fixture-emitter/Cargo.toml -- expected --seed 20260901 --out expected.jsonl
+
+# Send the fixture to an OTLP endpoint (default seed 20260901).
+cargo run --manifest-path fixture-emitter/Cargo.toml -- emit --protocol grpc --endpoint http://127.0.0.1:4317
+cargo run --manifest-path fixture-emitter/Cargo.toml -- emit --protocol http --endpoint http://127.0.0.1:4318 \
+  --expected-out expected.jsonl
+
+# Send to a built-in loopback receiver and compare the decoded wire with the expected contents.
+cargo run --manifest-path fixture-emitter/Cargo.toml -- selfcheck --protocol http \
+  --expected-out expected.jsonl --observed-out observed.jsonl
+
+make build-fixture-emitter               # release binary
+fixture-emitter/check-reproducible.sh    # reproducibility and independence checks (also part of make test)
+----
+
+`--endpoint` is the base URL: the HTTP transport appends `/v1/logs`, `/v1/traces`,
+and `/v1/metrics`. `--seed` fixes every trace and span identifier and the few
+generated values; all timestamps are fixed offsets from 2026-09-01T07:00:00Z, so
+no run reads a clock.
+
+== Fixture
+
+Two tenants (`toudai.workspace_id` `1111...` and `2222...`) both use the dataset
+`checkout` (`toudai.dataset`), so only the workspace tells their data apart. Each
+has a resource with `service.name`, `service.version`, `deployment.environment`,
+an integer `fixture.replica`, and the two trusted scope keys. Every record carries
+a producer attribute `fixture.key` that is unique within a tenant and joins an
+event to its expected row. Per tenant:
+
+[options="header",cols="2,1,4"]
+|===
+|Signal |Class |Records
+
+|logs
+|valid
+|`log.info` and `log.error` (trace-correlated), `log.no-trace-context`, and the two application events below
+
+|logs
+|boundary
+|`log.collision` (byte-identical content in both tenants), `invalid.bigint` (integers above 2^53, `Int64` extrema, a double of equal magnitude), `invalid.empty-vs-missing` (empty string, bytes, array, map; zero; `false`; keys that are never sent)
+
+|logs
+|unsupported
+|`invalid.bytes`, `invalid.array` (mixed types), `invalid.map` (nested), `invalid.nonfinite` (NaN, +/-Infinity, negative zero)
+
+|logs
+|policy
+|`log.spoofed-scope`: record attributes naming the other tenant and another dataset under the reserved `toudai.` prefix
+
+|logs
+|rejected
+|`invalid.duplicate-key`: one attribute key twice in one collection
+
+|spans
+|valid
+|`span.root` (two span events, one an exception), `span.db`, `span.zero-duration`
+
+|spans
+|boundary
+|`span.missing-start`, `span.missing-end`, `span.missing-both` (OTLP timestamp 0), `span.reversed` (end before start)
+
+|spans
+|unsupported
+|`span.invalid-values`: non-finite and extreme numbers, homogeneous arrays, empty string, empty array
+
+|metrics (tenant A only)
+|native-metric
+|counter `checkout.requests` = 7
+|===
+
+== Application-event encoding
+
+An application event is a standard OTLP log record whose `event_name` field is
+set. `event_name` is the event type, `body` is optional, and the event's fields
+are typed record attributes. A log record with an empty `event_name` is a log.
+The serving row's `kind` is `event` for the first and `log` for the second; the
+event stays queryable together with logs and spans. No proprietary producer field
+or batch identifier is involved. This is the encoding the fixture exercises; the
+RFD 0001 acceptance item that fixes the final encoding remains open.
+
+== Expected contents
+
+`expected` writes one JSON line per event, sorted by key, with:
+
+* the identity: `tenant_id`, `dataset`, `signal`, `fixture_key`;
+* `disposition` (`serve`, `reject`, `native-metric`), `reject_reason`, and the
+  annotations `class`, `dropped_keys`, `unsupported_keys`, `absent_keys`,
+  `span_event_names`;
+* `serving`: the Decision 0001 `serving_logs` or `serving_spans` columns except
+  the gateway-owned `event_id` and `routing_epoch`. Integers and doubles are
+  decimal strings in canonical form (`"9007199254740993"`, `"nan"`, `"-0.0"`)
+  so no JSON reader rounds them; timestamps are `YYYY-MM-DD HH:MM:SS.nnnnnnnnn`;
+* `payload`: the canonical payload text and `payload_sha256`, its SHA-256. The
+  payload is the Experiment 021 type-tagged encoding with `event_id` blanked
+  (the gateway assigns it) and span events added, so a downstream payload with
+  its identity blanked can be compared by checksum. A rejected record has no
+  serving row and no payload.
+
+Rules the expected values apply (Experiments 019-021 and `product-contract.adoc`):
+types are never inferred from text; missing, empty, `false`, and zero are
+distinct; reserved `toudai.` keys supplied by a producer are dropped from
+record, scope, and span attributes; a repeated key in one collection rejects the
+record; a span with an unset (0) timestamp has `missing` timing and a NULL
+duration, taking precedence over `end_before_start`, which also has a NULL
+duration; a valid zero duration is `ok` with `0`.
+
+The metric row has no serving row, and no timestamps, because the SDK stamps
+the data point when it collects.
+
+== Limits
+
+* The Rust SDK cannot send an explicit empty `AnyValue`, and its span attributes
+  cannot carry bytes or maps, so those cases are on log records; empty versus
+  missing is covered with empty strings, bytes, arrays, and maps against keys that
+  are never sent.
+* The resource omits `telemetry.sdk.*` and host attributes, which vary by build
+  and machine.
+* `selfcheck` proves the SDK and exporters put the modelled content on the wire.
+  It does not exercise a Collector, the owned exporter, or ClickHouse.
