@@ -7,7 +7,7 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Source mutation:* None; a disposable loopback ClickHouse server and the synthetic Experiment 021 fixture only
 - *Base:* `f87020d` (`origin/main`); the service under test is the head of the Track A pull request
 - *Harness:* `tests/e2e/` (server lifecycle in `server.rs`, scenarios in `main.rs`), `tests/fixtures/021/`, `tests/fixtures/e2e/`, `scripts/export-fixture021-canonical.py`
-- *Result:* 1 end-to-end test passed (the scenario sections below), after the two mutations listed under Results each made it fail.
+- *Result:* 1 end-to-end test passed (the scenario sections below), after the four mutations listed under Results each made it fail.
 
 == Question
 
@@ -26,8 +26,9 @@ canonical payload table. This experiment asks:
 . Is the tenant scope derived from the credential alone, so that no body, path,
   or event ID reaches another workspace's rows?
 . Can an event be retrieved by `(tenant_id, dataset, event_id)` from the product
-  `canonical_events` table, byte for byte, with the hash verifying against the
-  returned payload?
+  `canonical_events` table without re-encoding, with the hash verifying against
+  the returned payload, and without a profile limit or replayed rows turning the
+  answer into a silently partial or wrong one?
 
 This is not a performance measurement, a planner, an authorization design, or a
 test of the object-backed payload volume.
@@ -42,7 +43,7 @@ test of the object-backed payload volume.
 == Dataset
 
 - Serving rows: `tests/fixtures/021/serving_logs.jsonl` (54 rows: 27 per workspace) and `serving_spans.jsonl` (18 rows: 9 per workspace), exported from the Experiment 021 verifier's expectations by `scripts/export-fixture021-rows.py`.
-- Canonical rows: `tests/fixtures/021/canonical_events.jsonl` (10 rows), written by `scripts/export-fixture021-canonical.py`. The payloads are hand-authored type-preserving JSON, not Collector output; the exporter owns the real encoding, and retrieval treats a payload as opaque JSON text. `payload_sha256` is computed by the generator, independently of the service. The rows separate the lookup key's parts: `typed-1` exists for both workspaces and in a second dataset (three distinct payloads), `only-b` belongs to workspace B alone, `dup-1` is stored twice with one payload (an at-least-once replay), `conflict-1` twice with two payloads, and one ID contains `/`, a space, `é`, `+`, and `%`.
+- Canonical rows: `tests/fixtures/021/canonical_events.jsonl` (13 rows), written by `scripts/export-fixture021-canonical.py`. The payloads are hand-authored type-preserving JSON, not Collector output; the exporter owns the real encoding, and retrieval treats a payload as opaque JSON text. `payload_sha256` is computed by the generator, independently of the service. The rows separate the lookup key's parts: `typed-1` exists for both workspaces and in a second dataset (three distinct payloads), `only-b` belongs to workspace B alone, `dup-1` is stored twice with one payload (an at-least-once replay), `conflict-1` twice with two payloads, `conflict-3` with two copies of the payload whose hash sorts first plus one different payload, and one ID contains `/`, a space, `é`, `+`, and `%`.
 - Rows the test adds: a workspace-B-only dataset `b-only`, and one workspace-A event in dataset `special` whose attribute key is `k +%&=<TAB> é\'"` and whose value contains a backslash, quote, and newline, plus an int attribute keyed `a' OR 1=1 --`.
 - Credentials: `tests/fixtures/e2e/read-keys.txt` binds `test-key-workspace-a` and `test-key-workspace-b` to the two workspace IDs. The key file is a placeholder for the tenant-policy registry.
 
@@ -131,13 +132,16 @@ TOUDAI_E2E_RUNTIME=docker cargo test --test e2e   # clickhouse/clickhouse-server
 |1 event for the exact key/value; 0 for a prefix of the injection key, a different value, or `' OR 1=1 --`
 
 |Event `fixture/typed-1` as A, as B; `other/typed-1`; a span; `dup-1`; the escaped ID
-|200 with the stored payload byte for byte, `payload_sha256` equal to the generator's and to SHA-256 of the received payload, `timestamp_ns=1788246000123456789`; three distinct `typed-1` payloads
+|200 with the stored payload text unchanged, `payload_sha256` equal to the generator's and to SHA-256 of the received payload, `timestamp_ns=1788246000123456789`; three distinct `typed-1` payloads
 
 |Event of another workspace, other dataset, unknown ID, different case
 |404 `event_not_found` (cross-workspace is indistinguishable from absent)
 
-|Event `conflict-1`
-|500 `event_conflict`, no payload chosen
+|Events `conflict-1` and `conflict-3`
+|500 `event_conflict`, no payload chosen (replays of one payload do not hide the other)
+
+|Query as a user whose profile has `max_result_rows=1`, `result_overflow_mode=break`
+|502 `clickhouse_error` and no rows: the service forces every `*_overflow_mode` setting to `throw`; the same user queried directly gets one truncated row
 |===
 
 == Results
@@ -159,18 +163,26 @@ GET /v1/events/fixture/only-b as A -> 404 event_not_found
 POST /v1/query with "tenant_id"    -> 400 invalid_request: unknown field `tenant_id`
 ----
 
-To confirm the test can fail, two mutations were applied one at a time and the
+To confirm the test can fail, mutations were applied one at a time and the
 test run each time; each failed at the intended assertion and was reverted:
 
 . The event lookup bound a constant tenant instead of the key's tenant: the first
   event retrieval returned 404.
 . Query parameters were sent without the text-format escaping
   (`Param::wire_value`): the special-key scenario returned 502 `clickhouse_error`.
+. The event lookup without `LIMIT 1 BY payload_sha256`: `conflict-3` returned 200
+  with the replayed payload instead of `event_conflict`.
+. The client without the `*_overflow_mode=throw` settings: the limited user's
+  group-by returned 200 with one row and `approximation=exact`.
 
-A third defect surfaced during development, not by mutation: a body
+Two defects surfaced without mutation. During development, a body
 `{"kind":"count","tenant_id":"x"}` was accepted because serde ignores unknown
-fields on a unit variant of an internally tagged enum. The wire-format unit test
-caught it and the aggregates became empty struct variants.
+fields on a unit variant of an internally tagged enum; the wire-format unit test
+caught it and the aggregates became empty struct variants. The oracle review
+found that `RawValue` strips leading and trailing whitespace, which would leave
+the returned text unequal to the text `payload_sha256` covers, so a stored
+payload with any is now reported as malformed (502) instead of returned altered
+(unit-tested; the canonical producer must not emit boundary whitespace).
 
 Failed and rejected requests return an error body without plan diagnostics: the
 `PlanDiagnostics` of a request that never ran are not returned.

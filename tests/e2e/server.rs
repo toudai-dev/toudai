@@ -21,6 +21,13 @@ use std::time::{Duration, Instant};
 
 pub const USER: &str = "toudai";
 pub const PASSWORD: &str = "toudai-test";
+/// A second user whose profile silently truncates results (`break` overflow
+/// mode), to prove the service refuses to report a truncated answer as exact.
+pub const LIMITED_USER: &str = "limited";
+const LIMITED_PROFILE: &str = "<limited><max_result_rows>1</max_result_rows>\
+    <result_overflow_mode>break</result_overflow_mode><max_block_size>1</max_block_size></limited>";
+const LIMITED_USER_XML: &str = "<limited><password>toudai-test</password>\
+    <networks><ip>::/0</ip></networks><profile>limited</profile><quota>default</quota></limited>";
 const DEFAULT_IMAGE: &str = "clickhouse/clickhouse-server:26.8.2.7";
 const STORAGE_TEMPLATE: &str = include_str!("../fixtures/e2e/storage-test.xml");
 
@@ -107,6 +114,14 @@ fn start_docker() -> ClickHouseServer {
         STORAGE_TEMPLATE.replace("@DATA_DIR@", "/var/lib/clickhouse"),
     )
     .expect("write storage config");
+    let limited = dir.join("limited-user.xml");
+    std::fs::write(
+        &limited,
+        format!(
+            "<clickhouse><profiles>{LIMITED_PROFILE}</profiles><users>{LIMITED_USER_XML}</users></clickhouse>"
+        ),
+    )
+    .expect("write limited user config");
     let image = std::env::var("TOUDAI_E2E_CLICKHOUSE_IMAGE").unwrap_or(DEFAULT_IMAGE.into());
     let output = Command::new("docker")
         .args(["run", "--detach", "--publish", "127.0.0.1::8123"])
@@ -114,6 +129,11 @@ fn start_docker() -> ClickHouseServer {
         .arg(format!(
             "{}:/etc/clickhouse-server/config.d/toudai-storage-test.xml:ro",
             storage.display()
+        ))
+        .arg("--volume")
+        .arg(format!(
+            "{}:/etc/clickhouse-server/users.d/limited-user.xml:ro",
+            limited.display()
         ))
         .args(["--env", &format!("CLICKHOUSE_USER={USER}")])
         .args(["--env", &format!("CLICKHOUSE_PASSWORD={PASSWORD}")])
@@ -173,7 +193,7 @@ fn start_native() -> ClickHouseServer {
     <tmp_path>{data}/tmp/</tmp_path>
     <user_files_path>{data}/user_files/</user_files_path>
     <default_profile>default</default_profile>
-    <profiles><default/></profiles>
+    <profiles><default/>{LIMITED_PROFILE}</profiles>
     <quotas><default/></quotas>
     <users>
         <{USER}>
@@ -182,6 +202,7 @@ fn start_native() -> ClickHouseServer {
             <profile>default</profile>
             <quota>default</quota>
         </{USER}>
+        {LIMITED_USER_XML}
     </users>
 </clickhouse>
 "#,
@@ -230,9 +251,18 @@ async fn wait_until_ready(url: &str) {
 /// Run one statement over the HTTP interface; the optional body carries
 /// `INSERT ... FORMAT JSONEachRow` data.
 pub async fn execute(server: &ClickHouseServer, sql: &str, data: Option<&str>) -> String {
+    execute_as(server, USER, sql, data).await
+}
+
+pub async fn execute_as(
+    server: &ClickHouseServer,
+    user: &str,
+    sql: &str,
+    data: Option<&str>,
+) -> String {
     let request = reqwest::Client::new()
         .post(&server.url)
-        .basic_auth(USER, Some(PASSWORD));
+        .basic_auth(user, Some(PASSWORD));
     let request = match data {
         Some(data) => request.query(&[("query", sql)]).body(data.to_owned()),
         None => request.body(sql.to_owned()),

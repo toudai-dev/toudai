@@ -52,7 +52,7 @@ impl Drop for Service {
     }
 }
 
-fn spawn_service(clickhouse: &ClickHouseServer) -> Service {
+fn spawn_service(clickhouse: &ClickHouseServer, user: &str) -> Service {
     let keys = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/e2e/read-keys.txt"
@@ -61,7 +61,7 @@ fn spawn_service(clickhouse: &ClickHouseServer) -> Service {
         .env("TOUDAI_LISTEN", "127.0.0.1:0")
         .env("TOUDAI_READ_KEYS_FILE", keys)
         .env("TOUDAI_CLICKHOUSE_URL", &clickhouse.url)
-        .env("TOUDAI_CLICKHOUSE_USER", server::USER)
+        .env("TOUDAI_CLICKHOUSE_USER", user)
         .env("TOUDAI_CLICKHOUSE_PASSWORD", server::PASSWORD)
         .stderr(Stdio::piped())
         .spawn()
@@ -208,7 +208,7 @@ async fn query_service_end_to_end() {
         return;
     };
     load(&clickhouse).await;
-    let service = spawn_service(&clickhouse);
+    let service = spawn_service(&clickhouse, server::USER);
     let api = Api {
         client: reqwest::Client::new(),
         base: service.base.clone(),
@@ -219,6 +219,40 @@ async fn query_service_end_to_end() {
     query_failures(&api).await;
     scope_and_escaping(&api).await;
     event_retrieval(&api).await;
+    truncating_profile_is_an_error(&clickhouse).await;
+}
+
+/// A ClickHouse profile that truncates results with `break` must not turn an
+/// exact query into a successful partial answer.
+async fn truncating_profile_is_an_error(clickhouse: &ClickHouseServer) {
+    // Precondition: left alone, this user's profile really does truncate.
+    let direct = server::execute_as(
+        clickhouse,
+        server::LIMITED_USER,
+        "SELECT number FROM numbers(5) SETTINGS max_block_size = 1 FORMAT JSONEachRow",
+        None,
+    )
+    .await;
+    assert_eq!(
+        direct.lines().count(),
+        1,
+        "the limited profile must truncate: {direct}"
+    );
+
+    let service = spawn_service(clickhouse, server::LIMITED_USER);
+    let api = Api {
+        client: reqwest::Client::new(),
+        base: service.base.clone(),
+    };
+    // Nine groups are needed; the profile would keep one.
+    let body = logs(ints_filter(), json!([metric()]), json!({"kind": "count"}));
+    let (status, response) = api.query(Some(KEY_A), &body).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response}");
+    assert_eq!(response["error"]["code"], "clickhouse_error");
+    assert!(
+        response.get("rows").is_none(),
+        "no partial rows: {response}"
+    );
 }
 
 async fn health_and_authentication(api: &Api) {
@@ -756,6 +790,14 @@ async fn event_retrieval(api: &Api) {
             KEY_A,
             "fixture",
             "conflict-1",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "event_conflict",
+        ),
+        // Replays of one payload must not hide a different one.
+        (
+            KEY_A,
+            "fixture",
+            "conflict-3",
             StatusCode::INTERNAL_SERVER_ERROR,
             "event_conflict",
         ),
