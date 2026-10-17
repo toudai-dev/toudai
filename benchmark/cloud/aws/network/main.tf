@@ -59,6 +59,8 @@ resource "aws_route_table_association" "benchmark" {
 # Every node shares one security group. ClickHouse ports are reachable only from
 # another member of the group, so no database port is internet-facing, and
 # management access is Session Manager, which needs no inbound rule at all.
+# The description keeps the pre-rename product name on purpose: changing it
+# forces AWS to replace the group, and the deployed benchmark nodes depend on it.
 resource "aws_security_group" "benchmark" {
   name        = "${local.prefix}-nodes"
   description = "Lighthouse benchmark nodes; ClickHouse reachable only inside the group"

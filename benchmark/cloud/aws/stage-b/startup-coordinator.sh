@@ -9,7 +9,7 @@ exec > >(tee -a /var/log/lighthouse-stage-b-startup.log) 2>&1
 state=/var/lib/lighthouse-stage-b
 
 # See startup-leaf.sh: this timer is what bounds the cost of an abandoned node.
-shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "lighthouse experiment 015 stage B lifetime reached"
+shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "toudai experiment 015 stage B lifetime reached"
 
 install -d -m 0755 "${state}" /etc/clickhouse-server
 install -d -o lighthouse -g lighthouse /var/lib/lighthouse-clickhouse
@@ -28,7 +28,7 @@ clickhouse_bin="$(flox activate --dir /opt/lighthouse -- bash -c 'command -v cli
 
 cat > /etc/systemd/system/lighthouse-clickhouse.service <<'UNIT'
 [Unit]
-Description=Lighthouse ClickHouse 26.8.2.7 coordinator
+Description=Toudai ClickHouse 26.8.2.7 coordinator
 After=network-online.target
 [Service]
 User=lighthouse

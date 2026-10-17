@@ -66,17 +66,17 @@ build {
 
   provisioner "file" {
     source      = ".flox/env/manifest.toml"
-    destination = "/tmp/lighthouse-manifest.toml"
+    destination = "/tmp/toudai-manifest.toml"
   }
 
   provisioner "file" {
     source      = ".flox/env/manifest.lock"
-    destination = "/tmp/lighthouse-manifest.lock"
+    destination = "/tmp/toudai-manifest.lock"
   }
 
   provisioner "file" {
     source      = ".flox/env.json"
-    destination = "/tmp/lighthouse-env.json"
+    destination = "/tmp/toudai-env.json"
   }
 
   provisioner "shell" {

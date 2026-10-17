@@ -171,7 +171,7 @@ expected_state() {
 load_object() (
   local object="$1"
   local attempt object_file temp_dir
-  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/lighthouse-stage-b.XXXXXX")"
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/toudai-stage-b.XXXXXX")"
   object_file="${temp_dir}/object.parquet"
   trap 'rm -rf "${temp_dir}"' EXIT
 

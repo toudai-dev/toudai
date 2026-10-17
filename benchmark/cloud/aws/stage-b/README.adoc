@@ -129,28 +129,28 @@ preflight before starting the long load:
 [source,shell]
 ----
 revision="$(jj log -r @- --no-graph -T commit_id)"
-git archive --format=tar.gz -o "/tmp/lighthouse-${revision}.tar.gz" "${revision}"
-sha256sum "/tmp/lighthouse-${revision}.tar.gz"
+git archive --format=tar.gz -o "/tmp/toudai-${revision}.tar.gz" "${revision}"
+sha256sum "/tmp/toudai-${revision}.tar.gz"
 
 coordinator_ip="$(tofu -chdir=${stage_b} output -raw coordinator_private_ip)"
 leaf_ips="$(tofu -chdir=${stage_b} output -json leaf_private_ips | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
 loadgen_id="$(tofu -chdir=${stage_b} output -raw loadgen_instance_id)"
 
-"${aws[@]}" s3 cp "/tmp/lighthouse-${revision}.tar.gz" \
-  "${bucket}/results/LOAD_RUN/lighthouse-${revision}.tar.gz"
+"${aws[@]}" s3 cp "/tmp/toudai-${revision}.tar.gz" \
+  "${bucket}/results/LOAD_RUN/toudai-${revision}.tar.gz"
 
 ssm_run "${loadgen_id}" "
   set -euo pipefail
-  mkdir -p ~/lighthouse
-  aws s3 cp ${bucket}/results/LOAD_RUN/lighthouse-${revision}.tar.gz ~/lighthouse.tar.gz
-  tar -xzf ~/lighthouse.tar.gz -C ~/lighthouse
+  mkdir -p ~/toudai
+  aws s3 cp ${bucket}/results/LOAD_RUN/toudai-${revision}.tar.gz ~/toudai.tar.gz
+  tar -xzf ~/toudai.tar.gz -C ~/toudai
   flox activate --dir /opt/lighthouse -- bash -c '
     clickhouse local --version
     aws s3api list-objects-v2 --bucket lighthouse-exp015-benchmark-828361646739 \\
       --prefix corpus/2026-08-01/ --max-items 2 --query "Contents[].Key" --output text
     TOUDAI_CLUSTER_COORDINATOR_HOST=${coordinator_ip} \\
     TOUDAI_CLUSTER_LEAF_HOSTS=${leaf_ips} \\
-      ~/lighthouse/benchmark/scripts/benchmark-clickhouse-remote-cluster status SHARDS'
+      ~/toudai/benchmark/scripts/benchmark-clickhouse-remote-cluster status SHARDS'
 "
 ----
 
@@ -162,11 +162,11 @@ recoverable rather than fatal:
 ----
 ssm_run "${loadgen_id}" "
   flox activate --dir /opt/lighthouse -- bash -c '
-    cd ~/lighthouse
+    cd ~/toudai
     export TOUDAI_CLUSTER_COORDINATOR_HOST=${coordinator_ip}
     export TOUDAI_CLUSTER_LEAF_HOSTS=${leaf_ips}
     export TOUDAI_CORPUS_BUCKET=${bucket}
-    export TOUDAI_CORPUS_INVENTORY=~/lighthouse/benchmark/cloud/aws/stage-b/corpus.tsv
+    export TOUDAI_CORPUS_INVENTORY=~/toudai/benchmark/cloud/aws/stage-b/corpus.tsv
     export TOUDAI_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs
     export TOUDAI_LOAD_PARALLELISM=8
     export TOUDAI_BENCH_REVISION=${revision}
@@ -182,11 +182,11 @@ Launch the guarded continuation the same way. It waits for the loader's
 ----
 ssm_run "${loadgen_id}" "
   flox activate --dir /opt/lighthouse -- bash -c '
-    cd ~/lighthouse
+    cd ~/toudai
     export TOUDAI_CLUSTER_COORDINATOR_HOST=${coordinator_ip}
     export TOUDAI_CLUSTER_LEAF_HOSTS=${leaf_ips}
     export TOUDAI_CORPUS_BUCKET=${bucket}
-    export TOUDAI_CORPUS_INVENTORY=~/lighthouse/benchmark/cloud/aws/stage-b/corpus.tsv
+    export TOUDAI_CORPUS_INVENTORY=~/toudai/benchmark/cloud/aws/stage-b/corpus.tsv
     export TOUDAI_DISTRIBUTED_LOAD_RUN=LOAD_RUN
     export TOUDAI_BENCH_RUNS_ROOT=\$HOME/lighthouse-stage-b/runs
     export TOUDAI_BENCH_REVISION=${revision}

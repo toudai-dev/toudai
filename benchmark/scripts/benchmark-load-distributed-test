@@ -12,7 +12,7 @@ set -Eeuo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 loader="${repo_root}/benchmark/scripts/benchmark-load-distributed"
 transform="${repo_root}/benchmark/clickhouse/gcp-parquet-to-events.sql"
-work="$(mktemp -d "${TMPDIR:-/tmp}/lighthouse-stage-b-loader-test.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/toudai-stage-b-loader-test.XXXXXX")"
 run_id="loader-test-1s"
 run_dir="${work}/runs/${run_id}"
 corpus="${work}/corpus"

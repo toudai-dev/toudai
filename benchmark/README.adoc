@@ -1,8 +1,18 @@
-= Lighthouse ClickHouse Benchmarks
+= Toudai ClickHouse Benchmarks
 
 The performance harness runs the Nix-pinned native ClickHouse server separately
 from development services. It uses ports `19000` and `18123` and stores all
 runtime state below `TOUDAI_BENCH_ROOT`.
+
+NOTE: The product was renamed from Lighthouse to Toudai, and the script
+environment variables moved from the `LIGHTHOUSE_` to the `TOUDAI_` prefix.
+Experiment records under `rfd/0001/experiments/` are historical and still show
+the `LIGHTHOUSE_` names they were run with; use the same variable names with the
+`TOUDAI_` prefix. Names of existing storage and infrastructure (the ZFS
+datasets and mounts below, the `lighthouse` OS user and `/opt/lighthouse` Flox
+environment baked into the benchmark images, cloud projects, buckets, networks,
+and resource tags) keep the `lighthouse` name because renaming them would
+break recorded evidence or deployed resources.
 
 == One-time storage setup
 

@@ -14,7 +14,7 @@ state=/var/lib/lighthouse-stage-b
 # bounds the cost of a node that never becomes healthy; the topology sets
 # `instance_initiated_shutdown_behavior = "terminate"`, so the halt also deletes
 # the instance and its root volume.
-shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "lighthouse experiment 015 stage B lifetime reached"
+shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "toudai experiment 015 stage B lifetime reached"
 
 install -d -m 0755 "${state}" /etc/clickhouse-server
 
@@ -64,7 +64,7 @@ clickhouse_bin="$(flox activate --dir /opt/lighthouse -- bash -c 'command -v cli
 
 cat > /etc/systemd/system/lighthouse-clickhouse.service <<'UNIT'
 [Unit]
-Description=Lighthouse ClickHouse 26.8.2.7
+Description=Toudai ClickHouse 26.8.2.7
 After=network-online.target
 [Service]
 User=lighthouse

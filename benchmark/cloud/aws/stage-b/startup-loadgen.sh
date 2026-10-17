@@ -9,7 +9,7 @@ exec > >(tee -a /var/log/lighthouse-stage-b-startup.log) 2>&1
 state=/var/lib/lighthouse-stage-b
 
 # See startup-leaf.sh: this timer is what bounds the cost of an abandoned node.
-shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "lighthouse experiment 015 stage B lifetime reached"
+shutdown -h "+${TOUDAI_MAX_LIFETIME_MINUTES}" "toudai experiment 015 stage B lifetime reached"
 
 install -d -m 0755 "${state}"
 

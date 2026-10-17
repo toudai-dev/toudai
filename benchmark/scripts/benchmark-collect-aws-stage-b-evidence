@@ -96,7 +96,7 @@ failures=0
 ssm_capture() {
   local instance_id="$1" target="$2" command_id status
   command_id="$("${aws_cmd[@]}" ssm send-command --instance-ids "${instance_id}" \
-    --document-name AWS-RunShellScript --comment "lighthouse stage b evidence" \
+    --document-name AWS-RunShellScript --comment "toudai stage b evidence" \
     --parameters "$(python3 -c 'import json,sys; print(json.dumps({"commands": [sys.stdin.read()]}))' <<< "${remote_command}")" \
     --query 'Command.CommandId' --output text 2>/dev/null)" || return 1
   [[ -n "${command_id}" ]] || return 1

@@ -25,24 +25,24 @@ render() {
   echo "$1" | tofu console 2>&1 | tr -d '"' | base64 -d
 }
 
-render 'base64encode(base64decode(local.leaf_config_b64))' > /tmp/lighthouse-leaf.xml
-render 'base64encode(base64decode(local.users_config_b64))' > /tmp/lighthouse-users.xml
-render 'base64encode(templatefile("${path.module}/clickhouse-coordinator.xml.tftpl", { leaf_ips = ["10.60.1.10", "10.60.1.11"] }))' > /tmp/lighthouse-coordinator-2.xml
-render 'base64encode(templatefile("${path.module}/clickhouse-coordinator.xml.tftpl", { leaf_ips = ["10.60.1.10", "10.60.1.11", "10.60.1.12", "10.60.1.13"] }))' > /tmp/lighthouse-coordinator-4.xml
+render 'base64encode(base64decode(local.leaf_config_b64))' > /tmp/toudai-leaf.xml
+render 'base64encode(base64decode(local.users_config_b64))' > /tmp/toudai-users.xml
+render 'base64encode(templatefile("${path.module}/clickhouse-coordinator.xml.tftpl", { leaf_ips = ["10.60.1.10", "10.60.1.11"] }))' > /tmp/toudai-coordinator-2.xml
+render 'base64encode(templatefile("${path.module}/clickhouse-coordinator.xml.tftpl", { leaf_ips = ["10.60.1.10", "10.60.1.11", "10.60.1.12", "10.60.1.13"] }))' > /tmp/toudai-coordinator-4.xml
 
 # The leaf configuration must reach the node byte-identical to the accepted
 # one-shard baseline, because query behaviour has to stay comparable.
-check "leaf config is byte-identical to the source" diff -q clickhouse-leaf.xml /tmp/lighthouse-leaf.xml
-check "users config is byte-identical to the source" diff -q clickhouse-users.xml /tmp/lighthouse-users.xml
+check "leaf config is byte-identical to the source" diff -q clickhouse-leaf.xml /tmp/toudai-leaf.xml
+check "users config is byte-identical to the source" diff -q clickhouse-users.xml /tmp/toudai-users.xml
 
 check "two-shard coordinator names both leaves" python3 -c '
 import sys, xml.etree.ElementTree as ET
-hosts = [e.text for e in ET.parse("/tmp/lighthouse-coordinator-2.xml").iter("host")]
+hosts = [e.text for e in ET.parse("/tmp/toudai-coordinator-2.xml").iter("host")]
 sys.exit(0 if hosts == ["10.60.1.10", "10.60.1.11"] else 1)
 '
 check "four-shard coordinator names all four leaves" python3 -c '
 import sys, xml.etree.ElementTree as ET
-tree = ET.parse("/tmp/lighthouse-coordinator-4.xml")
+tree = ET.parse("/tmp/toudai-coordinator-4.xml")
 hosts = [e.text for e in tree.iter("host")]
 shards = len(list(tree.iter("shard")))
 sys.exit(0 if hosts == ["10.60.1.10", "10.60.1.11", "10.60.1.12", "10.60.1.13"] and shards == 4 else 1)
@@ -55,25 +55,25 @@ for role in leaf coordinator loadgen; do
     *) extra='""' ;;
   esac
   render "base64encode(templatefile(\"\${path.module}/startup-wrapper.sh.tftpl\", { clickhouse_config = local.leaf_config_b64, clickhouse_users = local.users_config_b64, max_lifetime_minutes = 1800, extra_env = ${extra}, startup_script = trimspace(file(\"\${path.module}/startup-${role}.sh\")) }))" \
-    > "/tmp/lighthouse-wrapper-${role}.sh"
-  check "${role} wrapper parses as bash" bash -n "/tmp/lighthouse-wrapper-${role}.sh"
+    > "/tmp/toudai-wrapper-${role}.sh"
+  check "${role} wrapper parses as bash" bash -n "/tmp/toudai-wrapper-${role}.sh"
   # The node body is handed to a child shell through a quoted here-document, so
   # extracting it and comparing proves the delivered script is the committed one.
   awk "/<<'TOUDAI_STAGE_B_NODE_SCRIPT'/{flag=1; next} /^TOUDAI_STAGE_B_NODE_SCRIPT\$/{flag=0} flag" \
-    "/tmp/lighthouse-wrapper-${role}.sh" > "/tmp/lighthouse-node-${role}.sh"
-  check "${role} node body is byte-identical to the source" diff -q "startup-${role}.sh" "/tmp/lighthouse-node-${role}.sh"
-  check "${role} wrapper schedules the lifetime halt" grep -q 'shutdown -h "+\${TOUDAI_MAX_LIFETIME_MINUTES}"' "/tmp/lighthouse-wrapper-${role}.sh"
+    "/tmp/toudai-wrapper-${role}.sh" > "/tmp/toudai-node-${role}.sh"
+  check "${role} node body is byte-identical to the source" diff -q "startup-${role}.sh" "/tmp/toudai-node-${role}.sh"
+  check "${role} wrapper schedules the lifetime halt" grep -q 'shutdown -h "+\${TOUDAI_MAX_LIFETIME_MINUTES}"' "/tmp/toudai-wrapper-${role}.sh"
 done
 
 check "leaf wrapper injects the committed config" python3 -c '
 import base64, re, sys
-wrapper = open("/tmp/lighthouse-wrapper-leaf.sh").read()
+wrapper = open("/tmp/toudai-wrapper-leaf.sh").read()
 match = re.search(r"^export TOUDAI_CLICKHOUSE_CONFIG_B64=.([A-Za-z0-9+/=]+).$", wrapper, re.M)
 if not match:
     sys.exit(1)
 sys.exit(0 if base64.b64decode(match.group(1)).decode() == open("clickhouse-leaf.xml").read() else 1)
 '
-check "loadgen wrapper injects the endpoint map" grep -q "export TOUDAI_LEAF_IPS='10.60.1.10,10.60.1.11'" /tmp/lighthouse-wrapper-loadgen.sh
+check "loadgen wrapper injects the endpoint map" grep -q "export TOUDAI_LEAF_IPS='10.60.1.10,10.60.1.11'" /tmp/toudai-wrapper-loadgen.sh
 
 if (( failures > 0 )); then
   echo "${failures} template check(s) failed" >&2

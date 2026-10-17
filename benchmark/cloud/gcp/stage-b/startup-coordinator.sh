@@ -12,7 +12,7 @@ chown -R lighthouse:lighthouse /etc/clickhouse-server
 
 cat > /etc/systemd/system/lighthouse-clickhouse.service <<'UNIT'
 [Unit]
-Description=Lighthouse ClickHouse 26.8.2.7 coordinator
+Description=Toudai ClickHouse 26.8.2.7 coordinator
 After=network-online.target
 [Service]
 User=lighthouse
