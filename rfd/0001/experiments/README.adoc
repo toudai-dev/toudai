@@ -136,4 +136,8 @@ conditions. Add a new run or record and link the relationship.
 |Completed
 |link:023-fixture-emitter-run.adoc[Deterministic OTLP fixture emitter]
 
+|024
+|Completed
+|link:024-key-derived-trusted-scope.adoc[Key-derived trusted scope and gateway-assigned event IDs]
+
 |===

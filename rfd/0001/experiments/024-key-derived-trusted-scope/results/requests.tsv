@@ -1,0 +1,18 @@
+id	endpoint	description	expected_http	observed_http
+a1	/v1/logs	ws A prod: two identical records	200	200
+a2	/v1/logs	ws A prod: manual resubmission of a1, same bytes (not an SDK retry)	200	200
+a3	/v1/traces	ws B prod: two identical spans	200	200
+a4	/v1/logs	ws A multi key, dataset staging	200	200
+a5	/v1/logs	ws B prod	200	200
+a6	/v1/logs	ws A prod: record-level toudai.* attributes	200	200
+r1	/v1/logs	unknown dataset on a multi-dataset key	403	403
+r2	/v1/logs	ws B key naming ws A's staging dataset	403	403
+r3	/v1/logs	multi-dataset key without a dataset	400	400
+r4	/v1/logs	override: resource toudai.workspace_id	400	400
+r5	/v1/logs	override: resource toudai.dataset	400	400
+r6	/v1/logs	override: forged toudai.scope_source marker	400	400
+r7	/v1/logs	no key	401	401
+r8	/v1/logs	unknown key	401	401
+r9	/v1/logs	read-only key	401	401
+r10	/v1/logs	valid key in Authorization instead of the key header	401	401
+r11	/v1/traces	no key (traces)	401	401

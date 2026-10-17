@@ -1,0 +1,38 @@
+id	description	expected	observed	result
+http-a1	ws A prod: two identical records -> HTTP status	200	200	PASS
+http-a2	ws A prod: manual resubmission of a1, same bytes (not an SDK retry) -> HTTP status	200	200	PASS
+http-a3	ws B prod: two identical spans -> HTTP status	200	200	PASS
+http-a4	ws A multi key, dataset staging -> HTTP status	200	200	PASS
+http-a5	ws B prod -> HTTP status	200	200	PASS
+http-a6	ws A prod: record-level toudai.* attributes -> HTTP status	200	200	PASS
+http-r1	unknown dataset on a multi-dataset key -> HTTP status	403	403	PASS
+http-r2	ws B key naming ws A's staging dataset -> HTTP status	403	403	PASS
+http-r3	multi-dataset key without a dataset -> HTTP status	400	400	PASS
+http-r4	override: resource toudai.workspace_id -> HTTP status	400	400	PASS
+http-r5	override: resource toudai.dataset -> HTTP status	400	400	PASS
+http-r6	override: forged toudai.scope_source marker -> HTTP status	400	400	PASS
+http-r7	no key -> HTTP status	401	401	PASS
+http-r8	unknown key -> HTTP status	401	401	PASS
+http-r9	read-only key -> HTTP status	401	401	PASS
+http-r10	valid key in Authorization instead of the key header -> HTTP status	401	401	PASS
+http-r11	no key (traces) -> HTTP status	401	401	PASS
+s-logs-by-scope	serving_logs rows by workspace/dataset/body	11111111-1111-4111-8111-111111111111 prod dup-body 4 | 11111111-1111-4111-8111-111111111111 prod record-forge-body 1 | 11111111-1111-4111-8111-111111111111 staging staging-body 1 | 22222222-2222-4222-8222-222222222222 prod b-body 1	11111111-1111-4111-8111-111111111111 prod dup-body 4 | 11111111-1111-4111-8111-111111111111 prod record-forge-body 1 | 11111111-1111-4111-8111-111111111111 staging staging-body 1 | 22222222-2222-4222-8222-222222222222 prod b-body 1	PASS
+s-spans-by-scope	serving_spans rows by workspace/dataset	22222222-2222-4222-8222-222222222222 prod 2	22222222-2222-4222-8222-222222222222 prod 2	PASS
+s-canonical-by-scope	canonical_events rows by workspace/dataset/signal	11111111-1111-4111-8111-111111111111 prod logs 5 | 11111111-1111-4111-8111-111111111111 staging logs 1 | 22222222-2222-4222-8222-222222222222 prod logs 1 | 22222222-2222-4222-8222-222222222222 prod spans 2	11111111-1111-4111-8111-111111111111 prod logs 5 | 11111111-1111-4111-8111-111111111111 staging logs 1 | 22222222-2222-4222-8222-222222222222 prod logs 1 | 22222222-2222-4222-8222-222222222222 prod spans 2	PASS
+s-resource-matches-column	serving_logs rows whose stored resource scope differs from the tenant_id/dataset columns	0	0	PASS
+n-rejected-bodies	stored rows containing a refused request's body marker	0	0	PASS
+n-victim	stored rows mentioning the forged victim workspace	0	0	PASS
+n-forged-id	stored rows containing the forged record event_id	0	0	PASS
+n-record-keys	stored rows containing the record-level toudai.event_id or toudai.scope_source keys	0	0	PASS
+i-uuidv7	canonical rows with a canonical-form UUIDv7 event_id / all rows	9 9	9 9	PASS
+i-unique	distinct event_ids / canonical rows (no ID shared, retries and identical events included)	9 9	9 9	PASS
+i-identical-content	dup-body rows / distinct event_ids / distinct content (same bytes sent four times)	4 4 1	4 4 1	PASS
+i-identical-spans	identical spans: rows / distinct event_ids / distinct content	2 2 1	2 2 1	PASS
+i-join-logs	serving_logs rows with exactly one canonical row sharing tenant, dataset, event_id, payload hash and payload identity	7	7	PASS
+i-join-spans	serving_spans rows with exactly one matching canonical row	2	2	PASS
+b-one-insert-per-table	finished INSERTs into serving_logs / rows written by the largest	1 7	1 7	PASS
+b-cross-workspace	workspaces among the rows that one insert wrote	2	2	PASS
+c-stored	stored rows containing SECRETMARKER	0	0	PASS
+c-query-log	query_log statements containing SECRETMARKER	0	0	PASS
+c-collector-log	Collector log lines containing SECRETMARKER	0	0	PASS
+c-responses	producer-visible response bodies containing SECRETMARKER	0	0	PASS

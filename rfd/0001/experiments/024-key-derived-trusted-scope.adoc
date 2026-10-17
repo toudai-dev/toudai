@@ -1,0 +1,160 @@
+= Experiment 024: Key-derived trusted scope and gateway-assigned event IDs
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Completed (bounded slice); dynamic key resolution, rotation/revocation, and replay provenance left open
+- *Run:* 2026-10-17T15:55:52Z-15:55:56Z (`run.sh`, exit 0)
+- *Source mutation:* None; disposable local ClickHouse, synthetic keys and fixtures, loopback only
+- *Product revision:* https://github.com/toudai-dev/collector[toudai-dev/collector] 915a3418ae81c4530a19425f4fc2b7472664242b (PR #3, merged to `main`)
+- *Harness:* `024-key-derived-trusted-scope/` (`run.sh`, fixture `keys.yaml`, ClickHouse config); evidence in `024-key-derived-trusted-scope/results/`
+- *Result:* 37 checks passed, 0 failed
+
+== Question
+
+Experiments 018 and 021 bound a credential to a workspace with static per-workspace
+`resource` processors and a `routing` connector, and gave records a content-derived
+identity. Neither derived scope from the key, rejected unknown datasets, or assigned
+identity at the gateway as Decision 0001 D5 requires. This experiment asks, for the
+product build:
+
+. Does a key-derived workspace and dataset reach every stored row, with dataset
+  selection confined to the key's list, unknown datasets rejected, and producer
+  attempts to set scope rejected or dropped?
+. Does the key text stay out of everything that can be stored, logged, or returned?
+. Is `event_id` assigned once per record before queue batching, random rather than
+  content-derived, and written unchanged by the exporter to both destinations, with
+  at-least-once semantics and no deduplication intact?
+
+== Hypothesis
+
+Written before the run:
+
+* Scope and dataset come only from the key: a request outside the key's datasets
+  writes nothing, and a producer-supplied `toudai.*` resource attribute is refused
+  rather than overwritten.
+* Four sends of byte-identical content (two records, sent twice) store four distinct
+  identities; a resubmission is not recognized as one. That is the accepted D5
+  cost, not a defect.
+* Assigning identity before the exporter's queue batch means one batch that merges two
+  workspaces' requests still stores each record under its assigned ID and workspace.
+* The pinned OTLP receiver reports a bare permanent consumer error as HTTP 500; a
+  client-visible 4xx needs the gateway to attach a gRPC status. (Observed while
+  building the processor, before this run: the first end-to-end test returned 500 for
+  the dataset and override rejections, which is why the processor's rejections carry
+  statuses.)
+
+== Fixture
+
+`keys.yaml` defines four synthetic keys, each containing the marker `SECRETMARKER` so a
+leak is greppable: workspace A with a one-dataset key (`prod`), workspace A with a
+two-dataset key (`prod`, `staging`), workspace B with a one-dataset key (`prod`), and a
+workspace A read-only key. `VICTIM` (`99999999-9999-4999-8999-999999999999`) is a
+workspace no key maps to; it appears only in forgery attempts.
+
+Accepted traffic (sent first and back to back so one queue batch can merge it):
+
+[cols="1,4"]
+|===
+|a1, a2 |Workspace A `prod`: one request with two identical records (`dup-body`), sent twice with the same bytes (a manual resubmission with `curl`, standing in for a producer retry)
+|a3 |Workspace B `prod`: one traces request with two identical spans
+|a4 |Workspace A multi-dataset key naming `staging`
+|a5 |Workspace B `prod`: one record
+|a6 |Workspace A `prod`: one record whose own attributes carry `toudai.workspace_id` = `VICTIM`, `toudai.event_id` = a forged UUIDv7, and `toudai.scope_source`
+|===
+
+Refused traffic: unknown dataset, another workspace's dataset, missing dataset on a
+multi-dataset key, resource-level `toudai.workspace_id` / `toudai.dataset` /
+`toudai.scope_source`, no key, an unknown key, a read-only key, a valid key sent in
+`Authorization` instead of the key header. Each refused request's body is
+`FORGED-REJECT-n`, so a stored trace of one is greppable.
+
+== Commands
+
+[source,sh]
+----
+git clone https://github.com/toudai-dev/collector && cd collector
+git checkout 915a3418ae81c4530a19425f4fc2b7472664242b
+nix develop --command bash <toudai>/rfd/0001/experiments/024-key-derived-trusted-scope/run.sh
+----
+
+The script builds the Collector, starts ClickHouse 26.8.2.7-lts on loopback ports
+19222/18322, loads the vendored DDL from `testdata/schema/` (without the S3 TTL/storage
+policy, which changes where parts live and nothing else), starts the Collector with
+`config/gateway.example.yaml` *unmodified* (only environment variables set ports, the key
+file, and the ClickHouse endpoint), sends the traffic above over OTLP/HTTP with `curl`,
+and compares each result with an expected value written in the script. It exits nonzero
+if any check fails.
+
+== Results
+
+All 37 checks passed (`results/checks.tsv` has expected and observed for each).
+
+[cols="2,3,3"]
+|===
+|Check |Expected |Observed
+
+|HTTP statuses
+|accepted 200; dataset outside the key 403; missing dataset on a multi-dataset key 400; forged resource `toudai.*` 400; no/unknown/read-only/wrong-header key 401
+|all 17 requests matched
+
+|Stored scope
+|logs: A/prod 4 `dup-body` + 1 record-forge, A/staging 1, B/prod 1; spans: B/prod 2; canonical 9 rows with the same split
+|matched; no stored resource scope differed from its `tenant_id`/`dataset` columns
+
+|Refused requests
+|no `FORGED-REJECT` body, no `VICTIM` workspace, no forged record event ID, no record-level `toudai.event_id` or `toudai.scope_source` key in any table
+|0 occurrences of each
+
+|Identity
+|9 canonical rows, 9 distinct canonical-form UUIDv7 IDs; four identical `dup-body` rows = four IDs; two identical spans = two IDs
+|9 / 9 / 9; 4 rows, 4 IDs, 1 distinct content; 2 rows, 2 IDs, 1 distinct content
+
+|Canonical and serving rows
+|every serving row has exactly one canonical row sharing tenant, dataset, `event_id`, and payload hash, and the payload's `identity.event_id` equals the column
+|7 of 7 logs, 2 of 2 spans
+
+|Rebatching
+|one serving_logs insert carrying all seven rows from both workspaces
+|1 finished insert, 7 rows written, 2 workspaces
+
+|Credentials
+|`SECRETMARKER` absent from every table, the query log, producer-visible responses, and the Collector log
+|0 occurrences in each
+|===
+
+== Interpretation
+
+What the results support: with the product gateway config, a key alone determines
+workspace and dataset, the pipeline refuses to guess either, and the exporter writes the
+ID the gateway assigned. The static resource processors and routing connector of
+Experiments 018 and 021 are not needed. Rejections are visible to the producer as 4xx and
+leave nothing behind. A resubmission and identical events get new identities, so exact
+counts remain counts of stored rows (D5); the harness does not inject an ambiguous insert,
+so the same-ID duplicate on an exporter retry is Experiment 021's measurement and is not
+re-measured here, only preserved by construction (the exporter derives nothing, and the
+processor runs once per request).
+
+What they do not support:
+
+* No OTLP SDK was used. Resubmitting identical bytes with `curl` is the closest the
+  harness gets to a producer retry; whether an SDK's automatic retry re-serializes,
+  reuses, or drops requests, and what that does to identity, is unmeasured.
+* The key file is static and read once at start. Rotation, revocation, cache expiry, and
+  keys per read/admin permission are not exercised.
+* One process, one run. Batching merged the requests because the run sent them within the
+  flush window; the check is that IDs and workspaces survive a merge, not that merges
+  always happen.
+* gRPC authentication and the dataset-rejection statuses over gRPC are covered by the
+  collector's Go tests against a file exporter, not by this ClickHouse run.
+* The scope marker remains a pipeline-composition guard, not authentication. Producers
+  cannot forge it through the gateway, but anything that can reach the exporter's
+  ClickHouse endpoint or a pipeline that omits the processor is outside this test.
+* Replay and overflow provenance (whether a replayed object passes the same checks) and
+  query-layer isolation are untested.
+
+== Follow-ups
+
+* Dynamic key resolution, rotation/revocation, and cache-expiry behavior (tenant policy
+  checklist, workspace-scoped key item).
+* Replay provenance once overflow objects exist.
+* A deduplication design, if the duplicate-rate measurement justifies one (Decision 0001 D5).

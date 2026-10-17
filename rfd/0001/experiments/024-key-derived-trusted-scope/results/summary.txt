@@ -1,0 +1,4 @@
+collector_revision=915a3418ae81c4530a19425f4fc2b7472664242b
+collector_uncommitted_paths=0
+clickhouse=26.8.2.7
+checks=37 failed=0
