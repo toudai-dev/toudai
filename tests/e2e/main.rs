@@ -70,6 +70,12 @@ fn spawn_service(clickhouse: &ClickHouseServer, user: &str) -> Service {
         .spawn()
         .expect("start toudai");
     let stderr = child.stderr.take().unwrap();
+    // Guard the child before waiting on it: a hang or early exit below must
+    // still reap it.
+    let mut service = Service {
+        child,
+        base: String::new(),
+    };
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -79,10 +85,10 @@ fn spawn_service(clickhouse: &ClickHouseServer, user: &str) -> Service {
             }
         }
     });
-    let base = receiver
+    service.base = receiver
         .recv_timeout(Duration::from_secs(30))
         .expect("toudai did not report its address");
-    Service { child, base }
+    service
 }
 
 struct Api {
@@ -254,20 +260,68 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
     let (_, expected_groups) = api.query(Some(KEY_A), &nine_groups).await;
     assert_eq!(expected_groups["rows"].as_array().unwrap().len(), 9);
 
-    let numbers = "SELECT number FROM numbers(5) FORMAT JSONEachRow";
+    // Requests whose answers the extra hostile settings would change: the
+    // zero-count row of an empty ungrouped count, and true/false booleans.
+    let empty_count = query_body(
+        "nothing",
+        "logs",
+        json!([]),
+        json!([]),
+        json!({"kind": "count"}),
+    );
+    let bool_attr = json!({"namespace": "record", "key": "bool.true"});
+    let bool_filter = logs(
+        json!([{"kind": "compare", "op": "eq", "attr": bool_attr,
+                "value": {"type": "bool", "value": true}}]),
+        json!([]),
+        json!({"kind": "count"}),
+    );
+    let bool_groups = logs(
+        json!([{"kind": "has_type", "attr": bool_attr, "value_type": "bool"}]),
+        json!([bool_attr]),
+        json!({"kind": "count"}),
+    );
+    let extra = [&empty_count, &bool_filter, &bool_groups];
+    let mut expected_extra = Vec::new();
+    for body in extra {
+        let (status, response) = api.query(Some(KEY_A), body).await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        expected_extra.push(response["rows"].clone());
+    }
+    assert_eq!(
+        expected_extra[0],
+        json!([{"groups": [], "events": count_json(0)}])
+    );
+    assert_eq!(expected_extra[1][0]["events"], count_json(1));
+    assert_eq!(
+        expected_extra[2],
+        json!([{"groups": [{"type": "bool", "value": true}], "events": count_json(1)}])
+    );
+
     let leaf_probe = "SELECT count() AS n FROM toudai.serving_logs \
                       WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow";
     for (user, _) in server::HOSTILE_PROFILES {
         // Precondition: left alone, this user's profile really does change what
         // a plain query returns.
-        let probe = if user == "h_leaf" {
-            leaf_probe
+        if user == "h_cache" {
+            let probe = "SELECT count() AS n FROM toudai.canonical_events \
+                         WHERE event_id = 'cache-probe' FORMAT JSONEachRow";
+            let before = server::execute_as(clickhouse, user, probe, None).await;
+            insert_canonical(clickhouse, "cache-probe", "{}").await;
+            let after = server::execute_as(clickhouse, user, probe, None).await;
+            assert_eq!(before, after, "the cache must serve the stale count");
+            assert_ne!(after, server::execute(clickhouse, probe, None).await);
         } else {
-            numbers
-        };
-        let unrestricted = server::execute(clickhouse, probe, None).await;
-        let direct = server::execute_as(clickhouse, user, probe, None).await;
-        assert_ne!(direct, unrestricted, "{user} must alter a direct query");
+            let probe = match user {
+                "h_leaf" => leaf_probe,
+                "h_emptyagg" => "SELECT count() AS n FROM numbers(0) FORMAT JSONEachRow",
+                "h_bool" => "SELECT toString(true) AS b FORMAT JSONEachRow",
+                _ => "SELECT number FROM numbers(5) FORMAT JSONEachRow",
+            };
+            let unrestricted = server::execute(clickhouse, probe, None).await;
+            let direct = server::execute_as(clickhouse, user, probe, None).await;
+            assert_ne!(direct, unrestricted, "{user} must alter a direct query");
+        }
 
         let service = spawn_service(clickhouse, user);
         let hostile = Api {
@@ -295,6 +349,14 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
             assert_eq!(response["rows"], expected_groups["rows"], "{user}");
         }
 
+        if !truncating {
+            for (body, expected) in extra.iter().zip(&expected_extra) {
+                let (status, response) = hostile.query(Some(KEY_A), body).await;
+                assert_eq!(status, StatusCode::OK, "{user}: {response}");
+                assert_eq!(&response["rows"], expected, "{user}: {body}");
+            }
+        }
+
         // The event lookup (`LIMIT 1 BY ... LIMIT 2`) is exposed to the same
         // settings: a capped result must not hide a conflict or an event.
         if !truncating {
@@ -312,7 +374,42 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
                 .await;
             assert_eq!(status, StatusCode::OK, "{user}");
         }
+
+        if user == "h_cache" {
+            // Identical requests must see inserts made between them.
+            let (status, _) = hostile.event(Some(KEY_A), "fixture", "late-1").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+            insert_canonical(clickhouse, "late-1", r#"{"n":1}"#).await;
+            let (status, text) = hostile.event(Some(KEY_A), "fixture", "late-1").await;
+            assert_eq!(status, StatusCode::OK, "cached absence: {text}");
+
+            insert_canonical(clickhouse, "late-2", r#"{"n":1}"#).await;
+            let (status, text) = hostile.event(Some(KEY_A), "fixture", "late-2").await;
+            assert_eq!(status, StatusCode::OK, "{text}");
+            insert_canonical(clickhouse, "late-2", r#"{"n":2}"#).await;
+            let (status, text) = hostile.event(Some(KEY_A), "fixture", "late-2").await;
+            assert_eq!(
+                status,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "cached single payload: {text}"
+            );
+        }
     }
+}
+
+/// Store one more canonical row for workspace A, dataset `fixture`.
+async fn insert_canonical(clickhouse: &ClickHouseServer, event_id: &str, payload: &str) {
+    let row = json!({
+        "tenant_id": WS_A, "dataset": "fixture", "signal": "logs", "event_id": event_id,
+        "timestamp": TS_TEXT, "schema_version": "1", "payload": payload,
+        "payload_sha256": format!("sha-{payload}"),
+    });
+    server::execute(
+        clickhouse,
+        "INSERT INTO toudai.canonical_events FORMAT JSONEachRow",
+        Some(&row.to_string()),
+    )
+    .await;
 }
 
 async fn health_and_authentication(api: &Api) {

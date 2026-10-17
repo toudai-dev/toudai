@@ -23,9 +23,10 @@ pub const USER: &str = "toudai";
 pub const PASSWORD: &str = "toudai-test";
 /// Users whose profiles would silently change a successful answer: truncate it
 /// (`break` overflow modes, in two limit families), cap or shift it, filter it,
-/// re-encode it, or make it an empty background reply. The test proves the
+/// re-encode it, make it an empty background reply, serve it from the query
+/// cache, drop the empty-aggregate row, or invert booleans. The test proves the
 /// service refuses to report any of them as the exact answer. `(user, settings)`.
-pub const HOSTILE_PROFILES: [(&str, &str); 7] = [
+pub const HOSTILE_PROFILES: [(&str, &str); 10] = [
     (
         "h_result",
         "<max_result_rows>1</max_result_rows><result_overflow_mode>break</result_overflow_mode><max_block_size>1</max_block_size>",
@@ -44,6 +45,15 @@ pub const HOSTILE_PROFILES: [(&str, &str); 7] = [
     (
         "h_background",
         "<run_query_in_background>1</run_query_in_background>",
+    ),
+    ("h_cache", "<use_query_cache>1</use_query_cache>"),
+    (
+        "h_emptyagg",
+        "<empty_result_for_aggregation_by_empty_set>1</empty_result_for_aggregation_by_empty_set>",
+    ),
+    (
+        "h_bool",
+        "<bool_true_representation>false</bool_true_representation><bool_false_representation>true</bool_false_representation>",
     ),
 ];
 

@@ -140,8 +140,8 @@ TOUDAI_E2E_RUNTIME=docker cargo test --test e2e   # clickhouse/clickhouse-server
 |Events `conflict-1` and `conflict-3`
 |500 `event_conflict`, no payload chosen (replays of one payload do not hide the other)
 
-|Query and event requests run as users whose profiles truncate the result (`max_result_rows=1`, `result_overflow_mode=break`), truncate a leaf read (`max_rows_to_read_leaf=1`, `read_overflow_mode_leaf=break`, over 200,000 `bulk` rows), or set `limit=1`, `offset=1`, `additional_result_filter=0`, `output_format=CSV`, or `run_query_in_background=1`
-|The two truncating profiles: 502 `clickhouse_error` and no rows (the service forces the ordinary and `_leaf` overflow modes to `throw` and keeps the operator's limits). The other five: exactly the unrestricted answers (nine groups; `conflict-3` is still a conflict, `typed-1` is still found, `/healthz` is healthy), because the service pins `limit`, `offset`, `filter`, `additional_result_filter`, `run_query_in_background`, `output_format`, and related result-shaping settings on every request. Each profile is first shown to change a direct query, and the unrestricted service counts all 200,000 `bulk` rows
+|Query and event requests run as users whose profiles truncate the result (`max_result_rows=1`, `result_overflow_mode=break`), truncate a leaf read (`max_rows_to_read_leaf=1`, `read_overflow_mode_leaf=break`, over 200,000 `bulk` rows), or set `limit=1`, `offset=1`, `additional_result_filter=0`, `output_format=CSV`, `run_query_in_background=1`, `use_query_cache=1`, `empty_result_for_aggregation_by_empty_set=1`, or inverted `bool_true_representation`/`bool_false_representation`
+|The two truncating profiles: 502 `clickhouse_error` and no rows (the service forces the ordinary and `_leaf` overflow modes to `throw` and keeps the operator's limits). The other eight: exactly the unrestricted answers (nine groups, the zero-count row of an empty count, a true-boolean filter and group; `conflict-3` is still a conflict, `typed-1` is still found, `/healthz` is healthy; for the cache user, an identical event request sees an event inserted after a 404 and a second payload inserted after a 200), because the service pins `limit`, `offset`, `filter`, `additional_result_filter`, `run_query_in_background`, `output_format`, `use_query_cache`, `empty_result_for_aggregation_by_empty_set`, the boolean representations, and related settings on every request. The event and health checks run for these eight; the two truncating users are checked on queries only. Each profile is first shown to change a direct query, and the unrestricted service counts all 200,000 `bulk` rows
 |===
 
 == Results
@@ -184,6 +184,11 @@ test run each time; each failed at the intended assertion and was reverted:
   matching hostile user got a wrong or failed answer (one group of nine, a
   filtered-out result, a CSV body, an empty background reply) with 200 or a
   false error (found by the oracle review).
+
+. The client without `use_query_cache`, `empty_result_for_aggregation_by_empty_set`,
+  or the boolean representations (one at a time): a repeated event request kept
+  returning the cached 404; the empty count returned no row; a true boolean was
+  grouped as false (found by the oracle review).
 
 Two defects surfaced without mutation. During development, a body
 `{"kind":"count","tenant_id":"x"}` was accepted because serde ignores unknown
