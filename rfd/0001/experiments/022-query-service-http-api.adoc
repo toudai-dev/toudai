@@ -190,6 +190,11 @@ test run each time; each failed at the intended assertion and was reverted:
   returning the cached 404; the empty count returned no row; a true boolean was
   grouped as false (found by the oracle review).
 
+. `serde_json` without `float_roundtrip`: the request text `900719925474099.5`
+  parsed as `...099.625`, so the stored double was missed (the wire unit test
+  and a singleton Float64 equality scenario failed; found by the oracle
+  review).
+
 Two defects surfaced without mutation. During development, a body
 `{"kind":"count","tenant_id":"x"}` was accepted because serde ignores unknown
 fields on a unit variant of an internally tagged enum; the wire-format unit test

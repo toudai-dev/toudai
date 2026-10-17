@@ -41,6 +41,9 @@ const BULK_ROWS: u64 = 200_000;
 
 const SPECIAL_KEY: &str = "k +%&=\t é\\'\"";
 const SPECIAL_VALUE: &str = "v \\ ' \n";
+/// Exact in binary64, but a lossy decimal parser reads it as ...099.625.
+const HALF_KEY: &str = "near.2^50";
+const HALF_VALUE: f64 = 900719925474099.5;
 const INJECTION_KEY: &str = "a' OR 1=1 --";
 
 struct Service {
@@ -197,7 +200,8 @@ async fn load(server: &ClickHouseServer) {
         json!({"tenant_id": WS_A, "dataset": "special", "event_id": "s-1",
                "routing_epoch": 1, "timestamp": TS_TEXT,
                "record_string": {SPECIAL_KEY: SPECIAL_VALUE},
-               "record_int": {INJECTION_KEY: 5}}),
+               "record_int": {INJECTION_KEY: 5},
+               "record_double": {HALF_KEY: HALF_VALUE}}),
     ]
     .iter()
     .map(Value::to_string)
@@ -813,6 +817,18 @@ async fn scope_and_escaping(api: &Api) {
         (
             "injection-shaped key does not match a prefix",
             json!([{"kind": "exists", "attr": string_attr("a' OR 1=1")}]),
+            "0",
+        ),
+        (
+            "a double literal reaches ClickHouse with the digits sent",
+            json!([{"kind": "compare", "op": "eq", "attr": string_attr(HALF_KEY),
+                    "value": {"type": "double", "value": HALF_VALUE}}]),
+            "1",
+        ),
+        (
+            "the next representable double is a different value",
+            json!([{"kind": "compare", "op": "eq", "attr": string_attr(HALF_KEY),
+                    "value": {"type": "double", "value": HALF_VALUE + 0.125}}]),
             "0",
         ),
         (
