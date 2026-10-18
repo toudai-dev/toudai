@@ -1,0 +1,21 @@
+[package]
+name = "fixture-emitter"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone crate: the root Cargo.toml has no [workspace], and the empty table
+# below keeps Cargo from treating this directory as a member of it.
+[workspace]
+
+[dependencies]
+opentelemetry = { version = "0.33", features = ["logs", "trace", "metrics"] }
+opentelemetry_sdk = { version = "0.33", features = ["logs", "trace", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["grpc-tonic", "http-proto", "reqwest-blocking-client", "logs", "trace", "metrics"] }
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic", "logs", "trace", "metrics"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tonic = "0.14"
+prost = "0.14"
+sha2 = "0.10"
+serde_json = "1"
+base64 = "0.22"

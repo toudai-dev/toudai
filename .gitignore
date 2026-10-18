@@ -10,6 +10,7 @@
 
 # Rust build output
 /target/
+/fixture-emitter/target/
 
 .DS_Store
 .idea

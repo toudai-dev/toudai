@@ -46,6 +46,13 @@ notification-driven or proprietary batch ID is involved. Cross-workspace query
 isolation and the final application-event encoding remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
+The Experiment 023 fixture emitter exercises one working encoding through the
+standard Rust SDK: an application event is an OTLP log record with `event_name` set,
+an optional body, and typed record attributes, served with `kind` `event`. It was
+checked only on the wire against its own expected contents, so the encoding stays
+open until it is decided and tested through the Collector path. See
+link:experiments/023-fixture-emitter-run.adoc[Experiment 023].
++
 Product tree: the owned exporter's `event_id` is still the content-derived Experiment 021
 identity. Decision 0001 D5 assigns `event_id` at the gateway before batching, which the
 exporter does not implement yet.

@@ -132,4 +132,8 @@ conditions. Add a new run or record and link the relationship.
 |Completed (bounded slice)
 |link:022-query-service-http-api.adoc[Query service HTTP API against ClickHouse]
 
+|023
+|Completed
+|link:023-fixture-emitter-run.adoc[Deterministic OTLP fixture emitter]
+
 |===
