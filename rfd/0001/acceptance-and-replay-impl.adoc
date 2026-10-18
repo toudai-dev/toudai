@@ -21,17 +21,18 @@ link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +
 Product tree: the owned exporter and the Collector distribution live in
 https://github.com/toudai-dev/collector[toudai-dev/collector], which owns the
-component pins; ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`. Still open:
-there is no product gateway configuration yet, the owned exporter does not map native
-metrics, and no standard-OTLP run of the product build is recorded as an experiment.
+component pins; ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`. The product gateway
+configuration is now `config/gateway.example.yaml` in that repository, and Experiment 024
+records an OTLP logs-and-traces run of the product build through it. Still open: the owned
+exporter does not map native metrics, so a metrics run is missing.
 
-* [ ] Define application-event encoding and internal identity assignment without requiring proprietary producer batch IDs; verify what survives SDK retries and Collector rebatching.
+* [x] Define internal identity assignment without requiring proprietary producer batch IDs; verify what survives producer resubmission and Collector rebatching.
 +
 Experiment 018 observed that exporter queue batching merges separate requests
 into one downstream request while preserving each resource group's attributes
 (the captured batch was same-workspace only; cross-workspace batching was not
 exercised), and that a producer retry after a crash inserted the same records
-again with no deduplication. Application-event encoding itself remains open.
+again with no deduplication.
 +
 Experiment 021 measured one real cross-workspace downstream batch from the owned
 exporter: a single logged export carried both synthetic workspaces and the four
@@ -46,16 +47,39 @@ notification-driven or proprietary batch ID is involved. Cross-workspace query
 isolation and the final application-event encoding remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
+Product tree and Experiment 024: Decision 0001 D5 is implemented. The `toudaigateway`
+processor in https://github.com/toudai-dev/collector[toudai-dev/collector] assigns every
+log record and span a random UUIDv7 `event_id` at trusted-scope injection, before the
+exporter's queue batching, and the exporter writes that ID to the canonical and serving
+rows without deriving anything from content (it fails the export on a missing or
+non-UUIDv7 ID). Measured through the product gateway config: two byte-identical records,
+and the same request resubmitted with `curl`, stored nine distinct IDs across nine rows
+(a resubmitted request is a new request and gets new IDs; the gateway cannot tell a
+retransmission from a second legitimate event, which is the D5 trade-off); a producer-supplied `toudai.event_id`
+on a record was replaced; and one queue batch merged requests from both workspaces into a
+single serving insert in which every row's canonical and serving IDs agree and stay
+unique, so rebatching after assignment does not change or collide identities. At-least-once semantics are kept: an exporter retry after an ambiguous insert
+reuses the same ID and writes it twice, and nothing deduplicates. See
+link:experiments/024-key-derived-trusted-scope.adoc[Experiment 024].
+
+* [ ] Verify what survives automatic retries of real OTLP SDK exporters (retry on 5xx/timeout, re-serialization, partial-success handling) through the gateway.
++
+Split from the item above: Experiments 018, 021, and 024 resubmit fixtures with scripts or
+`curl`, not an SDK, and Experiment 023 uses the Rust SDK only to emit and checks the wire,
+so no recorded run exercises an SDK's own retry behavior against the gateway-assigned
+identity.
+
+* [ ] Define application-event encoding.
++
+Split from the identity item when it was implemented. Experiments 018 and 021
+characterize the typed mapping; the final application-event encoding remains open.
++
 The Experiment 023 fixture emitter exercises one working encoding through the
 standard Rust SDK: an application event is an OTLP log record with `event_name` set,
 an optional body, and typed record attributes, served with `kind` `event`. It was
 checked only on the wire against its own expected contents, so the encoding stays
 open until it is decided and tested through the Collector path. See
 link:experiments/023-fixture-emitter-run.adoc[Experiment 023].
-+
-Product tree: the owned exporter's `event_id` is still the content-derived Experiment 021
-identity. Decision 0001 D5 assigns `event_id` at the gateway before batching, which the
-exporter does not implement yet.
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
 +
@@ -109,8 +133,8 @@ https://github.com/toudai-dev/collector[toudai-dev/collector]. Scratch runs of t
 exporter against ClickHouse 26.8.2.7 with an S3 emulator inserted typed log and span
 rows, stamped the epoch, moved an old payload partition to the S3 disk by TTL, and
 retrieved it by `(tenant_id, dataset, event_id)`. Those runs are not recorded as an
-experiment, and dataset routing still comes from a static `resource` processor, so the
-item stays open.
+experiment. Dataset routing is now key-derived rather than a static `resource` processor
+(Experiment 024), but the scratch runs are still unrecorded, so the item stays open.
 
 * [ ] Integrate authenticated tenant policy before both exports; demonstrate normal-path ingestion and exact-event retrieval against independent fixture expectations.
 +
@@ -140,6 +164,14 @@ fixtures, not the owned exporter's output, and the harness serves them from a
 local-disk stand-in for the `object` volume, so the item stays open for
 normal-path ingestion through authenticated tenant policy, retrieval of a
 payload after its TTL move to S3, and dynamic key resolution.
++
+Experiment 024 added static key-derived scope with dataset rejection ahead of both
+exports (see the key-derived scope item in
+link:tenant-policy-and-isolation-impl.adoc[Tenant policy and isolation]), with
+normal-path ingestion checked against independent expectations and canonical and serving
+rows joined by the assigned identity. The item stays open: tenant policy is still a static
+file without rotation, revocation, or caching, and Experiment 024's rows were not retrieved
+through the query service (Experiment 022's retrieval fixtures are hand-authored). See link:experiments/024-key-derived-trusted-scope.adoc[Experiment 024].
 
 == PoC-required: independent health telemetry
 
