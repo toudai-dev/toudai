@@ -55,8 +55,11 @@ type tests, and grouping are accepted for them (anything else is an explicit
 numeric comparison, and the response reports how many events that skipped
 (`non_finite_excluded`) instead of failing; group values order by
 `(type, text)`, not numerically; and the column names follow the product DDL in
-`clickhouse/schema/` (`tenant_id`, `timestamp`), which the ClickHouse-backed
-tests apply verbatim. The query layer does not yet filter on `routing_epoch`.
+`clickhouse/schema/` (`dataset`, `timestamp`), which the ClickHouse-backed
+tests apply verbatim. Since link:decisions/0002-single-tenant-core.adoc[Decision 0002]
+there is no tenant column: a query is scoped to the one dataset it names, a read key may
+be restricted to a dataset list, and the fixture's second workspace is a second dataset
+(`fixture-b`). The query layer does not yet filter on `routing_epoch`.
 The presentation of an unavailable duration remains a rendering decision.
 
 * [x] Compare companion-type, tagged-value, and native typed Map encodings against the typed fixture; verify lossless canonical round-trip, type-sensitive filters/groups, numeric rather than lexical ordering, presence semantics, aggregate type errors/overflow, and lossless response encoding; record storage and execution cost before selecting the PoC DDL.
