@@ -12,7 +12,7 @@
 use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
 use super::schema::{
     self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TENANT_COLUMN, TIMESTAMP_COLUMN, TIMING_END_BEFORE_START, TYPED_SCALARS,
+    TIMESTAMP_COLUMN, TIMING_END_BEFORE_START, TYPED_SCALARS,
 };
 use super::value::{Literal, ValueType};
 
@@ -153,10 +153,6 @@ fn conditions(
     keep: impl Fn(&Predicate) -> bool,
 ) -> Vec<String> {
     let mut conditions = vec![
-        format!(
-            "{TENANT_COLUMN} = {}",
-            binder.string(&query.scope.workspace_id)
-        ),
         format!("{DATASET_COLUMN} = {}", binder.string(&query.scope.dataset)),
         format!(
             "{TIMESTAMP_COLUMN} >= fromUnixTimestamp64Nano({})",
@@ -488,7 +484,6 @@ mod tests {
         let hostile = "x' OR 1=1; --";
         let query = Query {
             scope: Scope {
-                workspace_id: "ws".into(),
                 dataset: "ds".into(),
             },
             signal: Signal::Logs,

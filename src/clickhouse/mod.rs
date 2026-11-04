@@ -4,7 +4,7 @@
 //! request body and every parameter is a `param_<name>` URL argument that
 //! ClickHouse parses against the `{name:Type}` placeholder. Nothing from a
 //! request is ever interpolated into the SQL, so attribute keys, literals, and
-//! the tenant scope cannot change a statement.
+//! the dataset scope cannot change a statement.
 
 use std::fmt;
 use std::time::Duration;

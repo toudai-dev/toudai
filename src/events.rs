@@ -1,9 +1,8 @@
 //! Exact-event retrieval from the canonical payload table.
 //!
-//! `canonical_events` is sorted by `(tenant_id, dataset, event_id)` (Decision
-//! 0001 D3), so a lookup is a primary-key search that needs no event time. The
-//! tenant comes from the caller's credential and is bound as a parameter like
-//! the dataset and event ID.
+//! A lookup is by `(dataset, event_id)` (Decision 0002 D2), the canonical
+//! table's sort key, so it is a primary-key search that needs no event time.
+//! Both are bound as parameters.
 
 use std::fmt;
 
@@ -62,26 +61,19 @@ fn string_param(name: &str, value: &str) -> Param {
 /// under one identity is an error, not a pick. `LIMIT 1 BY payload_sha256`
 /// collapses replays before the final `LIMIT 2`, so any number of identical
 /// copies cannot crowd a differing payload out of the two rows read.
-pub fn lookup_statement(
-    tables: &ServingTables,
-    tenant_id: &str,
-    dataset: &str,
-    event_id: &str,
-) -> SqlStatement {
+pub fn lookup_statement(tables: &ServingTables, dataset: &str, event_id: &str) -> SqlStatement {
     SqlStatement {
         sql: format!(
             "SELECT dataset, event_id, signal, \
              toUnixTimestamp64Nano(timestamp) AS timestamp_ns, \
              schema_version, payload, payload_sha256 \
              FROM {} \
-             WHERE tenant_id = {{tenant_id:String}} \
-             AND dataset = {{dataset:String}} \
+             WHERE dataset = {{dataset:String}} \
              AND event_id = {{event_id:String}} \
              ORDER BY payload_sha256 LIMIT 1 BY payload_sha256 LIMIT 2 FORMAT JSONEachRow",
             tables.canonical_events()
         ),
         params: vec![
-            string_param("tenant_id", tenant_id),
             string_param("dataset", dataset),
             string_param("event_id", event_id),
         ],
@@ -164,24 +156,17 @@ mod tests {
     #[test]
     fn lookup_binds_every_identifier() {
         let tables = ServingTables::new("toudai").unwrap();
-        let hostile = "x' OR tenant_id != '";
-        let statement = lookup_statement(&tables, "tenant-a", "ds", hostile);
+        let hostile = "x' OR dataset != '";
+        let statement = lookup_statement(&tables, "ds-a", hostile);
         assert!(statement.sql.contains("FROM toudai.canonical_events "));
         assert!(!statement.sql.contains(hostile));
-        assert!(!statement.sql.contains("tenant-a"));
+        assert!(!statement.sql.contains("ds-a"));
         let bound: Vec<(&str, &str)> = statement
             .params
             .iter()
             .map(|p| (p.name.as_str(), p.value.as_str()))
             .collect();
-        assert_eq!(
-            bound,
-            [
-                ("tenant_id", "tenant-a"),
-                ("dataset", "ds"),
-                ("event_id", hostile)
-            ]
-        );
+        assert_eq!(bound, [("dataset", "ds-a"), ("event_id", hostile)]);
     }
 
     #[test]

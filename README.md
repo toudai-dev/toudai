@@ -18,7 +18,7 @@ Create the schema first with `clickhouse/apply-schema.sh` (see
 `clickhouse/README.adoc`; the database defaults to `toudai`), then:
 
 ```sh
-printf 'dev-read-key 11111111-1111-4111-8111-111111111111\n' > read-keys.txt
+printf 'dev-read-key\n' > read-keys.txt
 TOUDAI_READ_KEYS_FILE=read-keys.txt \
 TOUDAI_CLICKHOUSE_URL=http://127.0.0.1:8123 \
   cargo run
@@ -30,12 +30,14 @@ TOUDAI_CLICKHOUSE_URL=http://127.0.0.1:8123 \
 | `GET /v1/events/{dataset}/{event_id}` | The canonical payload of one event from `canonical_events`. |
 | `GET /healthz` | 200 while ClickHouse answers, 503 otherwise. No credential needed. |
 
-Both data endpoints need `Authorization: Bearer <read key>`. The key selects the
-tenant (workspace) every statement is scoped to; a request body that names a
-tenant is rejected, and another tenant's event is reported as not found. The
-static key file (`<key> <tenant_id>` per line, read at startup) is a placeholder
-for the tenant-policy registry, which will own key resolution, rotation,
-revocation, and dataset authorization.
+Both data endpoints need `Authorization: Bearer <read key>`. One deployment
+serves one customer
+([Decision 0002](rfd/0001/decisions/0002-single-tenant-core.adoc)), so a key
+admits the request, optionally restricted to a list of datasets: a dataset
+outside the list is refused with 403. Every statement is scoped to the dataset
+the request names. The static key file (`<key> [<dataset>...]` per line, no
+datasets meaning all of them, read at startup) is a placeholder for the key
+store.
 
 Configuration is environment-only: `TOUDAI_READ_KEYS_FILE` (required),
 `TOUDAI_LISTEN` (`127.0.0.1:8080`), `TOUDAI_CLICKHOUSE_URL`

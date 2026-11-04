@@ -12,7 +12,7 @@ async fn serve() -> String {
     let state = Arc::new(AppState {
         clickhouse: ClickHouse::new(ClickHouseConfig::new("http://127.0.0.1:1")).unwrap(),
         tables: ServingTables::new("toudai").unwrap(),
-        keys: ReadKeys::parse("key-a tenant-a\n").unwrap(),
+        keys: ReadKeys::parse("key-a\nkey-d d\n").unwrap(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -102,6 +102,90 @@ async fn query_requests_are_rejected_before_any_statement_runs() {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         assert_eq!(response["error"]["code"], code, "{body}");
+    }
+}
+
+/// A restricted key is refused other datasets after validation and before any
+/// statement runs: the backend here is unreachable, so an allowed dataset
+/// reaches it and fails with 502 while a refused one never gets that far.
+#[tokio::test]
+async fn datasets_outside_the_keys_list_are_refused() {
+    let base = serve().await;
+    let mut other = valid_query();
+    other["dataset"] = json!("other");
+    let mut unscoped = valid_query();
+    unscoped["dataset"] = json!("");
+    // (key, method, path, body, status, code)
+    let cases = [
+        // An invalid request is a 400 before the dataset list is consulted.
+        (
+            "key-d",
+            "/v1/query",
+            Some(unscoped),
+            StatusCode::BAD_REQUEST,
+            "missing_scope",
+        ),
+        (
+            "key-d",
+            "/v1/query",
+            Some(other.clone()),
+            StatusCode::FORBIDDEN,
+            "dataset_not_allowed",
+        ),
+        (
+            "key-d",
+            "/v1/events/other/e1",
+            None,
+            StatusCode::FORBIDDEN,
+            "dataset_not_allowed",
+        ),
+        (
+            "key-d",
+            "/v1/query",
+            Some(valid_query()),
+            StatusCode::BAD_GATEWAY,
+            "clickhouse_unavailable",
+        ),
+        (
+            "key-d",
+            "/v1/events/d/e1",
+            None,
+            StatusCode::BAD_GATEWAY,
+            "clickhouse_unavailable",
+        ),
+        (
+            "key-a",
+            "/v1/query",
+            Some(other),
+            StatusCode::BAD_GATEWAY,
+            "clickhouse_unavailable",
+        ),
+        (
+            "key-a",
+            "/v1/events/other/e1",
+            None,
+            StatusCode::BAD_GATEWAY,
+            "clickhouse_unavailable",
+        ),
+    ];
+    for (key, path, body, status, code) in cases {
+        let method = if body.is_some() {
+            reqwest::Method::POST
+        } else {
+            reqwest::Method::GET
+        };
+        let (got, _, response) = call(
+            method,
+            format!("{base}{path}"),
+            Some(&format!("Bearer {key}")),
+            body,
+        )
+        .await;
+        assert_eq!(
+            (got, response["error"]["code"].as_str()),
+            (status, Some(code)),
+            "{key} {path}"
+        );
     }
 }
 

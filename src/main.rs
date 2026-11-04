@@ -3,13 +3,13 @@
 //! Configuration is read from the environment:
 //!
 //! * `TOUDAI_READ_KEYS_FILE` (required): the static read-key file, a placeholder
-//!   for the tenant-policy registry (see `toudai::auth`).
+//!   for the key store (see `toudai::auth`).
 //! * `TOUDAI_LISTEN`: address to serve on (default `127.0.0.1:8080`).
 //! * `TOUDAI_CLICKHOUSE_URL`: ClickHouse HTTP interface (default
 //!   `http://127.0.0.1:8123`), with `TOUDAI_CLICKHOUSE_USER` and
 //!   `TOUDAI_CLICKHOUSE_PASSWORD` when it needs credentials.
-//! * `TOUDAI_CLICKHOUSE_DATABASE`: the database holding the serving and
-//!   canonical tables (default `toudai`).
+//! * `TOUDAI_CLICKHOUSE_DATABASE`: the deployment database holding the serving
+//!   and canonical tables (default `toudai`, as for `clickhouse/apply-schema.sh`).
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -24,8 +24,9 @@ fn env(name: &str) -> Option<String> {
 }
 
 async fn run() -> Result<(), String> {
-    let keys_path = env("TOUDAI_READ_KEYS_FILE")
-        .ok_or("TOUDAI_READ_KEYS_FILE is required: the file mapping read keys to tenants")?;
+    let keys_path = env("TOUDAI_READ_KEYS_FILE").ok_or(
+        "TOUDAI_READ_KEYS_FILE is required: the file listing read keys and their datasets",
+    )?;
     let keys = std::fs::read_to_string(&keys_path)
         .map_err(|e| format!("cannot read {keys_path}: {e}"))
         .and_then(|text| ReadKeys::parse(&text).map_err(|e| format!("{keys_path}: {e}")))?;

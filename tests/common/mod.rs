@@ -186,11 +186,10 @@ pub fn tables() -> ServingTables {
     ServingTables::new(DATABASE).expect("valid database name")
 }
 
-/// Workspace A, dataset `fixture`, every fixture log event (all sit at `TS`).
+/// Dataset `fixture`, every fixture log event (all sit at `TS`).
 pub fn logs_query() -> Query {
     Query {
         scope: Scope {
-            workspace_id: WS_A.into(),
             dataset: DATASET.into(),
         },
         signal: Signal::Logs,
