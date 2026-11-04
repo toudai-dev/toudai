@@ -1,7 +1,8 @@
 = ClickHouse schema
 
 The DDL the PoC vertical slice is built on, as fixed by
-link:../rfd/0001/decisions/0001-poc-physical-layout.adoc[Decision 0001]. It is derived from
+link:../rfd/0001/decisions/0001-poc-physical-layout.adoc[Decision 0001] and amended by
+link:../rfd/0001/decisions/0002-single-tenant-core.adoc[Decision 0002]. It is derived from
 `rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/serving-tables.sql`,
 which stays in place as evidence.
 
@@ -10,14 +11,16 @@ which stays in place as evidence.
 | File | Creates | Notes
 
 | `schema/001-database.sql` | the deployment database | Named by the `database` parameter (default `toudai`)
-| `schema/002-canonical-events.sql` | `canonical_events` | Payload table (D3) on the `toudai_payload` storage policy; the TTL moves partitions older than two days to the S3-backed `object` volume. Sorted for `(tenant_id, dataset, event_id)` lookup.
+| `schema/002-canonical-events.sql` | `canonical_events` | Payload table (D3) on the `toudai_payload` storage policy; the TTL moves partitions older than two days to the S3-backed `object` volume. Sorted for `(dataset, event_id)` lookup.
 | `schema/003-serving-logs.sql` | `serving_logs` | Hybrid typed-Map layout (D1)
 | `schema/004-serving-spans.sql` | `serving_spans` | Same, with span timing diagnostics
 |===
 
 Serving tables use daily partitions by event `timestamp`, the sort key
-`(tenant_id, dataset, timestamp, event_id)`, and a `routing_epoch UInt16` stamp (D2, D4).
-`tenant_id` holds the globally unique workspace ID. Identifiers are `String`.
+`(dataset, timestamp, event_id)`, and a `routing_epoch UInt16` stamp (D2, D4).
+There is no tenant column: one database holds one deployment's data, and `dataset` is a
+partition of it, not an isolation boundary. Identifiers are `String`. Before any retained
+data exists, a schema change is applied by dropping and reloading the tables.
 
 `config.d/toudai-storage.xml` defines the disks and the `toudai_payload` policy the
 payload table names. Its S3 endpoint and cache size are placeholders for the deployment.

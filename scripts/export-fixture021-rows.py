@@ -13,11 +13,12 @@ fixture, produced by that verifier's own independent expectation functions
 
 The experiment's second workspace is the second dataset here: Decision 0002
 removed workspaces from the core, and `dataset` is the partition a query is
-scoped to.
+scoped to. The experiment's workspace column and the `toudai.workspace_id` and
+`toudai.scope_source` resource attributes are dropped for the same reason.
 
 Rows use the product column names of `clickhouse/schema/003-serving-logs.sql`
-and `004-serving-spans.sql` (`tenant_id`, `timestamp`, `routing_epoch`), not the
-experiment's `workspace_id` and `ts`. Event identities are the fixture's own
+and `004-serving-spans.sql` (`timestamp`, `routing_epoch`), not the
+experiment's `ts`. Event identities are the fixture's own
 (`typed-1`, `sum-a`, ...); the owned exporter stores content-derived identities
 instead, which this layer never reads. The experiment harness needs its pinned Python dependencies; see
 `rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/setup.sh`.
@@ -50,18 +51,18 @@ fixture019 = fixture021.fixture019
 # The recorded experiment harness is immutable and forges the pre-rename
 # `lighthouse.*` resource attribute keys. The product tree uses the Toudai
 # names, so the exported rows translate the keys instead of editing the harness.
-WIRE_KEYS = {
-    "lighthouse.workspace_id": "toudai.workspace_id",
-    "lighthouse.dataset": "toudai.dataset",
-    "lighthouse.scope_source": "toudai.scope_source",
-}
+# Decision 0002 removed the workspace and scope-source attributes from the wire
+# contract, so they are dropped rather than translated.
+WIRE_KEYS = {"lighthouse.dataset": "toudai.dataset"}
+DROPPED_KEYS = {"lighthouse.workspace_id", "lighthouse.scope_source"}
 
 
-# The two copies of the fixture: (workspace, dataset). The verifier's
-# expectations name the experiment's single dataset; the second copy moves to its
-# own dataset, so the trusted `toudai.dataset` resource attribute follows it.
+# The two copies of the fixture. The verifier's expectations name the
+# experiment's single dataset; the second copy moves to its own dataset, so the
+# trusted `toudai.dataset` resource attribute follows it. The verifier still
+# takes a workspace, whose only effect is the dropped workspace attribute.
 SECOND_DATASET = "fixture-b"
-COPIES = ((fixture021.WS_A, fixture021.DATASET), (fixture021.WS_B, SECOND_DATASET))
+DATASETS = (fixture021.DATASET, SECOND_DATASET)
 
 
 # The serving tables stamp each row with its placement epoch (D4); the fixture
@@ -70,7 +71,11 @@ ROUTING_EPOCH = 1
 
 
 def wire_keys(attributes: dict) -> dict:
-    return {WIRE_KEYS.get(key, key): value for key, value in attributes.items()}
+    return {
+        WIRE_KEYS.get(key, key): value
+        for key, value in attributes.items()
+        if key not in DROPPED_KEYS
+    }
 
 
 def dump(obj) -> str:
@@ -100,10 +105,9 @@ def maps(prefix: str, record: dict) -> dict:
     }
 
 
-def log_row(event: dict, workspace: str, dataset: str) -> dict:
-    e = verify.log_expectation(event, workspace)
+def log_row(event: dict, dataset: str) -> dict:
+    e = verify.log_expectation(event, fixture021.WS_A)
     return {
-        "tenant_id": workspace,
         "routing_epoch": ROUTING_EPOCH,
         "dataset": dataset,
         "event_id": event["event_id"],
@@ -126,10 +130,9 @@ def log_row(event: dict, workspace: str, dataset: str) -> dict:
     }
 
 
-def span_row(event: dict, workspace: str, dataset: str) -> dict:
-    e = verify.span_expectation(event, workspace)
+def span_row(event: dict, dataset: str) -> dict:
+    e = verify.span_expectation(event, fixture021.WS_A)
     return {
-        "tenant_id": workspace,
         "routing_epoch": ROUTING_EPOCH,
         "dataset": dataset,
         "event_id": event["event_id"],
@@ -155,8 +158,8 @@ def span_row(event: dict, workspace: str, dataset: str) -> dict:
 
 
 def build() -> dict[str, str]:
-    logs = [log_row(e, ws, ds) for ws, ds in COPIES for e in fixture019.EVENTS if not e["duplicate"]]
-    spans = [span_row(e, ws, ds) for ws, ds in COPIES for e in fixture021.ALL_SPAN_EVENTS]
+    logs = [log_row(e, ds) for ds in DATASETS for e in fixture019.EVENTS if not e["duplicate"]]
+    spans = [span_row(e, ds) for ds in DATASETS for e in fixture021.ALL_SPAN_EVENTS]
     return {
         "serving_logs.jsonl": "".join(dump(r) + "\n" for r in logs),
         "serving_spans.jsonl": "".join(dump(r) + "\n" for r in spans),

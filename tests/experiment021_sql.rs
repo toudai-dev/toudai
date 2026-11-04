@@ -48,14 +48,14 @@ fn fixture_loaded() {
     // rejects (`dup-1`), in each of two datasets.
     let per_dataset = ch.raw(
         &format!(
-            "SELECT tenant_id, dataset, count() FROM {DATABASE}.serving_logs \
-             GROUP BY tenant_id, dataset ORDER BY tenant_id, dataset"
+            "SELECT dataset, count() FROM {DATABASE}.serving_logs \
+             GROUP BY dataset ORDER BY dataset"
         ),
         &[],
     );
     assert_eq!(
         per_dataset,
-        format!("{WS_A}\t{DATASET}\t27\n{WS_B}\t{SECOND_DATASET}\t27\n")
+        format!("{DATASET}\t27\n{SECOND_DATASET}\t27\n")
     );
 }
 

@@ -1,9 +1,9 @@
 -- Decision 0001 D1/D2/D4: serving rows for logs.
 --
--- Sort key (tenant_id, dataset, timestamp, event_id) and daily partitions by event
--- time (D2). `tenant_id` holds the globally unique workspace ID, never an account
--- ID. Identifiers stay String. `routing_epoch` is the placement epoch the writer
--- stamped on the row (D4); the planner filters on it inside each shard.
+-- Sort key (dataset, timestamp, event_id) (Decision 0002 D2: no tenant column)
+-- and daily partitions by event time (D2). Identifiers stay String.
+-- `routing_epoch` is the placement epoch the writer stamped on the row (D4); the
+-- planner filters on it inside each shard.
 --
 -- Record attributes are native typed value Maps plus a key-only `record_other`
 -- map for the canonical-only kinds (bytes, array, map) and explicit empty.
@@ -11,7 +11,6 @@
 -- (Experiment 020).
 CREATE TABLE IF NOT EXISTS {database:Identifier}.serving_logs
 (
-    tenant_id String,
     dataset LowCardinality(String),
     event_id String,
     routing_epoch UInt16,
@@ -38,4 +37,4 @@ CREATE TABLE IF NOT EXISTS {database:Identifier}.serving_logs
 )
 ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
-ORDER BY (tenant_id, dataset, timestamp, event_id);
+ORDER BY (dataset, timestamp, event_id);

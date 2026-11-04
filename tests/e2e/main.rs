@@ -22,8 +22,6 @@ use sha2::{Digest, Sha256};
 
 use server::{ClickHouseServer, apply_ddl, execute, product_ddl};
 
-const WS_A: &str = "11111111-1111-4111-8111-111111111111";
-const WS_B: &str = "22222222-2222-4222-8222-222222222222";
 /// Not the default `toudai`: the DDL and the service both take the database
 /// name as configuration (Decision 0002 D1), and the test proves they agree.
 const DATABASE: &str = "toudai_e2e";
@@ -189,6 +187,22 @@ async fn load(server: &ClickHouseServer) {
         apply_ddl(server, &sql, DATABASE).await;
         eprintln!("applied {name}");
     }
+    // Decision 0002 D2: no tenant column leads any sort key.
+    let sort_keys = execute(
+        server,
+        &format!(
+            "SELECT name, sorting_key FROM system.tables \
+             WHERE database = '{DATABASE}' ORDER BY name FORMAT TSV"
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(
+        sort_keys,
+        "canonical_events\tdataset, event_id\n\
+         serving_logs\tdataset, timestamp, event_id\n\
+         serving_spans\tdataset, timestamp, event_id\n"
+    );
     for (table, rows) in [
         ("serving_logs", LOG_ROWS),
         ("serving_spans", SPAN_ROWS),
@@ -200,9 +214,9 @@ async fn load(server: &ClickHouseServer) {
     // Rows beyond the fixture: a dataset only the restricted key lists, and one
     // event whose attribute names and values need every escaping layer.
     let extra = [
-        json!({"tenant_id": WS_B, "dataset": "b-only", "event_id": "b-1",
+        json!({"dataset": "b-only", "event_id": "b-1",
                "routing_epoch": 1, "timestamp": TS_TEXT}),
-        json!({"tenant_id": WS_A, "dataset": "special", "event_id": "s-1",
+        json!({"dataset": "special", "event_id": "s-1",
                "routing_epoch": 1, "timestamp": TS_TEXT,
                "record_string": {SPECIAL_KEY: SPECIAL_VALUE},
                "record_int": {INJECTION_KEY: 5},
@@ -248,8 +262,8 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
     // Enough rows in one dataset for a leaf read limit to bite (the fixture is a
     // single block).
     let bulk = format!(
-        "INSERT INTO {DATABASE}.serving_logs (tenant_id, dataset, event_id, routing_epoch, timestamp) \
-         SELECT '{WS_A}', 'bulk', toString(number), 1, toDateTime64('{TS_TEXT}', 9) \
+        "INSERT INTO {DATABASE}.serving_logs (dataset, event_id, routing_epoch, timestamp) \
+         SELECT 'bulk', toString(number), 1, toDateTime64('{TS_TEXT}', 9) \
          FROM numbers({BULK_ROWS})"
     );
     server::execute(clickhouse, &bulk, None).await;
@@ -410,10 +424,10 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
     }
 }
 
-/// Store one more canonical row for workspace A, dataset `fixture`.
+/// Store one more canonical row in dataset `fixture`.
 async fn insert_canonical(clickhouse: &ClickHouseServer, event_id: &str, payload: &str) {
     let row = json!({
-        "tenant_id": WS_A, "dataset": "fixture", "signal": "logs", "event_id": event_id,
+        "dataset": "fixture", "signal": "logs", "event_id": event_id,
         "timestamp": TS_TEXT, "schema_version": "1", "payload": payload,
         "payload_sha256": format!("sha-{payload}"),
     });
@@ -809,7 +823,7 @@ async fn scope_and_escaping(api: &Api) {
     // A body that names a tenant or workspace is rejected, not obeyed or ignored.
     for field in ["tenant_id", "workspace_id"] {
         let mut body = query_body("b-only", "logs", json!([]), json!([]), count.clone());
-        body[field] = json!(WS_B);
+        body[field] = json!("11111111-1111-4111-8111-111111111111");
         let (status, response) = api.query(Some(KEY_ALL), &body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{field}: {response}");
         assert_eq!(response["error"]["code"], "invalid_request");
