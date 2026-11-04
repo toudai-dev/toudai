@@ -45,7 +45,8 @@ Experiment results may revise design sections, but every checklist item has exac
 
 The PoC must demonstrate one reproducible vertical slice on a single
 ClickHouse node, using the physical layout fixed in
-link:decisions/0001-poc-physical-layout.adoc[Decision 0001]:
+link:decisions/0001-poc-physical-layout.adoc[Decision 0001] as amended by the
+single-tenant scope of link:decisions/0002-single-tenant-core.adoc[Decision 0002]:
 
 ....
 OTLP -> Collector authentication/validation -> owned exporter -> ClickHouse
