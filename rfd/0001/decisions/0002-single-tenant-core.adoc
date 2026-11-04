@@ -1,0 +1,160 @@
+= Decision 0002: Single-tenant core
+:status: accepted
+:date: 2026-11-04
+
+link:../README.adoc[RFD 0001] · link:0001-poc-physical-layout.adoc[Decision 0001]
+
+This record removes multi-tenancy from the Toudai core. One deployment of the
+public engine serves one customer. Accounts, workspaces, ingestion keys mapped
+to customers, and the choice of which cluster and database a customer lands in
+belong to a private entry point and control plane outside this repository. It
+supersedes the `tenant_id` parts of Decision 0001 D2 and D3 and retires the
+tenant-policy section plan from the public RFD.
+
+== Context
+
+The product boundary follows the Typesense model: the public, GPL-3 repository
+holds the core engine (schema, exporter, query service), and the components
+that make it a paid service stay private. Typesense Cloud provisions one
+dedicated cluster per customer, so the open engine has no notion of a tenant;
+isolation is the deployment boundary. Honeycomb's hosted ingest is the same
+shape on the write side: standard SDKs and stock Collectors send OTLP to an
+owned endpoint that resolves the key and routes, and the storage behind it is
+not what customers address.
+
+Decision 0001 baked `tenant_id` into every sort key and the payload lookup
+key, the query service scopes every query by a read key mapped to a tenant,
+the collector carries an auth extension and a gateway processor that derive
+workspace scope from the key (Experiment 024), and the tenant-policy plan
+still holds cross-workspace authorization and workload-isolation tests. All of
+that is machinery for a problem the private layer solves by routing: a request
+arrives with a key, the entry point maps the key to one customer, and the
+customer maps to one cluster and one database. Below that line nothing needs
+to know who the customer is.
+
+The cost of keeping tenancy in the core is paid on every path: a column in
+every sort key, an authorization check in every query, a scope marker through
+every pipeline, and a test matrix for colliding names across workspaces. The
+cost of dropping it is a schema reload before any retained data exists, which
+is the cheapest moment there will be.
+
+== Decisions
+
+=== D1. Deployment unit
+
+The unit the public engine knows about is one customer's data in one
+ClickHouse database. A deployment may be a dedicated cluster or one database
+among many on a shared cluster; the engine does not distinguish the two. The
+database name is configuration (default `toudai`) in the DDL application, the
+exporter, and the query service, and nothing in the core assumes it owns the
+server.
+
+The resource hierarchy above the database (`account -> workspace`) and the
+mapping from an ingestion or read key to a customer are private control-plane
+state. The public engine never receives, stores, or checks a workspace or
+account identifier.
+
+=== D2. Schema
+
+Supersedes the `tenant_id` parts of Decision 0001 D2 and D3.
+
+* `tenant_id` is removed from `canonical_events`, `serving_logs`, and
+  `serving_spans`, and from the canonical payload's identity block.
+* Sort keys become `(dataset, timestamp, event_id)` for the serving tables and
+  `(dataset, event_id)` for the canonical payload table. Payload lookup is by
+  `(dataset, event_id)`.
+* `dataset` stays. It is a customer-internal partition of their own data (for
+  example `prod` and `staging`), not an isolation boundary.
+* Daily partitions, `String` identifiers, `routing_epoch`, the S3-backed
+  payload disk with its cache volume and `TTL ... TO VOLUME`, and the typed
+  `Map` layout of Decision 0001 D1 are unchanged.
+* The wire resource attribute for the dataset is `toudai.dataset`.
+  `toudai.workspace_id` and `toudai.scope_source` are removed from the wire
+  contract.
+
+=== D3. Identity and authentication in the core
+
+* `event_id` is still assigned at the gateway before batching, delivery is
+  still at least once, and nothing deduplicates (Decision 0001 D5 unchanged).
+  A producer-supplied `toudai.event_id` is still rejected.
+* Authentication in the core shrinks to key validity. A write key admits OTLP
+  to the deployment; a read key admits queries. A key may optionally be
+  restricted to a list of datasets. Keys map to permissions, never to a
+  customer, because the deployment already is the customer.
+* The dataset of a request comes from the `X-Toudai-Dataset` header, else the
+  key's single allowed dataset, else a configured default. A dataset outside
+  the key's list is refused. Producer-supplied `toudai.dataset` on the
+  resource is accepted only when it matches the resolved dataset.
+* Static key files remain the PoC placeholder for the key store, as before.
+
+=== D4. Placement and growth are entry-point concerns
+
+The private entry point maps a customer to a cell (a ClickHouse cluster) and a
+database, and for a shared cell to a shard group. A customer never spans
+cells. The routing epoch of Decision 0001 D4 is kept for exactly the growth
+case: when a customer outgrows its group, the control plane opens a new epoch
+on a wider group or a dedicated cell, creates the tables there, and flips the
+route; rows already written stay where they are and age out, and a query that
+spans epochs fans out to the union of their shard sets. No step moves parts.
+
+The engine's part of this is unchanged from Decision 0001: writers stamp the
+current epoch, the planner resolves a time range to epochs and fans out. The
+epoch table and the customer-to-placement map are control-plane state, not
+part of the public schema.
+
+=== D5. Isolation on a shared cluster
+
+Customers sharing a cluster are isolated with stock ClickHouse mechanisms
+configured by the control plane: one ClickHouse user per customer database
+with grants limited to that database, a settings profile with memory and
+concurrency limits, quotas, and workload scheduling. The core contributes
+nothing to this and is not tested against it; those tests belong with the
+private service.
+
+=== D6. What leaves the public RFD
+
+The tenant-policy-and-isolation section and its plan are superseded. Accounts,
+workspaces, per-workspace keys with rotation and revocation, the
+cross-workspace authorization matrix with colliding names and IDs, and
+workload-isolation tests between workspaces move to the private service. What
+stays public from that section is reduced to D3 above: key validity and
+dataset restriction, and the rule that a key never appears in stored rows,
+overflow objects, logs, or responses. The sensitive-data and redaction policy
+items stay public but become per-deployment configuration rather than
+per-workspace policy.
+
+Experiments 018, 021, 022, and 024 remain as recorded history. Their
+workspace-scope findings are evidence that the gateway can derive and enforce
+a scope before batching; the private entry point inherits that design. The
+query-service and identity findings stand unchanged.
+
+== Consequences
+
+* `clickhouse/schema` drops `tenant_id`, changes the sort keys as in D2, and
+  documents the database name as configuration. Pre-PoC, the migration is a
+  reload: no retained data exists.
+* The query service removes tenant scoping and the tenant column constant;
+  read-key authentication becomes validity plus an optional dataset list;
+  the exact-event route keeps its `{dataset}/{event_id}` shape. Fixtures and
+  the end-to-end test lose their second workspace or turn it into a second
+  dataset.
+* The owned exporter drops the `tenant_id` column and the workspace
+  attribute. The auth extension validates the key, its write permission, and
+  its dataset list. The gateway processor sets `toudai.dataset` and assigns
+  `toudai.event_id`; workspace and scope-marker handling is removed. The
+  vendored DDL in the collector repository is refreshed from the merged
+  schema.
+* The fixture emitter's two workspaces become two datasets; its expected
+  file is regenerated and Experiment 023 gains a note, not a rewrite.
+* Section plans that say "tenant" or "workspace" scope are amended to say
+  dataset where that is what they mean, and otherwise point here. The
+  tenant-policy plan is marked superseded with a note of what moved.
+* Exact counts, duplicate disclosure, and the ten-day load target are
+  unaffected.
+
+== Superseding
+
+A later decision record may revise any item above. Reintroducing a tenant
+column into the public schema needs a measured reason the entry-point routing
+of D4 cannot meet, and it must name the migration, because by then retained
+data will exist.
