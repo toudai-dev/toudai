@@ -12,7 +12,7 @@
 --
 -- `tenant_id` holds the globally unique workspace ID, never an account ID.
 -- Identifiers stay String (D2).
-CREATE TABLE IF NOT EXISTS toudai.canonical_events
+CREATE TABLE IF NOT EXISTS {database:Identifier}.canonical_events
 (
     tenant_id String,
     dataset LowCardinality(String),

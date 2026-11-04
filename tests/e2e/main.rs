@@ -20,10 +20,13 @@ use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use server::{ClickHouseServer, execute, product_ddl};
+use server::{ClickHouseServer, apply_ddl, execute, product_ddl};
 
 const WS_A: &str = "11111111-1111-4111-8111-111111111111";
 const WS_B: &str = "22222222-2222-4222-8222-222222222222";
+/// Not the default `toudai`: the DDL and the service both take the database
+/// name as configuration (Decision 0002 D1), and the test proves they agree.
+const DATABASE: &str = "toudai_e2e";
 const KEY_A: &str = "test-key-workspace-a";
 const KEY_B: &str = "test-key-workspace-b";
 /// 2026-09-01T07:00:00.123456789Z, the fixture's event time.
@@ -69,6 +72,7 @@ fn spawn_service(clickhouse: &ClickHouseServer, user: &str) -> Service {
         .env("TOUDAI_CLICKHOUSE_URL", &clickhouse.url)
         .env("TOUDAI_CLICKHOUSE_USER", user)
         .env("TOUDAI_CLICKHOUSE_PASSWORD", server::PASSWORD)
+        .env("TOUDAI_CLICKHOUSE_DATABASE", DATABASE)
         .stderr(Stdio::piped())
         .spawn()
         .expect("start toudai");
@@ -180,7 +184,7 @@ fn count_json(value: u64) -> Value {
 
 async fn load(server: &ClickHouseServer) {
     for (name, sql) in product_ddl() {
-        execute(server, &sql, None).await;
+        apply_ddl(server, &sql, DATABASE).await;
         eprintln!("applied {name}");
     }
     for (table, rows) in [
@@ -188,7 +192,7 @@ async fn load(server: &ClickHouseServer) {
         ("serving_spans", SPAN_ROWS),
         ("canonical_events", CANONICAL_ROWS),
     ] {
-        let sql = format!("INSERT INTO toudai.{table} FORMAT JSONEachRow");
+        let sql = format!("INSERT INTO {DATABASE}.{table} FORMAT JSONEachRow");
         execute(server, &sql, Some(rows)).await;
     }
     // Rows beyond the fixture: a workspace-B-only dataset to prove scope comes
@@ -209,7 +213,7 @@ async fn load(server: &ClickHouseServer) {
     .join("\n");
     execute(
         server,
-        "INSERT INTO toudai.serving_logs FORMAT JSONEachRow",
+        &format!("INSERT INTO {DATABASE}.serving_logs FORMAT JSONEachRow"),
         Some(&extra),
     )
     .await;
@@ -243,7 +247,7 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
     // Enough rows in one dataset for a leaf read limit to bite (the fixture is a
     // single block).
     let bulk = format!(
-        "INSERT INTO toudai.serving_logs (tenant_id, dataset, event_id, routing_epoch, timestamp) \
+        "INSERT INTO {DATABASE}.serving_logs (tenant_id, dataset, event_id, routing_epoch, timestamp) \
          SELECT '{WS_A}', 'bulk', toString(number), 1, toDateTime64('{TS_TEXT}', 9) \
          FROM numbers({BULK_ROWS})"
     );
@@ -302,22 +306,26 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
         json!([{"groups": [{"type": "bool", "value": true}], "events": count_json(1)}])
     );
 
-    let leaf_probe = "SELECT count() AS n FROM toudai.serving_logs \
-                      WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow";
+    let leaf_probe = format!(
+        "SELECT count() AS n FROM {DATABASE}.serving_logs \
+         WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow"
+    );
     for (user, _) in server::HOSTILE_PROFILES {
         // Precondition: left alone, this user's profile really does change what
         // a plain query returns.
         if user == "h_cache" {
-            let probe = "SELECT count() AS n FROM toudai.canonical_events \
-                         WHERE event_id = 'cache-probe' FORMAT JSONEachRow";
-            let before = server::execute_as(clickhouse, user, probe, None).await;
+            let probe = format!(
+                "SELECT count() AS n FROM {DATABASE}.canonical_events \
+                 WHERE event_id = 'cache-probe' FORMAT JSONEachRow"
+            );
+            let before = server::execute_as(clickhouse, user, &probe, None).await;
             insert_canonical(clickhouse, "cache-probe", "{}").await;
-            let after = server::execute_as(clickhouse, user, probe, None).await;
+            let after = server::execute_as(clickhouse, user, &probe, None).await;
             assert_eq!(before, after, "the cache must serve the stale count");
-            assert_ne!(after, server::execute(clickhouse, probe, None).await);
+            assert_ne!(after, server::execute(clickhouse, &probe, None).await);
         } else {
             let probe = match user {
-                "h_leaf" => leaf_probe,
+                "h_leaf" => leaf_probe.as_str(),
                 "h_emptyagg" => "SELECT count() AS n FROM numbers(0) FORMAT JSONEachRow",
                 "h_bool" => "SELECT toString(true) AS b FORMAT JSONEachRow",
                 _ => "SELECT number FROM numbers(5) FORMAT JSONEachRow",
@@ -410,7 +418,7 @@ async fn insert_canonical(clickhouse: &ClickHouseServer, event_id: &str, payload
     });
     server::execute(
         clickhouse,
-        "INSERT INTO toudai.canonical_events FORMAT JSONEachRow",
+        &format!("INSERT INTO {DATABASE}.canonical_events FORMAT JSONEachRow"),
         Some(&row.to_string()),
     )
     .await;

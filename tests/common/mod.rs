@@ -23,7 +23,7 @@ pub const WS_B: &str = "22222222-2222-4222-8222-222222222222";
 pub const DATASET: &str = "fixture";
 /// 2026-09-01T07:00:00.123456789Z, the fixture's event time.
 pub const TS: i64 = 1_788_246_000_123_456_789;
-/// The database the product DDL creates (`clickhouse/schema/001-database.sql`).
+/// The database the fixture DDL is applied to: the product default.
 pub const DATABASE: &str = "toudai";
 
 /// The product DDL files in apply order, minus those `clickhouse local` cannot
@@ -155,7 +155,16 @@ pub fn clickhouse() -> Option<&'static ClickHouse> {
                 ddl.iter().map(|(name, _)| name).collect::<Vec<_>>()
             );
             for (_, sql) in ddl {
-                ch.local(&[flag("--multiquery"), flag("--query"), sql], None);
+                // The DDL names its database as a parameter (Decision 0002 D1).
+                ch.local(
+                    &[
+                        flag("--multiquery"),
+                        format!("--param_database={DATABASE}"),
+                        flag("--query"),
+                        sql,
+                    ],
+                    None,
+                );
             }
             for (table, rows) in [("serving_logs", LOG_ROWS), ("serving_spans", SPAN_ROWS)] {
                 ch.local(

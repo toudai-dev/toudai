@@ -318,6 +318,22 @@ pub async fn execute_as(
     body
 }
 
+/// Apply one product DDL file to `database`, which the files name as a query
+/// parameter (Decision 0002 D1).
+pub async fn apply_ddl(server: &ClickHouseServer, sql: &str, database: &str) {
+    let response = reqwest::Client::new()
+        .post(&server.url)
+        .basic_auth(USER, Some(PASSWORD))
+        .query(&[("param_database", database)])
+        .body(sql.to_owned())
+        .send()
+        .await
+        .expect("clickhouse request");
+    let status = response.status();
+    let body = response.text().await.expect("clickhouse response");
+    assert!(status.is_success(), "clickhouse rejected the DDL: {body}");
+}
+
 /// The product DDL, in apply order.
 pub fn product_ddl() -> Vec<(String, String)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("clickhouse/schema");

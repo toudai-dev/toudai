@@ -9,7 +9,7 @@ which stays in place as evidence.
 |===
 | File | Creates | Notes
 
-| `schema/001-database.sql` | `toudai` database |
+| `schema/001-database.sql` | the deployment database | Named by the `database` parameter (default `toudai`)
 | `schema/002-canonical-events.sql` | `canonical_events` | Payload table (D3) on the `toudai_payload` storage policy; the TTL moves partitions older than two days to the S3-backed `object` volume. Sorted for `(tenant_id, dataset, event_id)` lookup.
 | `schema/003-serving-logs.sql` | `serving_logs` | Hybrid typed-Map layout (D1)
 | `schema/004-serving-spans.sql` | `serving_spans` | Same, with span timing diagnostics
@@ -22,7 +22,14 @@ Serving tables use daily partitions by event `timestamp`, the sort key
 `config.d/toudai-storage.xml` defines the disks and the `toudai_payload` policy the
 payload table names. Its S3 endpoint and cache size are placeholders for the deployment.
 
-Apply the files in order with `clickhouse-client --multiquery < schema/NNN-name.sql`; every
-statement is `IF NOT EXISTS`. The owned exporter in
+The database name is configuration, not schema
+(link:../rfd/0001/decisions/0002-single-tenant-core.adoc[Decision 0002] D1): one database
+holds one deployment's data, and every file names it as the `{database:Identifier}` query
+parameter. `apply-schema.sh` applies the files in order to `TOUDAI_CLICKHOUSE_DATABASE`
+(default `toudai`, the same variable and default as the query service) and passes its
+arguments to `clickhouse-client`; by hand, run
+`clickhouse-client --param_database=<name> --multiquery < schema/NNN-name.sql` for each
+file. Every statement is `IF NOT EXISTS`. Nothing in the schema assumes the database owns
+the server. The owned exporter in
 https://github.com/toudai-dev/collector[toudai-dev/collector] names these columns in its
 `INSERT` statements, so a change to a table here needs the matching change there.

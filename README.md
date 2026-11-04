@@ -14,6 +14,9 @@ make lint
 The `toudai` binary serves the typed query layer over HTTP in front of
 ClickHouse.
 
+Create the schema first with `clickhouse/apply-schema.sh` (see
+`clickhouse/README.adoc`; the database defaults to `toudai`), then:
+
 ```sh
 printf 'dev-read-key 11111111-1111-4111-8111-111111111111\n' > read-keys.txt
 TOUDAI_READ_KEYS_FILE=read-keys.txt \
