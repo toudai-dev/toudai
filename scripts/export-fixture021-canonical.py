@@ -11,10 +11,10 @@ service, so a test can check what the API returns against it.
 
 The rows are chosen to separate the lookup key's parts:
 
-* `typed-1` exists for both workspaces with different payloads, and in a second
-  dataset of workspace A, so a lookup that ignored tenant or dataset returns the
-  wrong payload;
-* `only-b` exists for workspace B alone;
+* `typed-1` exists in datasets `fixture`, `fixture-b`, and `other` with three
+  different payloads, so a lookup that ignored the dataset returns the wrong
+  payload;
+* `only-b` exists in dataset `fixture-b` alone;
 * `dup-1` is stored twice with the same payload (an at-least-once replay) and
   `conflict-1` twice with different payloads; `conflict-3` holds two copies of
   the payload whose hash sorts first plus one different payload, so a lookup
@@ -80,10 +80,10 @@ def rows():
             "str.one": typed("string", "1"), "unicode": typed("string", "héllo—\U0001f30d"),
             "bytes.raw": typed("bytes", "AAH+/w=="), "empty.value": {"type": "empty"},
         }),
-        row(WS_B, "fixture", "logs", "typed-1", {"int.big": typed("int", "7"), "marker": typed("string", "workspace-b")}),
+        row(WS_B, "fixture-b", "logs", "typed-1", {"int.big": typed("int", "7"), "marker": typed("string", "workspace-b")}),
         row(WS_A, "other", "logs", "typed-1", {"marker": typed("string", "dataset-other")}),
         row(WS_A, "fixture", "spans", "span-1", {"duration": typed("int", "1500")}),
-        row(WS_B, "fixture", "logs", "only-b", {"marker": typed("string", "only-b")}),
+        row(WS_B, "fixture-b", "logs", "only-b", {"marker": typed("string", "only-b")}),
         row(WS_A, "fixture", "logs", "dup-1", {"n": typed("int", "1")}),
         row(WS_A, "fixture", "logs", "dup-1", {"n": typed("int", "1")}),
         row(WS_A, "fixture", "logs", "conflict-1", {"n": typed("int", "1")}),

@@ -21,6 +21,8 @@ use toudai::query::{Aggregate, Query, Scope, ServingTables, Signal, SqlStatement
 pub const WS_A: &str = "11111111-1111-4111-8111-111111111111";
 pub const WS_B: &str = "22222222-2222-4222-8222-222222222222";
 pub const DATASET: &str = "fixture";
+/// The fixture's second copy (`scripts/export-fixture021-rows.py`).
+pub const SECOND_DATASET: &str = "fixture-b";
 /// 2026-09-01T07:00:00.123456789Z, the fixture's event time.
 pub const TS: i64 = 1_788_246_000_123_456_789;
 /// The database the fixture DDL is applied to: the product default.

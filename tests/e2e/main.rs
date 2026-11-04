@@ -451,7 +451,7 @@ async fn health_and_authentication(api: &Api) {
 
 /// Contract results over HTTP. The expected values are the independent ones the
 /// `experiment021_results` tests derive from the fixture inventory: 27 log
-/// events per workspace, 12 of which hold an int at `metric.value`.
+/// events per dataset, 12 of which hold an int at `metric.value`.
 async fn query_results(api: &Api) {
     let ints = || json!([{"kind": "has_type", "attr": metric(), "value_type": "int"}]);
     let sum_int = || sum(metric(), "int");
@@ -773,7 +773,8 @@ async fn scope_and_escaping(api: &Api) {
 
     // The same query under each key sees only that workspace's rows.
     for (dataset, a, b) in [
-        ("fixture", "27", "27"),
+        ("fixture", "27", "0"),
+        ("fixture-b", "0", "27"),
         ("b-only", "0", "1"),
         ("special", "1", "0"),
     ] {
@@ -880,10 +881,10 @@ async fn event_retrieval(api: &Api) {
     // fixture stores for that exact (tenant, dataset, event_id).
     let found = [
         (KEY_A, WS_A, "fixture", "typed-1", "logs"),
-        (KEY_B, WS_B, "fixture", "typed-1", "logs"),
+        (KEY_B, WS_B, "fixture-b", "typed-1", "logs"),
         (KEY_A, WS_A, "other", "typed-1", "logs"),
         (KEY_A, WS_A, "fixture", "span-1", "spans"),
-        (KEY_B, WS_B, "fixture", "only-b", "logs"),
+        (KEY_B, WS_B, "fixture-b", "only-b", "logs"),
         // Stored twice by an at-least-once replay: still one event.
         (KEY_A, WS_A, "fixture", "dup-1", "logs"),
         // A `/`, space, non-ASCII, `+`, and `%` in the ID stay one path segment.
@@ -919,7 +920,7 @@ async fn event_retrieval(api: &Api) {
         );
         payloads.push(got.payload.get().to_owned());
     }
-    // Tenant and dataset are part of the identity: `typed-1` has three payloads.
+    // The dataset is part of the identity: `typed-1` has three payloads.
     assert_eq!(
         [&payloads[0], &payloads[1], &payloads[2]]
             .iter()
