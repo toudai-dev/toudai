@@ -1,36 +1,38 @@
 //! Bearer read-key authentication.
 //!
-//! PLACEHOLDER for the tenant-policy registry (RFD 0001 tenant policy and
-//! isolation). Until the registry exists, a static file maps read keys to the
-//! tenant (workspace) ID a key may read. The file holds one `<key> <tenant_id>`
-//! pair per line; blank lines and `#` comments are ignored. It is read once at
-//! startup, so adding or revoking a key means restarting the service, and keys
-//! are stored in the clear. None of that is the production design: key
-//! resolution, rotation, revocation, and per-dataset authorization all belong to
-//! the registry. What this module fixes is the contract callers rely on: the
-//! tenant scope of a request comes only from the credential, never from the
-//! request.
+//! One deployment serves one customer (Decision 0002 D1), so a read key maps to
+//! permissions, never to a customer: a valid key admits queries, optionally
+//! restricted to a list of datasets (D3). Which customer a key belongs to is
+//! private control-plane state outside the engine.
+//!
+//! PLACEHOLDER for the key store. A static file holds one `<key> [<dataset>...]`
+//! entry per line: a key alone may read every dataset, and a key followed by
+//! dataset names may read only those. Blank lines and `#` comments are ignored.
+//! It is read once at startup, so adding or revoking a key means restarting the
+//! service, and keys are stored in the clear.
 
 use std::collections::HashSet;
 use std::fmt;
 
-/// The tenant (globally unique workspace ID) a read key is bound to.
+/// The datasets a read key may query.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TenantId(String);
+pub enum DatasetAccess {
+    All,
+    Only(Vec<String>),
+}
 
-impl TenantId {
-    pub fn new(id: impl Into<String>) -> TenantId {
-        TenantId(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
+impl DatasetAccess {
+    pub fn allows(&self, dataset: &str) -> bool {
+        match self {
+            DatasetAccess::All => true,
+            DatasetAccess::Only(datasets) => datasets.iter().any(|d| d == dataset),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadKeys {
-    entries: Vec<(String, TenantId)>,
+    entries: Vec<(String, DatasetAccess)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +51,7 @@ impl std::error::Error for ReadKeysError {}
 
 impl ReadKeys {
     pub fn parse(text: &str) -> Result<ReadKeys, ReadKeysError> {
-        let mut entries: Vec<(String, TenantId)> = Vec::new();
+        let mut entries: Vec<(String, DatasetAccess)> = Vec::new();
         let mut seen = HashSet::new();
         for (index, line) in text.lines().enumerate() {
             let line_no = index + 1;
@@ -58,20 +60,28 @@ impl ReadKeys {
                 continue;
             }
             let mut fields = line.split_whitespace();
-            let (Some(key), Some(tenant), None) = (fields.next(), fields.next(), fields.next())
-            else {
-                return Err(ReadKeysError {
-                    line: line_no,
-                    detail: "expected `<key> <tenant_id>`",
-                });
-            };
+            let key = fields.next().expect("a non-empty line has a field");
             if !seen.insert(key) {
                 return Err(ReadKeysError {
                     line: line_no,
                     detail: "duplicate key",
                 });
             }
-            entries.push((key.to_owned(), TenantId(tenant.to_owned())));
+            let datasets: Vec<String> = fields.map(str::to_owned).collect();
+            // A trailing comment would otherwise silently become dataset names
+            // and restrict the key; refuse it so the operator notices.
+            if datasets.iter().any(|d| d.starts_with('#')) {
+                return Err(ReadKeysError {
+                    line: line_no,
+                    detail: "a dataset name cannot start with `#`; comments go on their own line",
+                });
+            }
+            let access = if datasets.is_empty() {
+                DatasetAccess::All
+            } else {
+                DatasetAccess::Only(datasets)
+            };
+            entries.push((key.to_owned(), access));
         }
         if entries.is_empty() {
             return Err(ReadKeysError {
@@ -82,13 +92,14 @@ impl ReadKeys {
         Ok(ReadKeys { entries })
     }
 
-    /// The tenant bound to `key`. The scan visits every entry and compares in
-    /// constant time per entry, so timing does not reveal which key matched.
-    pub fn tenant_for(&self, key: &str) -> Option<&TenantId> {
+    /// The datasets `key` may read, or `None` for an unknown key. The scan
+    /// visits every entry and compares in constant time per entry, so timing
+    /// does not reveal which key matched.
+    pub fn access_for(&self, key: &str) -> Option<&DatasetAccess> {
         let mut found = None;
-        for (candidate, tenant) in &self.entries {
+        for (candidate, access) in &self.entries {
             if constant_time_eq(candidate.as_bytes(), key.as_bytes()) {
-                found = Some(tenant);
+                found = Some(access);
             }
         }
         found
@@ -114,25 +125,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_keys_and_looks_up_tenants() {
+    fn parses_keys_and_their_datasets() {
         let keys =
-            ReadKeys::parse("# comment\n\nkey-a  tenant-a\n  key-b\ttenant-b  \nkey-c tenant-a\n")
+            ReadKeys::parse("# comment\n\nkey-all\n  key-one\tprod  \nkey-two prod staging\n")
                 .unwrap();
+        // (key, dataset, Some(allowed) for a known key, None for an unknown one)
         let cases = [
-            ("key-a", Some("tenant-a")),
-            ("key-b", Some("tenant-b")),
-            ("key-c", Some("tenant-a")),
-            ("key-", None),
-            ("key-aa", None),
-            ("KEY-A", None),
-            ("tenant-a", None),
-            ("", None),
+            ("key-all", "prod", Some(true)),
+            ("key-all", "anything", Some(true)),
+            ("key-one", "prod", Some(true)),
+            ("key-one", "staging", Some(false)),
+            ("key-one", "Prod", Some(false)),
+            ("key-two", "staging", Some(true)),
+            ("key-two", "dev", Some(false)),
+            ("key-", "prod", None),
+            ("key-alll", "prod", None),
+            ("KEY-ALL", "prod", None),
+            ("prod", "prod", None),
+            ("", "prod", None),
         ];
-        for (key, tenant) in cases {
+        for (key, dataset, allowed) in cases {
             assert_eq!(
-                keys.tenant_for(key).map(TenantId::as_str),
-                tenant,
-                "{key:?}"
+                keys.access_for(key).map(|access| access.allows(dataset)),
+                allowed,
+                "{key:?} {dataset:?}"
             );
         }
     }
@@ -142,9 +158,8 @@ mod tests {
         let cases = [
             ("", 0, "no keys"),
             ("# only a comment\n", 0, "no keys"),
-            ("key-only\n", 1, "expected"),
-            ("a t\nb t extra\n", 2, "expected"),
-            ("a t\nb u\na v\n", 3, "duplicate key"),
+            ("a\nb prod\na staging\n", 3, "duplicate key"),
+            ("a\nb prod # prod only\n", 2, "cannot start with `#`"),
         ];
         for (text, line, detail) in cases {
             let err = ReadKeys::parse(text).unwrap_err();

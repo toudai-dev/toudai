@@ -2,14 +2,12 @@
 //!
 //! Names follow the product DDL in `clickhouse/schema/003-serving-logs.sql` and
 //! `004-serving-spans.sql` (Decision 0001 D1/D2/D4), so every column name lives
-//! here and nowhere else. The tenant column holds the workspace ID.
+//! here and nowhere else.
 
 use super::error::QueryError;
 use super::model::{Namespace, Signal};
 use super::value::ValueType;
 
-/// Holds the globally unique workspace ID (D2); the Rust `workspace_id` field maps to it.
-pub const TENANT_COLUMN: &str = "tenant_id";
 pub const DATASET_COLUMN: &str = "dataset";
 pub const TIMESTAMP_COLUMN: &str = "timestamp";
 pub const SPAN_DURATION_COLUMN: &str = "duration_ns";
@@ -46,7 +44,7 @@ impl ServingTables {
     }
 
     /// The canonical payload table (Decision 0001 D3), looked up by
-    /// `(tenant_id, dataset, event_id)`.
+    /// `(dataset, event_id)` (Decision 0002 D2).
     pub fn canonical_events(&self) -> String {
         format!("{}.{CANONICAL_EVENTS_TABLE}", self.database)
     }

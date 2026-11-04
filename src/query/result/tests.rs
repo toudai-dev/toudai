@@ -8,7 +8,6 @@ use crate::query::schema::ServingTables;
 fn query(aggregate: Aggregate, group_by: Vec<AttrRef>) -> Plan {
     let q = Query {
         scope: Scope {
-            workspace_id: "ws".into(),
             dataset: "fixture".into(),
         },
         signal: Signal::Logs,

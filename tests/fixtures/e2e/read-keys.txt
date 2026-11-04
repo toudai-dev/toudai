@@ -1,3 +1,4 @@
-# Test-only read keys for the end-to-end API test: <key> <tenant_id>.
-test-key-workspace-a 11111111-1111-4111-8111-111111111111
-test-key-workspace-b 22222222-2222-4222-8222-222222222222
+# Test-only read keys for the end-to-end API test: <key> [<dataset>...].
+# A key without datasets may read every dataset of the deployment.
+test-key-all
+test-key-restricted fixture-b b-only

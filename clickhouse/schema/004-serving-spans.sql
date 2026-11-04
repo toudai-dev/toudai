@@ -1,8 +1,7 @@
 -- Decision 0001 D1/D2/D4: serving rows for spans. Same key, partition, epoch, and
 -- identifier rules as serving_logs.
-CREATE TABLE IF NOT EXISTS toudai.serving_spans
+CREATE TABLE IF NOT EXISTS {database:Identifier}.serving_spans
 (
-    tenant_id String,
     dataset LowCardinality(String),
     event_id String,
     routing_epoch UInt16,
@@ -47,4 +46,4 @@ CREATE TABLE IF NOT EXISTS toudai.serving_spans
 )
 ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
-ORDER BY (tenant_id, dataset, timestamp, event_id);
+ORDER BY (dataset, timestamp, event_id);

@@ -11,10 +11,10 @@ service, so a test can check what the API returns against it.
 
 The rows are chosen to separate the lookup key's parts:
 
-* `typed-1` exists for both workspaces with different payloads, and in a second
-  dataset of workspace A, so a lookup that ignored tenant or dataset returns the
-  wrong payload;
-* `only-b` exists for workspace B alone;
+* `typed-1` exists in datasets `fixture`, `fixture-b`, and `other` with three
+  different payloads, so a lookup that ignored the dataset returns the wrong
+  payload;
+* `only-b` exists in dataset `fixture-b` alone;
 * `dup-1` is stored twice with the same payload (an at-least-once replay) and
   `conflict-1` twice with different payloads; `conflict-3` holds two copies of
   the payload whose hash sorts first plus one different payload, so a lookup
@@ -31,19 +31,16 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-WS_A = "11111111-1111-4111-8111-111111111111"
-WS_B = "22222222-2222-4222-8222-222222222222"
 # 2026-09-01 07:00:00.123456789, the serving fixture's event time.
 TS = "2026-09-01 07:00:00.123456789"
 
 
-def payload(tenant, dataset, signal, event_id, attrs):
+def payload(dataset, signal, event_id, attrs):
     # Written with explicit separators so the stored text is stable; integers
     # beyond 2^53 are decimal strings.
     return json.dumps(
         {
             "schema_version": "1",
-            "workspace_id": tenant,
             "dataset": dataset,
             "signal": signal,
             "event_id": event_id,
@@ -54,10 +51,9 @@ def payload(tenant, dataset, signal, event_id, attrs):
     )
 
 
-def row(tenant, dataset, signal, event_id, attrs):
-    text = payload(tenant, dataset, signal, event_id, attrs)
+def row(dataset, signal, event_id, attrs):
+    text = payload(dataset, signal, event_id, attrs)
     return {
-        "tenant_id": tenant,
         "dataset": dataset,
         "signal": signal,
         "event_id": event_id,
@@ -75,21 +71,21 @@ def typed(kind, value):
 def rows():
     big = typed("int", "9007199254740993")
     return [
-        row(WS_A, "fixture", "logs", "typed-1", {
+        row("fixture", "logs", "typed-1", {
             "int.big": big, "double.one": typed("double", 1.0),
             "str.one": typed("string", "1"), "unicode": typed("string", "héllo—\U0001f30d"),
             "bytes.raw": typed("bytes", "AAH+/w=="), "empty.value": {"type": "empty"},
         }),
-        row(WS_B, "fixture", "logs", "typed-1", {"int.big": typed("int", "7"), "marker": typed("string", "workspace-b")}),
-        row(WS_A, "other", "logs", "typed-1", {"marker": typed("string", "dataset-other")}),
-        row(WS_A, "fixture", "spans", "span-1", {"duration": typed("int", "1500")}),
-        row(WS_B, "fixture", "logs", "only-b", {"marker": typed("string", "only-b")}),
-        row(WS_A, "fixture", "logs", "dup-1", {"n": typed("int", "1")}),
-        row(WS_A, "fixture", "logs", "dup-1", {"n": typed("int", "1")}),
-        row(WS_A, "fixture", "logs", "conflict-1", {"n": typed("int", "1")}),
-        row(WS_A, "fixture", "logs", "conflict-1", {"n": typed("int", "2")}),
+        row("fixture-b", "logs", "typed-1", {"int.big": typed("int", "7"), "marker": typed("string", "dataset-fixture-b")}),
+        row("other", "logs", "typed-1", {"marker": typed("string", "dataset-other")}),
+        row("fixture", "spans", "span-1", {"duration": typed("int", "1500")}),
+        row("fixture-b", "logs", "only-b", {"marker": typed("string", "only-b")}),
+        row("fixture", "logs", "dup-1", {"n": typed("int", "1")}),
+        row("fixture", "logs", "dup-1", {"n": typed("int", "1")}),
+        row("fixture", "logs", "conflict-1", {"n": typed("int", "1")}),
+        row("fixture", "logs", "conflict-1", {"n": typed("int", "2")}),
         *conflict_with_replays(),
-        row(WS_A, "fixture", "logs", "odd id/1 é+%", {"marker": typed("string", "odd")}),
+        row("fixture", "logs", "odd id/1 é+%", {"marker": typed("string", "odd")}),
     ]
 
 
@@ -97,7 +93,7 @@ def conflict_with_replays():
     # Two copies of the lower-hash payload and one of the higher: ordered by
     # hash, the first two physical rows are identical.
     pair = sorted(
-        (row(WS_A, "fixture", "logs", "conflict-3", {"n": typed("int", str(n))}) for n in (1, 2)),
+        (row("fixture", "logs", "conflict-3", {"n": typed("int", str(n))}) for n in (1, 2)),
         key=lambda r: r["payload_sha256"],
     )
     return [pair[0], pair[0], pair[1]]

@@ -65,7 +65,7 @@ pub enum QueryError {
         operation: Operation,
         value: UnsupportedValue,
     },
-    /// The request has no workspace or dataset scope.
+    /// The request has no dataset scope.
     MissingScope {
         field: &'static str,
     },

@@ -1,9 +1,9 @@
 //! JSON wire form of a query request.
 //!
-//! The wire types mirror [`crate::query::Query`] and carry no tenant: the scope
-//! a query runs under comes from the credential, and `deny_unknown_fields` turns
-//! a body that tries to name a tenant (or anything else unrecognised) into a
-//! rejected request instead of an ignored field.
+//! The wire types mirror [`crate::query::Query`]. `deny_unknown_fields` turns
+//! a body with anything unrecognised (including the `tenant_id` and
+//! `workspace_id` scope fields Decision 0002 removed) into a rejected request
+//! instead of an ignored field.
 //!
 //! Literals use the typed form of the response encoding, `{"type": ..., "value":
 //! ...}`, so the type is never inferred from JSON syntax: `{"type":"int"}` and
@@ -14,7 +14,6 @@
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::auth::TenantId;
 use crate::query::{
     Aggregate, AttrRef, CmpOp, Literal, Namespace, Predicate, Query, Scope, Signal, TimeRange,
     ValueType,
@@ -34,11 +33,9 @@ pub struct QueryRequest {
 }
 
 impl QueryRequest {
-    /// The request under the authenticated tenant's scope.
-    pub fn into_query(self, tenant: &TenantId) -> Query {
+    pub fn into_query(self) -> Query {
         Query {
             scope: Scope {
-                workspace_id: tenant.as_str().to_owned(),
                 dataset: self.dataset,
             },
             signal: match self.signal {
@@ -197,7 +194,7 @@ impl From<PredicateWire> for Predicate {
 enum AggregateWire {
     // Empty struct variants, not unit variants: serde ignores unknown fields on
     // a unit variant of an internally tagged enum, which would let
-    // `{"kind": "count", "tenant_id": ...}` through.
+    // `{"kind": "count", "surprise": ...}` through.
     Count {},
     CountValues {
         attr: AttrWire,
@@ -323,11 +320,9 @@ mod tests {
 
     use super::*;
 
-    const TENANT: &str = "tenant-from-credential";
-
     fn parse(request: Value) -> Result<Query, String> {
         serde_json::from_value::<QueryRequest>(request)
-            .map(|r| r.into_query(&TenantId::new(TENANT)))
+            .map(QueryRequest::into_query)
             .map_err(|e| e.to_string())
     }
 
@@ -367,7 +362,6 @@ mod tests {
             query,
             Query {
                 scope: Scope {
-                    workspace_id: TENANT.into(),
                     dataset: "fixture".into()
                 },
                 signal: Signal::Spans,
@@ -514,7 +508,7 @@ mod tests {
                     "aggregate":{{"kind":"count"}}}}"#
             );
             let parsed: QueryRequest = serde_json::from_str(&request).unwrap();
-            let query = parsed.into_query(&TenantId::new(TENANT));
+            let query = parsed.into_query();
             let Predicate::Compare {
                 value: Literal::Double(got),
                 ..

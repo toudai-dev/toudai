@@ -425,7 +425,7 @@ fn plan_diagnostics_travel_with_the_result() {
     // The explicit type filter lets the sum read the int Map alone.
     assert_eq!(
         json["diagnostics"]["columns"],
-        serde_json::json!(["dataset", "record_int", "tenant_id", "timestamp"])
+        serde_json::json!(["dataset", "record_int", "timestamp"])
     );
 }
 

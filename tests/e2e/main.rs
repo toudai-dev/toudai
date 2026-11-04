@@ -20,12 +20,15 @@ use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use server::{ClickHouseServer, execute, product_ddl};
+use server::{ClickHouseServer, apply_ddl, execute, product_ddl};
 
-const WS_A: &str = "11111111-1111-4111-8111-111111111111";
-const WS_B: &str = "22222222-2222-4222-8222-222222222222";
-const KEY_A: &str = "test-key-workspace-a";
-const KEY_B: &str = "test-key-workspace-b";
+/// Not the default `toudai`: the DDL and the service both take the database
+/// name as configuration (Decision 0002 D1), and the test proves they agree.
+const DATABASE: &str = "toudai_e2e";
+/// May read every dataset.
+const KEY_ALL: &str = "test-key-all";
+/// May read only `fixture-b` and `b-only` (`tests/fixtures/e2e/read-keys.txt`).
+const KEY_RESTRICTED: &str = "test-key-restricted";
 /// 2026-09-01T07:00:00.123456789Z, the fixture's event time.
 const TS: i64 = 1_788_246_000_123_456_789;
 const TS_TEXT: &str = "2026-09-01 07:00:00.123456789";
@@ -69,6 +72,7 @@ fn spawn_service(clickhouse: &ClickHouseServer, user: &str) -> Service {
         .env("TOUDAI_CLICKHOUSE_URL", &clickhouse.url)
         .env("TOUDAI_CLICKHOUSE_USER", user)
         .env("TOUDAI_CLICKHOUSE_PASSWORD", server::PASSWORD)
+        .env("TOUDAI_CLICKHOUSE_DATABASE", DATABASE)
         .stderr(Stdio::piped())
         .spawn()
         .expect("start toudai");
@@ -180,24 +184,39 @@ fn count_json(value: u64) -> Value {
 
 async fn load(server: &ClickHouseServer) {
     for (name, sql) in product_ddl() {
-        execute(server, &sql, None).await;
+        apply_ddl(server, &sql, DATABASE).await;
         eprintln!("applied {name}");
     }
+    // Decision 0002 D2: no tenant column leads any sort key.
+    let sort_keys = execute(
+        server,
+        &format!(
+            "SELECT name, sorting_key FROM system.tables \
+             WHERE database = '{DATABASE}' ORDER BY name FORMAT TSV"
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(
+        sort_keys,
+        "canonical_events\tdataset, event_id\n\
+         serving_logs\tdataset, timestamp, event_id\n\
+         serving_spans\tdataset, timestamp, event_id\n"
+    );
     for (table, rows) in [
         ("serving_logs", LOG_ROWS),
         ("serving_spans", SPAN_ROWS),
         ("canonical_events", CANONICAL_ROWS),
     ] {
-        let sql = format!("INSERT INTO toudai.{table} FORMAT JSONEachRow");
+        let sql = format!("INSERT INTO {DATABASE}.{table} FORMAT JSONEachRow");
         execute(server, &sql, Some(rows)).await;
     }
-    // Rows beyond the fixture: a workspace-B-only dataset to prove scope comes
-    // from the key, and one event whose attribute names and values need every
-    // escaping layer.
+    // Rows beyond the fixture: a dataset only the restricted key lists, and one
+    // event whose attribute names and values need every escaping layer.
     let extra = [
-        json!({"tenant_id": WS_B, "dataset": "b-only", "event_id": "b-1",
+        json!({"dataset": "b-only", "event_id": "b-1",
                "routing_epoch": 1, "timestamp": TS_TEXT}),
-        json!({"tenant_id": WS_A, "dataset": "special", "event_id": "s-1",
+        json!({"dataset": "special", "event_id": "s-1",
                "routing_epoch": 1, "timestamp": TS_TEXT,
                "record_string": {SPECIAL_KEY: SPECIAL_VALUE},
                "record_int": {INJECTION_KEY: 5},
@@ -209,7 +228,7 @@ async fn load(server: &ClickHouseServer) {
     .join("\n");
     execute(
         server,
-        "INSERT INTO toudai.serving_logs FORMAT JSONEachRow",
+        &format!("INSERT INTO {DATABASE}.serving_logs FORMAT JSONEachRow"),
         Some(&extra),
     )
     .await;
@@ -243,8 +262,8 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
     // Enough rows in one dataset for a leaf read limit to bite (the fixture is a
     // single block).
     let bulk = format!(
-        "INSERT INTO toudai.serving_logs (tenant_id, dataset, event_id, routing_epoch, timestamp) \
-         SELECT '{WS_A}', 'bulk', toString(number), 1, toDateTime64('{TS_TEXT}', 9) \
+        "INSERT INTO {DATABASE}.serving_logs (dataset, event_id, routing_epoch, timestamp) \
+         SELECT 'bulk', toString(number), 1, toDateTime64('{TS_TEXT}', 9) \
          FROM numbers({BULK_ROWS})"
     );
     server::execute(clickhouse, &bulk, None).await;
@@ -257,11 +276,11 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
         json!([]),
         json!({"kind": "count"}),
     );
-    let (status, response) = api.query(Some(KEY_A), &bulk_count).await;
+    let (status, response) = api.query(Some(KEY_ALL), &bulk_count).await;
     assert_eq!(status, StatusCode::OK, "{response}");
     assert_eq!(response["rows"][0]["events"], count_json(BULK_ROWS));
     let nine_groups = logs(ints_filter(), json!([metric()]), json!({"kind": "count"}));
-    let (_, expected_groups) = api.query(Some(KEY_A), &nine_groups).await;
+    let (_, expected_groups) = api.query(Some(KEY_ALL), &nine_groups).await;
     assert_eq!(expected_groups["rows"].as_array().unwrap().len(), 9);
 
     // Requests whose answers the extra hostile settings would change: the
@@ -288,7 +307,7 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
     let extra = [&empty_count, &bool_filter, &bool_groups];
     let mut expected_extra = Vec::new();
     for body in extra {
-        let (status, response) = api.query(Some(KEY_A), body).await;
+        let (status, response) = api.query(Some(KEY_ALL), body).await;
         assert_eq!(status, StatusCode::OK, "{response}");
         expected_extra.push(response["rows"].clone());
     }
@@ -302,22 +321,26 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
         json!([{"groups": [{"type": "bool", "value": true}], "events": count_json(1)}])
     );
 
-    let leaf_probe = "SELECT count() AS n FROM toudai.serving_logs \
-                      WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow";
+    let leaf_probe = format!(
+        "SELECT count() AS n FROM {DATABASE}.serving_logs \
+         WHERE dataset = 'bulk' AND severity_number >= 0 FORMAT JSONEachRow"
+    );
     for (user, _) in server::HOSTILE_PROFILES {
         // Precondition: left alone, this user's profile really does change what
         // a plain query returns.
         if user == "h_cache" {
-            let probe = "SELECT count() AS n FROM toudai.canonical_events \
-                         WHERE event_id = 'cache-probe' FORMAT JSONEachRow";
-            let before = server::execute_as(clickhouse, user, probe, None).await;
+            let probe = format!(
+                "SELECT count() AS n FROM {DATABASE}.canonical_events \
+                 WHERE event_id = 'cache-probe' FORMAT JSONEachRow"
+            );
+            let before = server::execute_as(clickhouse, user, &probe, None).await;
             insert_canonical(clickhouse, "cache-probe", "{}").await;
-            let after = server::execute_as(clickhouse, user, probe, None).await;
+            let after = server::execute_as(clickhouse, user, &probe, None).await;
             assert_eq!(before, after, "the cache must serve the stale count");
-            assert_ne!(after, server::execute(clickhouse, probe, None).await);
+            assert_ne!(after, server::execute(clickhouse, &probe, None).await);
         } else {
             let probe = match user {
-                "h_leaf" => leaf_probe,
+                "h_leaf" => leaf_probe.as_str(),
                 "h_emptyagg" => "SELECT count() AS n FROM numbers(0) FORMAT JSONEachRow",
                 "h_bool" => "SELECT toString(true) AS b FORMAT JSONEachRow",
                 _ => "SELECT number FROM numbers(5) FORMAT JSONEachRow",
@@ -338,7 +361,7 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
         } else {
             &nine_groups
         };
-        let (status, response) = hostile.query(Some(KEY_A), body).await;
+        let (status, response) = hostile.query(Some(KEY_ALL), body).await;
         if truncating {
             // Overflow limits are operator protections the service keeps; it
             // turns their `break` into an error.
@@ -355,7 +378,7 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
 
         if !truncating {
             for (body, expected) in extra.iter().zip(&expected_extra) {
-                let (status, response) = hostile.query(Some(KEY_A), body).await;
+                let (status, response) = hostile.query(Some(KEY_ALL), body).await;
                 assert_eq!(status, StatusCode::OK, "{user}: {response}");
                 assert_eq!(&response["rows"], expected, "{user}: {body}");
             }
@@ -364,9 +387,9 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
         // The event lookup (`LIMIT 1 BY ... LIMIT 2`) is exposed to the same
         // settings: a capped result must not hide a conflict or an event.
         if !truncating {
-            let (status, text) = hostile.event(Some(KEY_A), "fixture", "conflict-3").await;
+            let (status, text) = hostile.event(Some(KEY_ALL), "fixture", "conflict-3").await;
             assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{user}: {text}");
-            let (status, text) = hostile.event(Some(KEY_A), "fixture", "typed-1").await;
+            let (status, text) = hostile.event(Some(KEY_ALL), "fixture", "typed-1").await;
             assert_eq!(status, StatusCode::OK, "{user}: {text}");
             let (status, _) = hostile
                 .send(
@@ -381,17 +404,17 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
 
         if user == "h_cache" {
             // Identical requests must see inserts made between them.
-            let (status, _) = hostile.event(Some(KEY_A), "fixture", "late-1").await;
+            let (status, _) = hostile.event(Some(KEY_ALL), "fixture", "late-1").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
             insert_canonical(clickhouse, "late-1", r#"{"n":1}"#).await;
-            let (status, text) = hostile.event(Some(KEY_A), "fixture", "late-1").await;
+            let (status, text) = hostile.event(Some(KEY_ALL), "fixture", "late-1").await;
             assert_eq!(status, StatusCode::OK, "cached absence: {text}");
 
             insert_canonical(clickhouse, "late-2", r#"{"n":1}"#).await;
-            let (status, text) = hostile.event(Some(KEY_A), "fixture", "late-2").await;
+            let (status, text) = hostile.event(Some(KEY_ALL), "fixture", "late-2").await;
             assert_eq!(status, StatusCode::OK, "{text}");
             insert_canonical(clickhouse, "late-2", r#"{"n":2}"#).await;
-            let (status, text) = hostile.event(Some(KEY_A), "fixture", "late-2").await;
+            let (status, text) = hostile.event(Some(KEY_ALL), "fixture", "late-2").await;
             assert_eq!(
                 status,
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -401,16 +424,16 @@ async fn hostile_profiles_cannot_change_answers(clickhouse: &ClickHouseServer, a
     }
 }
 
-/// Store one more canonical row for workspace A, dataset `fixture`.
+/// Store one more canonical row in dataset `fixture`.
 async fn insert_canonical(clickhouse: &ClickHouseServer, event_id: &str, payload: &str) {
     let row = json!({
-        "tenant_id": WS_A, "dataset": "fixture", "signal": "logs", "event_id": event_id,
+        "dataset": "fixture", "signal": "logs", "event_id": event_id,
         "timestamp": TS_TEXT, "schema_version": "1", "payload": payload,
         "payload_sha256": format!("sha-{payload}"),
     });
     server::execute(
         clickhouse,
-        "INSERT INTO toudai.canonical_events FORMAT JSONEachRow",
+        &format!("INSERT INTO {DATABASE}.canonical_events FORMAT JSONEachRow"),
         Some(&row.to_string()),
     )
     .await;
@@ -432,7 +455,12 @@ async fn health_and_authentication(api: &Api) {
     );
 
     let body = logs(json!([]), json!([]), json!({"kind": "count"}));
-    for key in [None, Some("wrong"), Some("test-key-workspace-")] {
+    for key in [
+        None,
+        Some("wrong"),
+        Some("test-key-al"),
+        Some("test-key-all-"),
+    ] {
         let (status, response) = api.query(key, &body).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{key:?}");
         assert_eq!(response["error"]["code"], "unauthenticated");
@@ -443,7 +471,7 @@ async fn health_and_authentication(api: &Api) {
 
 /// Contract results over HTTP. The expected values are the independent ones the
 /// `experiment021_results` tests derive from the fixture inventory: 27 log
-/// events per workspace, 12 of which hold an int at `metric.value`.
+/// events per dataset, 12 of which hold an int at `metric.value`.
 async fn query_results(api: &Api) {
     let ints = || json!([{"kind": "has_type", "attr": metric(), "value_type": "int"}]);
     let sum_int = || sum(metric(), "int");
@@ -519,7 +547,7 @@ async fn query_results(api: &Api) {
         ),
     ];
     for (name, body, events, stats) in cases {
-        let (status, response) = api.query(Some(KEY_A), &body).await;
+        let (status, response) = api.query(Some(KEY_ALL), &body).await;
         assert_eq!(status, StatusCode::OK, "{name}: {response}");
         let rows = response["rows"].as_array().unwrap();
         assert_eq!(rows.len(), 1, "{name}: {response}");
@@ -540,7 +568,7 @@ async fn query_results(api: &Api) {
     // comparison restricts the sum to ints, so no incompatible-type check runs.
     let (_, response) = api
         .query(
-            Some(KEY_A),
+            Some(KEY_ALL),
             &logs(json!([compare("le", int("2"))]), json!([]), sum_int()),
         )
         .await;
@@ -554,12 +582,13 @@ async fn query_results(api: &Api) {
         ])
     );
     let columns = response["diagnostics"]["columns"].as_array().unwrap();
-    assert!(columns.contains(&json!("tenant_id")) && columns.contains(&json!("record_int")));
+    assert!(columns.contains(&json!("dataset")) && columns.contains(&json!("record_int")));
+    assert!(!columns.contains(&json!("tenant_id")), "{columns:?}");
 
     // Typed groups: ints group by value text, distinct from strings and doubles.
     let (status, response) = api
         .query(
-            Some(KEY_A),
+            Some(KEY_ALL),
             &logs(ints(), json!([metric()]), json!({"kind": "count"})),
         )
         .await;
@@ -594,7 +623,7 @@ async fn query_results(api: &Api) {
     // Missing is its own group.
     let (_, response) = api
         .query(
-            Some(KEY_A),
+            Some(KEY_ALL),
             &logs(
                 json!([{"kind": "absent", "attr": metric()}]),
                 json!([metric()]),
@@ -614,7 +643,7 @@ async fn query_results(api: &Api) {
         json!({"kind": "span_duration"}),
     );
     spans["time"]["start_ns"] = json!("0");
-    let (status, response) = api.query(Some(KEY_A), &spans).await;
+    let (status, response) = api.query(Some(KEY_ALL), &spans).await;
     assert_eq!(status, StatusCode::OK, "{response}");
     let row = &response["rows"][0];
     assert_eq!(row["events"], count_json(9));
@@ -627,7 +656,7 @@ async fn query_results(api: &Api) {
     // when nothing matched.
     let (status, response) = api
         .query(
-            Some(KEY_A),
+            Some(KEY_ALL),
             &logs(
                 json!([{"kind": "compare", "op": "lt",
                         "attr": {"namespace": "record", "key": "double.nan"},
@@ -739,7 +768,7 @@ async fn query_failures(api: &Api) {
         ),
     ];
     for (name, body, status, code) in cases {
-        let (got, response) = api.query(Some(KEY_A), &body).await;
+        let (got, response) = api.query(Some(KEY_ALL), &body).await;
         assert_eq!(
             (got, response["error"]["code"].as_str()),
             (status, Some(code)),
@@ -753,7 +782,8 @@ fn ints_filter() -> Value {
     json!([{"kind": "has_type", "attr": metric(), "value_type": "int"}])
 }
 
-/// The tenant comes from the key alone, and request text never reaches the SQL.
+/// Every query is scoped to the dataset it names, a restricted key is refused
+/// datasets outside its list, and request text never reaches the SQL.
 async fn scope_and_escaping(api: &Api) {
     let count_of = |response: &Value| {
         response["rows"][0]["events"]["value"]
@@ -763,25 +793,38 @@ async fn scope_and_escaping(api: &Api) {
     };
     let count = json!({"kind": "count"});
 
-    // The same query under each key sees only that workspace's rows.
-    for (dataset, a, b) in [
-        ("fixture", "27", "27"),
-        ("b-only", "0", "1"),
-        ("special", "1", "0"),
+    // (dataset, events for KEY_ALL, events for KEY_RESTRICTED or None when the
+    // dataset is outside its list)
+    for (dataset, all, restricted) in [
+        ("fixture", "27", None),
+        ("fixture-b", "27", Some("27")),
+        ("b-only", "1", Some("1")),
+        ("special", "1", None),
     ] {
-        for (key, expected) in [(KEY_A, a), (KEY_B, b)] {
-            let body = query_body(dataset, "logs", json!([]), json!([]), count.clone());
-            let (status, response) = api.query(Some(key), &body).await;
-            assert_eq!(status, StatusCode::OK, "{response}");
-            assert_eq!(count_of(&response), expected, "{dataset} as {key}");
+        let body = query_body(dataset, "logs", json!([]), json!([]), count.clone());
+        let (status, response) = api.query(Some(KEY_ALL), &body).await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(count_of(&response), all, "{dataset} as {KEY_ALL}");
+
+        let (status, response) = api.query(Some(KEY_RESTRICTED), &body).await;
+        match restricted {
+            Some(expected) => {
+                assert_eq!(status, StatusCode::OK, "{response}");
+                assert_eq!(count_of(&response), expected, "{dataset}");
+            }
+            None => {
+                assert_eq!(status, StatusCode::FORBIDDEN, "{dataset}: {response}");
+                assert_eq!(response["error"]["code"], "dataset_not_allowed");
+                assert!(response.get("rows").is_none(), "{dataset}");
+            }
         }
     }
 
-    // A body that names a tenant is rejected, not obeyed or ignored.
+    // A body that names a tenant or workspace is rejected, not obeyed or ignored.
     for field in ["tenant_id", "workspace_id"] {
         let mut body = query_body("b-only", "logs", json!([]), json!([]), count.clone());
-        body[field] = json!(WS_B);
-        let (status, response) = api.query(Some(KEY_A), &body).await;
+        body[field] = json!("11111111-1111-4111-8111-111111111111");
+        let (status, response) = api.query(Some(KEY_ALL), &body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{field}: {response}");
         assert_eq!(response["error"]["code"], "invalid_request");
     }
@@ -839,7 +882,7 @@ async fn scope_and_escaping(api: &Api) {
         ),
     ];
     for (name, filters, expected) in cases {
-        let (status, response) = api.query(Some(KEY_A), &special(filters)).await;
+        let (status, response) = api.query(Some(KEY_ALL), &special(filters)).await;
         assert_eq!(status, StatusCode::OK, "{name}: {response}");
         assert_eq!(count_of(&response), expected, "{name}");
     }
@@ -856,37 +899,36 @@ struct EventResponse {
     payload_sha256: String,
 }
 
-/// The fixture row for `(tenant, dataset, event_id)`, as the generator wrote it.
-fn fixture_events(tenant: &str, dataset: &str, event_id: &str) -> Vec<Value> {
+/// The fixture rows for `(dataset, event_id)`, as the generator wrote them.
+fn fixture_events(dataset: &str, event_id: &str) -> Vec<Value> {
     CANONICAL_ROWS
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
-        .filter(|row| {
-            row["tenant_id"] == tenant && row["dataset"] == dataset && row["event_id"] == event_id
-        })
+        .filter(|row| row["dataset"] == dataset && row["event_id"] == event_id)
         .collect()
 }
 
 async fn event_retrieval(api: &Api) {
-    // (key, tenant, dataset, event id, signal): each must return the payload the
-    // fixture stores for that exact (tenant, dataset, event_id).
+    // (key, dataset, event id, signal): each must return the payload the
+    // fixture stores for that exact (dataset, event_id).
     let found = [
-        (KEY_A, WS_A, "fixture", "typed-1", "logs"),
-        (KEY_B, WS_B, "fixture", "typed-1", "logs"),
-        (KEY_A, WS_A, "other", "typed-1", "logs"),
-        (KEY_A, WS_A, "fixture", "span-1", "spans"),
-        (KEY_B, WS_B, "fixture", "only-b", "logs"),
+        (KEY_ALL, "fixture", "typed-1", "logs"),
+        (KEY_RESTRICTED, "fixture-b", "typed-1", "logs"),
+        (KEY_ALL, "other", "typed-1", "logs"),
+        (KEY_ALL, "fixture-b", "typed-1", "logs"),
+        (KEY_ALL, "fixture", "span-1", "spans"),
+        (KEY_RESTRICTED, "fixture-b", "only-b", "logs"),
         // Stored twice by an at-least-once replay: still one event.
-        (KEY_A, WS_A, "fixture", "dup-1", "logs"),
+        (KEY_ALL, "fixture", "dup-1", "logs"),
         // A `/`, space, non-ASCII, `+`, and `%` in the ID stay one path segment.
-        (KEY_A, WS_A, "fixture", "odd id/1 é+%", "logs"),
+        (KEY_ALL, "fixture", "odd id/1 é+%", "logs"),
     ];
     let mut payloads = Vec::new();
-    for (key, tenant, dataset, event_id, signal) in found {
+    for (key, dataset, event_id, signal) in found {
         let (status, text) = api.event(Some(key), dataset, event_id).await;
         assert_eq!(status, StatusCode::OK, "{dataset}/{event_id}: {text}");
         let got: EventResponse = serde_json::from_str(&text).unwrap();
-        let stored = &fixture_events(tenant, dataset, event_id)[0];
+        let stored = &fixture_events(dataset, event_id)[0];
         assert_eq!(
             (got.dataset.as_str(), got.event_id.as_str()),
             (dataset, event_id)
@@ -911,7 +953,7 @@ async fn event_retrieval(api: &Api) {
         );
         payloads.push(got.payload.get().to_owned());
     }
-    // Tenant and dataset are part of the identity: `typed-1` has three payloads.
+    // The dataset is part of the identity: `typed-1` has three payloads.
     assert_eq!(
         [&payloads[0], &payloads[1], &payloads[2]]
             .iter()
@@ -922,37 +964,46 @@ async fn event_retrieval(api: &Api) {
 
     // (key, dataset, event id, status, error code)
     let missing = [
-        // Another workspace's event is indistinguishable from an absent one.
+        // Another dataset's event is not this dataset's event.
         (
-            KEY_A,
+            KEY_ALL,
             "fixture",
             "only-b",
             StatusCode::NOT_FOUND,
             "event_not_found",
         ),
+        // A restricted key is refused datasets outside its list, whether or
+        // not the event exists there.
         (
-            KEY_B,
+            KEY_RESTRICTED,
             "other",
             "typed-1",
-            StatusCode::NOT_FOUND,
-            "event_not_found",
+            StatusCode::FORBIDDEN,
+            "dataset_not_allowed",
         ),
         (
-            KEY_A,
+            KEY_RESTRICTED,
+            "nope",
+            "typed-1",
+            StatusCode::FORBIDDEN,
+            "dataset_not_allowed",
+        ),
+        (
+            KEY_ALL,
             "nope",
             "typed-1",
             StatusCode::NOT_FOUND,
             "event_not_found",
         ),
         (
-            KEY_A,
+            KEY_ALL,
             "fixture",
             "typed-2",
             StatusCode::NOT_FOUND,
             "event_not_found",
         ),
         (
-            KEY_A,
+            KEY_ALL,
             "fixture",
             "TYPED-1",
             StatusCode::NOT_FOUND,
@@ -960,7 +1011,7 @@ async fn event_retrieval(api: &Api) {
         ),
         // Two different payloads under one identity are reported, not picked.
         (
-            KEY_A,
+            KEY_ALL,
             "fixture",
             "conflict-1",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -968,7 +1019,7 @@ async fn event_retrieval(api: &Api) {
         ),
         // Replays of one payload must not hide a different one.
         (
-            KEY_A,
+            KEY_ALL,
             "fixture",
             "conflict-3",
             StatusCode::INTERNAL_SERVER_ERROR,

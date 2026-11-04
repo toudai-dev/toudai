@@ -126,9 +126,11 @@ Long-term component boundary, dataset routing, and retained-scale qualification
 remain open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
-Product tree: the Decision 0001 DDL is in `clickhouse/schema` (`tenant_id`, `timestamp`,
-`routing_epoch`, and a payload table on the S3-backed `toudai_payload` storage
-policy); the owned exporter that writes it lives in
+Product tree: the Decision 0001 DDL, as amended by
+link:decisions/0002-single-tenant-core.adoc[Decision 0002] (no `tenant_id`; sort keys
+`(dataset, timestamp, event_id)` and `(dataset, event_id)`; the database name is
+configuration), is in `clickhouse/schema` (`timestamp`, `routing_epoch`, and a payload
+table on the S3-backed `toudai_payload` storage policy); the owned exporter that writes it lives in
 https://github.com/toudai-dev/collector[toudai-dev/collector]. Scratch runs of that
 exporter against ClickHouse 26.8.2.7 with an S3 emulator inserted typed log and span
 rows, stamped the epoch, moved an old payload partition to the S3 disk by TTL, and
@@ -164,6 +166,14 @@ fixtures, not the owned exporter's output, and the harness serves them from a
 local-disk stand-in for the `object` volume, so the item stays open for
 normal-path ingestion through authenticated tenant policy, retrieval of a
 payload after its TTL move to S3, and dynamic key resolution.
++
+Product tree since link:decisions/0002-single-tenant-core.adoc[Decision 0002]: the route
+keeps its `{dataset}/{event_id}` shape and reads `canonical_events` by
+`(dataset, event_id)`; a read key admits the request, optionally restricted to a list of
+datasets (a dataset outside it is refused with 403 before any statement runs). The
+end-to-end test's fixture moves the second workspace's payloads to a second dataset, so
+`typed-1` still has three distinct payloads, now across three datasets. Experiment 022's
+record is unchanged history of the tenant-scoped version.
 +
 Experiment 024 added static key-derived scope with dataset rejection ahead of both
 exports (see the key-derived scope item in

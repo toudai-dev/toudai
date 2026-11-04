@@ -6,7 +6,7 @@
 //! comments cite; none of them are read back from the code under test.
 //!
 //! The fixture's `metric.value` key holds one value per event (24 of the 27
-//! workspace A log events carry it): 12 int, 5 double (1.0, -0.0, NaN, +Inf,
+//! dataset `fixture` log events carry it): 12 int, 5 double (1.0, -0.0, NaN, +Inf,
 //! -Inf), 3 string ("1", "", "3"), 1 bool (false), 1 each of bytes, map, and
 //! explicit empty. Events `typed-1`, `group-missing`, and `no-service-name`
 //! have no `metric.value`.
@@ -45,14 +45,18 @@ fn events(ch: &ClickHouse, query: Query) -> u64 {
 fn fixture_loaded() {
     let Some(ch) = clickhouse() else { return };
     // 28 inventory events minus the duplicate-key record the owned exporter
-    // rejects (`dup-1`), in each of two workspaces.
-    let per_workspace = ch.raw(
+    // rejects (`dup-1`), in each of two datasets.
+    let per_dataset = ch.raw(
         &format!(
-            "SELECT tenant_id, count() FROM {DATABASE}.serving_logs GROUP BY tenant_id ORDER BY tenant_id"
+            "SELECT dataset, count() FROM {DATABASE}.serving_logs \
+             GROUP BY dataset ORDER BY dataset"
         ),
         &[],
     );
-    assert_eq!(per_workspace, format!("{WS_A}\t27\n{WS_B}\t27\n"));
+    assert_eq!(
+        per_dataset,
+        format!("{DATASET}\t27\n{SECOND_DATASET}\t27\n")
+    );
 }
 
 #[test]
@@ -431,62 +435,51 @@ fn namespaces_do_not_overwrite_each_other() {
 #[test]
 fn scope_and_time_bounds_are_enforced() {
     let Some(ch) = clickhouse() else { return };
-    // (workspace, dataset, [start, end), expected events)
-    let cases: Vec<(&str, &str, i64, i64, u64)> = vec![
-        (WS_A, DATASET, TS, TS + 1, 27),
-        (WS_B, DATASET, TS, TS + 1, 27),
-        (
-            "99999999-9999-4999-8999-999999999999",
-            DATASET,
-            TS,
-            TS + 1,
-            0,
-        ),
-        (WS_A, "forged-dataset", TS, TS + 1, 0),
+    // (dataset, [start, end), expected events)
+    let cases: Vec<(&str, i64, i64, u64)> = vec![
+        (DATASET, TS, TS + 1, 27),
+        (SECOND_DATASET, TS, TS + 1, 27),
+        ("forged-dataset", TS, TS + 1, 0),
         // Half-open: the event at exactly TS is in [TS, TS+1) but not in
         // [TS-1, TS) or [TS+1, TS+2).
-        (WS_A, DATASET, TS - 1, TS, 0),
-        (WS_A, DATASET, TS + 1, TS + 2, 0),
-        (WS_A, DATASET, TS - 1, TS + 1, 27),
+        (DATASET, TS - 1, TS, 0),
+        (DATASET, TS + 1, TS + 2, 0),
+        (DATASET, TS - 1, TS + 1, 27),
     ];
-    for (workspace, dataset, start_ns, end_ns, expected) in cases {
+    for (dataset, start_ns, end_ns, expected) in cases {
         let mut q = logs_query();
-        q.scope.workspace_id = workspace.into();
         q.scope.dataset = dataset.into();
         q.time.start_ns = start_ns;
         q.time.end_ns = end_ns;
-        assert_eq!(
-            events(ch, q),
-            expected,
-            "{workspace} {dataset} [{start_ns}, {end_ns})"
-        );
+        assert_eq!(events(ch, q), expected, "{dataset} [{start_ns}, {end_ns})");
     }
 
-    // The copied workspace-B fixture must carry B in both authenticated scope
-    // and resource metadata; a mislabeled copy would weaken the isolation control.
-    let mut q = logs_query();
-    q.scope.workspace_id = WS_B.into();
-    q.filters = vec![cmp(
-        AttrRef::resource("toudai.workspace_id"),
-        CmpOp::Eq,
-        L::String(WS_B.into()),
-    )];
-    assert_eq!(events(ch, q.clone()), 27);
-    q.filters = vec![cmp(
-        AttrRef::resource("toudai.workspace_id"),
-        CmpOp::Eq,
-        L::String(WS_A.into()),
-    )];
-    assert_eq!(events(ch, q), 0);
-
-    let mut q = spans_query();
-    q.scope.workspace_id = WS_B.into();
-    q.filters = vec![cmp(
-        AttrRef::resource("toudai.workspace_id"),
-        CmpOp::Eq,
-        L::String(WS_B.into()),
-    )];
-    assert_eq!(events(ch, q), 7);
+    // The second copy must carry its dataset in both the query scope and the
+    // trusted resource attribute; a mislabeled copy would weaken the control.
+    // (query, resource toudai.dataset, expected events); spans start at 0 so the
+    // two with unset timing are included.
+    let cases = [
+        (logs_query(), SECOND_DATASET, 27),
+        (logs_query(), DATASET, 0),
+        (spans_query(), SECOND_DATASET, 9),
+        (spans_query(), DATASET, 0),
+    ];
+    for (base, resource_dataset, expected) in cases {
+        let mut q = base;
+        q.scope.dataset = SECOND_DATASET.into();
+        q.time.start_ns = 0;
+        q.filters = vec![cmp(
+            AttrRef::resource("toudai.dataset"),
+            CmpOp::Eq,
+            L::String(resource_dataset.into()),
+        )];
+        assert_eq!(
+            events(ch, q.clone()),
+            expected,
+            "{:?} {resource_dataset}",
+            q.signal
+        );
+    }
 }
 
 #[test]
@@ -786,11 +779,11 @@ fn span_duration_counts() {
         assert_eq!(rows[0]["sum_value"], sum, "{name}");
     }
 
-    // The same workspace's log rows are never part of a span count; the other
-    // workspace's spans are not either.
+    // The same dataset's log rows are never part of a span count; the other
+    // dataset's spans are not either.
     let mut q = spans_query();
     q.time.start_ns = 0;
-    q.scope.workspace_id = WS_B.into();
+    q.scope.dataset = SECOND_DATASET.into();
     q.aggregate = Aggregate::SpanDuration;
     assert_eq!(u64_field(&run(ch, q)[0], "events"), 9);
 }

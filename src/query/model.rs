@@ -2,11 +2,10 @@
 
 use super::value::{Literal, ValueType};
 
-/// The authenticated scope every query runs under. Both fields are mandatory
-/// and are bound as parameters; a request cannot widen them.
+/// The scope every query runs under: one dataset of the deployment (Decision
+/// 0002). It is mandatory and bound as a parameter; a request cannot widen it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope {
-    pub workspace_id: String,
     pub dataset: String,
 }
 

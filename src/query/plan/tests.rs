@@ -2,15 +2,13 @@ use super::*;
 use crate::query::model::{Scope, TimeRange};
 use crate::query::value::Literal;
 
-// Fixture identity from Experiment 021 (`fixture021.py`): workspace A, dataset
-// `fixture`, events at 2026-09-01T07:00:00.123456789Z.
-const WS_A: &str = "11111111-1111-4111-8111-111111111111";
+// Fixture identity from Experiment 021 (`fixture021.py`): dataset `fixture`,
+// events at 2026-09-01T07:00:00.123456789Z.
 const TS: i64 = 1_788_246_000_123_456_789;
 
 fn query(signal: Signal) -> Query {
     Query {
         scope: Scope {
-            workspace_id: WS_A.into(),
             dataset: "fixture".into(),
         },
         signal,
@@ -49,13 +47,6 @@ fn validation_table() {
             "typed int equality",
             logs_with(|q| q.filters = vec![compare(metric(), CmpOp::Eq, Int(1))]),
             Ok(()),
-        ),
-        (
-            "missing workspace",
-            logs_with(|q| q.scope.workspace_id.clear()),
-            Err(MissingScope {
-                field: "workspace_id",
-            }),
         ),
         (
             "missing dataset",
@@ -248,19 +239,19 @@ fn diagnostics_table() {
         (
             "plain count reads only the envelope",
             query(Signal::Logs),
-            vec!["dataset", "tenant_id", "timestamp"],
+            vec!["dataset", "timestamp"],
             vec![],
         ),
         (
             "known-type filter reads only the matching typed Map",
             logs_with(|q| q.filters = vec![compare(metric(), CmpOp::Eq, Literal::Int(1))]),
-            vec!["dataset", "record_int", "tenant_id", "timestamp"],
+            vec!["dataset", "record_int", "timestamp"],
             vec![TypeMatchedPredicates, KeyMembershipPresence],
         ),
         (
             "float comparison is finite-only",
             logs_with(|q| q.filters = vec![compare(metric(), CmpOp::Gt, Literal::Double(1.5))]),
-            vec!["dataset", "record_double", "tenant_id", "timestamp"],
+            vec!["dataset", "record_double", "timestamp"],
             vec![
                 TypeMatchedPredicates,
                 FiniteFloatComparison,
@@ -277,7 +268,6 @@ fn diagnostics_table() {
                 "record_int",
                 "record_other",
                 "record_string",
-                "tenant_id",
                 "timestamp",
             ],
             vec![KeyMembershipPresence],
@@ -288,7 +278,7 @@ fn diagnostics_table() {
                 q.filters = vec![int_filter.clone()];
                 q.aggregate = sum_int.clone();
             }),
-            vec!["dataset", "record_int", "tenant_id", "timestamp"],
+            vec!["dataset", "record_int", "timestamp"],
             vec![KeyMembershipPresence, Int128Sum, ContributingCounts],
         ),
         (
@@ -301,7 +291,6 @@ fn diagnostics_table() {
                 "record_int",
                 "record_other",
                 "record_string",
-                "tenant_id",
                 "timestamp",
             ],
             vec![
@@ -324,7 +313,6 @@ fn diagnostics_table() {
                 "record_int",
                 "record_other",
                 "record_string",
-                "tenant_id",
                 "timestamp",
             ],
             vec![
@@ -337,13 +325,7 @@ fn diagnostics_table() {
         (
             "resource group reads the type and value Maps",
             logs_with(|q| q.group_by = vec![AttrRef::resource("res.int64")]),
-            vec![
-                "dataset",
-                "resource",
-                "resource_types",
-                "tenant_id",
-                "timestamp",
-            ],
+            vec!["dataset", "resource", "resource_types", "timestamp"],
             vec![
                 KeyMembershipPresence,
                 GroupKeyIncludesType,
@@ -357,13 +339,7 @@ fn diagnostics_table() {
                 q.aggregate = Aggregate::SpanDuration;
                 q
             },
-            vec![
-                "dataset",
-                "duration_ns",
-                "span_timing_status",
-                "tenant_id",
-                "timestamp",
-            ],
+            vec!["dataset", "duration_ns", "span_timing_status", "timestamp"],
             vec![Int128Sum, ContributingCounts],
         ),
     ];

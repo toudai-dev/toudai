@@ -6,10 +6,11 @@
 //! * `GET /healthz`: whether the service can reach ClickHouse.
 //!
 //! The query and event endpoints require `Authorization: Bearer <read key>`.
-//! The key selects the tenant every statement is scoped to (see [`crate::auth`],
-//! a placeholder for the tenant-policy registry); no request body or path can
-//! name a tenant. An event that belongs to another tenant is reported exactly
-//! like one that does not exist.
+//! One deployment serves one customer (Decision 0002), so a valid key admits
+//! the request and nothing scopes it to a customer. The dataset is named
+//! explicitly, by the request body or the event path; a key restricted to a
+//! list of datasets (see [`crate::auth`]) is refused any other dataset with
+//! 403 before a statement runs.
 
 pub mod wire;
 
@@ -26,7 +27,7 @@ use axum::routing::{get, post};
 use axum::{Json, http};
 use serde_json::{Value, json};
 
-use crate::auth::{ReadKeys, TenantId, bearer_token};
+use crate::auth::{DatasetAccess, ReadKeys, bearer_token};
 use crate::clickhouse::{ClickHouse, ClickHouseError};
 use crate::events::{self, EventError};
 use crate::query::{QueryError, ServingTables, interpret, plan};
@@ -121,17 +122,32 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// The tenant a request's bearer key is bound to. Extracting it is what makes
-/// a handler authenticated.
-struct Tenant(TenantId);
+/// The datasets a request's bearer key may read. Extracting it is what makes a
+/// handler authenticated.
+struct ReadKey(DatasetAccess);
 
-impl FromRequestParts<Arc<AppState>> for Tenant {
+impl ReadKey {
+    /// Refuse a dataset outside the key's list (Decision 0002 D3).
+    fn check(&self, dataset: &str) -> Result<(), ApiError> {
+        if self.0.allows(dataset) {
+            Ok(())
+        } else {
+            Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "dataset_not_allowed",
+                "the read key may not read this dataset",
+            ))
+        }
+    }
+}
+
+impl FromRequestParts<Arc<AppState>> for ReadKey {
     type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &Arc<AppState>,
-    ) -> Result<Tenant, ApiError> {
+    ) -> Result<ReadKey, ApiError> {
         let unauthenticated = |message: &'static str| {
             ApiError::new(StatusCode::UNAUTHORIZED, "unauthenticated", message)
         };
@@ -146,16 +162,16 @@ impl FromRequestParts<Arc<AppState>> for Tenant {
             .ok_or_else(|| unauthenticated("the Authorization header is not a bearer token"))?;
         state
             .keys
-            .tenant_for(key)
+            .access_for(key)
             .cloned()
-            .map(Tenant)
+            .map(ReadKey)
             .ok_or_else(|| unauthenticated("the read key is not recognised"))
     }
 }
 
 async fn query(
     State(state): State<Arc<AppState>>,
-    Tenant(tenant): Tenant,
+    key: ReadKey,
     body: Result<Json<QueryRequest>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let Json(request) = body.map_err(|rejection| {
@@ -165,7 +181,9 @@ async fn query(
             rejection.body_text(),
         )
     })?;
-    let planned = plan(request.into_query(&tenant), &state.tables).map_err(ApiError::rejected)?;
+    // Validate first, so a malformed request is a 400 whatever the key may read.
+    let planned = plan(request.into_query(), &state.tables).map_err(ApiError::rejected)?;
+    key.check(&planned.query.scope.dataset)?;
     let rows = state
         .clickhouse
         .query_rows(&planned.statement)
@@ -185,10 +203,11 @@ async fn query(
 
 async fn event(
     State(state): State<Arc<AppState>>,
-    Tenant(tenant): Tenant,
+    key: ReadKey,
     Path((dataset, event_id)): Path<(String, String)>,
 ) -> Result<Json<events::CanonicalEvent>, ApiError> {
-    let statement = events::lookup_statement(&state.tables, tenant.as_str(), &dataset, &event_id);
+    key.check(&dataset)?;
+    let statement = events::lookup_statement(&state.tables, &dataset, &event_id);
     let rows = state
         .clickhouse
         .query_rows(&statement)

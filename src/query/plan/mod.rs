@@ -8,7 +8,7 @@ use super::error::{Operation, QueryError, UnsupportedValue};
 use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
 use super::schema::{
     self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TENANT_COLUMN, TIMESTAMP_COLUMN, TYPED_SCALARS,
+    TIMESTAMP_COLUMN, TYPED_SCALARS,
 };
 use super::sql::{self, SqlStatement};
 use super::value::{Literal, ValueType};
@@ -99,11 +99,6 @@ pub(crate) fn has_type_filter(filters: &[Predicate], attr: &AttrRef, ty: ValueTy
 
 /// Check a request against the PoC typed-value contract.
 pub fn validate(query: &Query) -> Result<(), QueryError> {
-    if query.scope.workspace_id.is_empty() {
-        return Err(QueryError::MissingScope {
-            field: "workspace_id",
-        });
-    }
     if query.scope.dataset.is_empty() {
         return Err(QueryError::MissingScope { field: "dataset" });
     }
@@ -216,7 +211,7 @@ fn validate_record_aggregate(attr: &AttrRef, ty: ValueType) -> Result<(), QueryE
 pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
     let signal = query.signal;
     let mut columns: BTreeSet<&'static str> = BTreeSet::new();
-    columns.extend([TENANT_COLUMN, DATASET_COLUMN, TIMESTAMP_COLUMN]);
+    columns.extend([DATASET_COLUMN, TIMESTAMP_COLUMN]);
 
     // Every typed Map plus the key-only Map: what presence and grouping need
     // when the type of a key is not known in advance.
