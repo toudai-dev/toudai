@@ -137,6 +137,15 @@ rows, stamped the epoch, moved an old payload partition to the S3 disk by TTL, a
 retrieved it by `(tenant_id, dataset, event_id)`. Those runs are not recorded as an
 experiment. Dataset routing is now key-derived rather than a static `resource` processor
 (Experiment 024), but the scratch runs are still unrecorded, so the item stays open.
++
+Collector since Decision 0002
+(https://github.com/toudai-dev/collector/pull/5[toudai-dev/collector#5]): the exporter
+writes the tables of this DDL without `tenant_id`, its vendored copy is refreshed from the merged schema
+(applied with `--param_database`; the exporter's `database` defaults to `toudai`), and
+the payload identity is `(dataset, event_id)`. A scratch run of that build against
+ClickHouse 26.8.2.7 created the tables in a non-default database and joined every serving
+row to its canonical row by `(dataset, event_id)`; it ran on a local-disk stand-in for the
+`object` volume and is not recorded as an experiment, so the item stays open.
 
 * [ ] Integrate authenticated tenant policy before both exports; demonstrate normal-path ingestion and exact-event retrieval against independent fixture expectations.
 +

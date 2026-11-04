@@ -65,6 +65,18 @@ workspace-scoped key item above), the `workspace_id` provenance of replayed or
 overflow objects, and a network control keeping the exporter's ClickHouse endpoint
 reachable only through the gateway. See
 link:experiments/024-key-derived-trusted-scope.adoc[Experiment 024].
++
+Product tree since link:decisions/0002-single-tenant-core.adoc[Decision 0002]
+(https://github.com/toudai-dev/collector/pull/5[toudai-dev/collector#5]): keys no
+longer map to a workspace. A key carries write permission and an optional dataset list
+(a key without one permits every dataset), and the gateway sets only `toudai.dataset`: the `X-Toudai-Dataset` header, else the
+key's only dataset, else a configured default, refused with 403 when outside the key's
+list from any source. A producer resource `toudai.dataset` is accepted only when it
+equals the resolved dataset; `toudai.workspace_id` and `toudai.scope_source` are gone
+from the wire contract. Event ID assignment, key digesting, and key redaction are
+unchanged. Experiment
+024 remains the recorded, workspace-scoped evidence; the workspace parts of this item are
+superseded by Decision 0002 D6.
 
 * [ ] Test workspace authorization across ingestion, queries, metadata, and exact payload retrieval using sibling workspaces in one account and a workspace in another account with colliding dataset/event/trace names and IDs; reject cross-workspace access on every path the slice provides, including shared downstream batches; repeat for overflow and catch-up when those paths exist in qualification.
 
