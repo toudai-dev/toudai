@@ -14,6 +14,7 @@
 //! Experiment 025. The mapping module's doc lists every difference; these are
 //! the ones these requests exercise:
 //!
+//! - The payload schema is `toudai.canonical.event/2`, not `/1`.
 //! - A span's canonical payload keeps its events (`span.events`).
 //! - A log record with `event_name` set is stored with `kind` `event`.
 
@@ -133,6 +134,17 @@ fn edit_payload(row: &mut Value, edit: impl FnOnce(&str) -> String) {
     row["payload_sha256"] = sha.into();
 }
 
+/// Ingest's payload schema in place of the Go exporter's, in the payload and
+/// the `schema_version` column.
+fn with_ingest_schema(row: &mut Value) {
+    const GO: &str = r#""schema":"toudai.canonical.event/1""#;
+    row["canonical"]["schema_version"] = "toudai.canonical.event/2".into();
+    edit_payload(row, |payload| {
+        assert_eq!(payload.matches(GO).count(), 1);
+        payload.replace(GO, r#""schema":"toudai.canonical.event/2""#)
+    });
+}
+
 /// Insert `events` (compact JSON) into the Go span envelope. Payload keys are
 /// sorted, so `events` comes right after `end_ns`, which every span has.
 fn with_span_events(row: &mut Value, events: &str) {
@@ -155,7 +167,10 @@ fn assert_rows<R>(
     rejected_records: &[usize],
 ) {
     let (mut want_rows, want_rejections) = expected(expected_text);
-    want_rows.iter_mut().for_each(differences);
+    for row in &mut want_rows {
+        with_ingest_schema(row);
+        differences(row);
+    }
     assert_eq!(mapped.serving.len(), want_rows.len(), "{signal} row count");
     assert_eq!(mapped.canonical.len(), mapped.serving.len());
     for ((row, canonical_row), want) in mapped.serving.iter().zip(&mapped.canonical).zip(&want_rows)

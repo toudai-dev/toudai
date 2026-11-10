@@ -2,8 +2,8 @@
 //! Decision 0002 D2): one serving row and one canonical row per stored record.
 //!
 //! The mapping reproduces the Go exporter at collector `f780574`, so rows
-//! written by either path compare equal apart from `event_id` (Experiment
-//! 025). The dataset and the `event_id`s arrive as typed values from
+//! written by either path compare equal apart from `event_id` and the
+//! differences listed below (Experiment 025). The dataset and the `event_id`s arrive as typed values from
 //! [`crate::admit`] rather than as attributes stamped into the request, so the
 //! exporter's "missing trusted scope" and "missing event_id" failures have no
 //! counterpart here.
@@ -17,6 +17,8 @@
 //!   exporter stores the span and ignores its events.
 //! - A log record with `event_name` set is an application event, `kind`
 //!   `event`; the Go exporter stores `log`.
+//! - The payload schema is `toudai.canonical.event/2`; the Go exporter writes
+//!   `/1`.
 //!
 //! A record is rejected on its own when it, its scope, its resource, or one of
 //! its span events repeats an attribute key or nested map key; the rest of the
@@ -44,8 +46,10 @@ use crate::admit::DATASET_ATTR;
 use crate::value::{Attributes, DuplicateKey, Value, canonical_nodes, decode_attributes};
 
 /// The `schema` field of every canonical payload and the `schema_version`
-/// column of `canonical_events`.
-pub const CANONICAL_SCHEMA: &str = "toudai.canonical.event/1";
+/// column of `canonical_events`. `/2` because the payload differs from the Go
+/// exporter's `/1`: a span payload always has `events` (a `/1` span's events
+/// were not captured, not absent), and `kind` may be `event`.
+pub const CANONICAL_SCHEMA: &str = "toudai.canonical.event/2";
 
 /// A `canonical_events` row. Timestamps are nanoseconds since the epoch, the
 /// RowBinary form of `DateTime64(9)`.
@@ -555,7 +559,7 @@ struct Canonical<'a> {
     envelope: (&'static str, Json),
 }
 
-/// The canonical payload (`toudai.canonical.event/1`) and its SHA-256 hex.
+/// The canonical payload ([`CANONICAL_SCHEMA`]) and its SHA-256 hex.
 /// Identity is `{dataset, event_id}`, times are nanosecond strings, and keys
 /// are sorted.
 fn canonical_payload(c: Canonical<'_>) -> (String, String) {

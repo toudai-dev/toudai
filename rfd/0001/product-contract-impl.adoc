@@ -36,8 +36,11 @@ checksum is the fixture's own, not comparable to a stored payload. See link:expe
 +
 `toudai-ingest` keeps span events in the canonical payload (`span.events`: name,
 time, and typed attributes, in producer order); the Go exporter at collector
-`f780574` drops them. `ingest/tests/fixture_e2e.rs` checks the fixture's
-`span.root` events against the Experiment 023 expected payloads. The item stays
+`f780574` drops them. Ingest's payloads are schema `toudai.canonical.event/2`
+and the Go exporter's `/1`, so a `/1` span payload without `events` means its
+events were not captured, not that it had none. `ingest/tests/fixture_e2e.rs`
+checks the fixture's `span.root` events against the Experiment 023 expected
+payloads. The item stays
 open: `serving_spans` has no events column, so trace rendering through the query
 service cannot show them yet, and correlated logs are not rendered with a trace.
 
