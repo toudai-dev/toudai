@@ -482,6 +482,37 @@ mod tests {
         }
     }
 
+    /// A Toudai gateway serves logs and traces and refuses metrics. Without
+    /// the metric, the run succeeds and both datasets' logs and traces arrive
+    /// in full.
+    #[test]
+    fn logs_and_traces_reach_a_destination_without_metrics() {
+        let mut fixture = model::build(9);
+        fixture.metrics.clear();
+        for transport in [Transport::Grpc, Transport::Http] {
+            let rt = runtime().unwrap();
+            let rejects = Rejects {
+                metrics: true,
+                ..Rejects::default()
+            };
+            let receiver = Receiver::start_rejecting(rt.handle(), rejects).unwrap();
+            send(&rt, &receiver, transport, &fixture).unwrap();
+            let observed = observe::observe(&receiver.shared.lock().unwrap()).unwrap();
+            let datasets = |ctxs: Vec<&crate::model::Ctx>| {
+                ctxs.iter()
+                    .flat_map(|c| &c.resource)
+                    .filter(|(k, _)| k == "toudai.dataset")
+                    .map(|(_, v)| format!("{v:?}"))
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+            };
+            assert_eq!(observed.logs.len(), fixture.logs.len(), "{transport:?}");
+            assert_eq!(observed.spans.len(), fixture.spans.len(), "{transport:?}");
+            assert_eq!(datasets(observed.logs.iter().map(|l| &l.ctx).collect()), 2);
+            assert_eq!(datasets(observed.spans.iter().map(|s| &s.ctx).collect()), 2);
+        }
+    }
+
     #[test]
     fn transports_observe_identical_contents() {
         let grpc = selfcheck(5, Transport::Grpc).unwrap().1;
