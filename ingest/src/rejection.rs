@@ -42,6 +42,18 @@ impl StatusKind {
         }
     }
 
+    /// The `google.rpc.Code` of the class, for gRPC statuses and for the
+    /// `google.rpc.Status` body of an OTLP/HTTP error.
+    pub fn rpc_code(self) -> i32 {
+        match self {
+            StatusKind::InvalidArgument => 3,
+            StatusKind::PermissionDenied => 7,
+            StatusKind::Internal => 13,
+            StatusKind::Unavailable => 14,
+            StatusKind::Unauthenticated => 16,
+        }
+    }
+
     /// The counter label of the class.
     pub fn label(self) -> &'static str {
         match self {

@@ -31,9 +31,9 @@ use tonic::transport::server::TcpIncoming;
 use tonic::{Code, Request, Response, Status};
 use tower::util::MapResponseLayer;
 
+use crate::Refusal;
 use crate::auth::{KEY_HEADER, Scope};
 use crate::pipeline::{Pipeline, Signal};
-use crate::{Refusal, StatusKind};
 
 /// The largest message accepted, after decompression: grpc-go's default,
 /// which the Collector's OTLP receiver kept (Decision 0003 D3).
@@ -114,14 +114,7 @@ fn scope<T>(request: &mut Request<T>) -> Scope {
 }
 
 fn status(refusal: Refusal) -> Status {
-    let code = match refusal.kind {
-        StatusKind::Unauthenticated => Code::Unauthenticated,
-        StatusKind::InvalidArgument => Code::InvalidArgument,
-        StatusKind::PermissionDenied => Code::PermissionDenied,
-        StatusKind::Unavailable => Code::Unavailable,
-        StatusKind::Internal => Code::Internal,
-    };
-    Status::new(code, refusal.message)
+    Status::new(Code::from_i32(refusal.kind.rpc_code()), refusal.message)
 }
 
 /// The producer's deadline from `grpc-timeout` (gRPC over HTTP/2: at most

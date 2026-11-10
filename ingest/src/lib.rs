@@ -9,6 +9,7 @@
 pub mod admit;
 pub mod auth;
 pub mod grpc;
+pub mod http;
 pub mod mapping;
 pub mod metrics;
 pub mod pipeline;
