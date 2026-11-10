@@ -9,8 +9,9 @@
 pub mod admit;
 pub mod auth;
 pub mod batcher;
-#[cfg(test)]
-mod fuzzing;
+#[cfg(any(test, feature = "fuzzing"))]
+#[doc(hidden)]
+pub mod fuzzing;
 pub mod grpc;
 pub mod http;
 pub mod mapping;

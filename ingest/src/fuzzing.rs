@@ -1,11 +1,15 @@
-//! Checks on input a client controls, run by the property tests below. Each
-//! panics when ingest breaks an invariant.
+//! Checks on input a client controls, shared by the property tests below and
+//! the cargo-fuzz targets in `ingest/fuzz`. Each panics when ingest breaks an
+//! invariant, so a panic is a bug whichever driver finds it. Built only for
+//! tests and with the `fuzzing` feature, which CI's `--all-features` lint
+//! also builds.
 
 use std::collections::HashSet;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
 use axum::body::Bytes;
+use http::HeaderValue;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
@@ -19,12 +23,53 @@ use toudai::auth::DatasetAccess;
 use crate::admit::{DATASET_ATTR, RESERVED_PREFIX, admit_logs, admit_traces};
 use crate::auth::Scope;
 use crate::grpc::unsnappy;
+use crate::http::{Format, MAX_BODY_BYTES, decompress};
 use crate::mapping::{CanonicalRow, map_logs, map_traces};
 use crate::protojson::{self, AnyValues};
+
+/// Every `Content-Encoding` the HTTP receiver accepts, and one it refuses.
+const ENCODINGS: [&str; 9] = [
+    "",
+    "gzip",
+    "zlib",
+    "deflate",
+    "zstd",
+    "lz4",
+    "snappy",
+    "x-snappy-framed",
+    "br",
+];
 
 /// The dataset every check resolves, the one the test fixtures name; keys
 /// may also permit another.
 const DATASET: &str = "fixture";
+
+/// An OTLP/HTTP body taken as the receiver and pipeline take it: decompressed,
+/// decoded, admitted, and mapped. `selector` picks the encoding (low nibble),
+/// the format (bit 4), the signal (bit 5), and the key's datasets (bits 6-7).
+pub fn http_body(selector: u8, body: &[u8]) {
+    let encoding = ENCODINGS[usize::from(selector & 0x0f) % ENCODINGS.len()];
+    let format = if selector & 0x10 == 0 {
+        Format::Protobuf
+    } else {
+        Format::Json
+    };
+    let header = (!encoding.is_empty()).then(|| HeaderValue::from_static(encoding));
+    let Ok(body) = decompress(header.as_ref(), Bytes::copy_from_slice(body)) else {
+        return;
+    };
+    if !encoding.is_empty() {
+        assert!(body.len() <= MAX_BODY_BYTES, "decompression is capped");
+    }
+    let scope = scope(selector >> 6);
+    if selector & 0x20 == 0 {
+        if let Some(request) = format.decode::<ExportLogsServiceRequest>(&body) {
+            check_logs(&request, &scope);
+        }
+    } else if let Some(request) = format.decode::<ExportTraceServiceRequest>(&body) {
+        check_traces(&request, &scope);
+    }
+}
 
 /// A key's scope: always [`DATASET`], which `authorize` guarantees the key
 /// permits, with all datasets, only it, or it and one other.
@@ -40,6 +85,22 @@ pub fn scope(bits: u8) -> Scope {
     }
 }
 
+/// A gRPC request body through the snappy layer. No message reaches tonic
+/// still compressed, and a body with no compressed message passes through
+/// unchanged, for tonic to decode or refuse.
+pub fn grpc_body(body: &[u8]) {
+    let Ok(out) = read_grpc(body) else {
+        return;
+    };
+    assert!(
+        !has_compressed_message(&out),
+        "every message is decompressed"
+    );
+    if !has_compressed_message(body) {
+        assert_eq!(&out[..], body, "uncompressed framing passes through");
+    }
+}
+
 fn read_grpc(body: &[u8]) -> Result<Bytes, tonic::Status> {
     let body = tonic::body::Body::new(axum::body::Body::from(Bytes::copy_from_slice(body)));
     // An in-memory body is never pending, so one poll finishes the read and
@@ -49,6 +110,34 @@ fn read_grpc(body: &[u8]) -> Result<Bytes, tonic::Status> {
         panic!("an in-memory body is read without waiting");
     };
     result
+}
+
+/// Whether any complete gRPC message in `body` is flagged compressed.
+fn has_compressed_message(mut body: &[u8]) -> bool {
+    while body.len() >= 5 {
+        let length = u32::from_be_bytes([body[1], body[2], body[3], body[4]]) as usize;
+        if body.len() - 5 < length {
+            return false;
+        }
+        if body[0] == 1 {
+            return true;
+        }
+        body = &body[5 + length..];
+    }
+    false
+}
+
+/// [`round_trip`] for a protobuf request. `selector` picks the signal (bit 0)
+/// and whether doubles are written as decimal strings (bit 1).
+pub fn json_round_trip(selector: u8, protobuf: &[u8]) {
+    let decimal_strings = selector & 2 != 0;
+    if selector & 1 == 0 {
+        if let Ok(request) = ExportLogsServiceRequest::decode(protobuf) {
+            round_trip(request, decimal_strings);
+        }
+    } else if let Ok(request) = ExportTraceServiceRequest::decode(protobuf) {
+        round_trip(request, decimal_strings);
+    }
 }
 
 /// Prefix of the strings standing in for doubles while the JSON is written.

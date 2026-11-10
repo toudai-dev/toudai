@@ -1,0 +1,42 @@
+[package]
+name = "toudai-ingest-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+toudai-ingest = { path = "..", features = ["fuzzing"] }
+
+# Its own workspace, outside the repository's: cargo-fuzz needs a nightly
+# compiler, which the main build and CI do not use.
+[workspace]
+members = ["."]
+
+# Line tables, so crash backtraces name source lines.
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "http_body"
+path = "fuzz_targets/http_body.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "grpc_body"
+path = "fuzz_targets/grpc_body.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "json_round_trip"
+path = "fuzz_targets/json_round_trip.rs"
+test = false
+doc = false
+bench = false
