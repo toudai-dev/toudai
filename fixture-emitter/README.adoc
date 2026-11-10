@@ -30,7 +30,14 @@ fixture-emitter/check-reproducible.sh    # reproducibility and independence chec
 ----
 
 `--endpoint` is the base URL: the HTTP transport appends `/v1/logs`, `/v1/traces`,
-and `/v1/metrics`. `--seed` fixes every trace and span identifier and the few
+and `/v1/metrics`. Each dataset is sent with its own providers, and every request
+names its dataset in the `X-Toudai-Dataset` header (gRPC metadata
+`x-toudai-dataset`) as well as in the resource `toudai.dataset`, so a Toudai
+gateway resolves the same dataset the resource carries (Decision 0002 D3). A
+destination that needs a write key gets it from the standard
+`OTEL_EXPORTER_OTLP_HEADERS`, for example `OTEL_EXPORTER_OTLP_HEADERS=x-toudai-key=<key>`;
+the key must permit both datasets. `selfcheck`'s receiver refuses a request whose
+header is missing, repeated, or different from a resource `toudai.dataset`. `--seed` fixes every trace and span identifier and the few
 generated values. Log, application-event, span, and span-event timestamps are
 fixed offsets from 2026-09-01T07:00:00Z, so those never read a clock. The metric
 data point is the exception: the SDK stamps its start and end time at collection.

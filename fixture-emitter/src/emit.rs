@@ -4,7 +4,7 @@
 //! left to configure is transport: the same fixture goes out over OTLP/gRPC or
 //! OTLP/HTTP (protobuf) through the SDK's batch processors and `opentelemetry-otlp`.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,11 +15,15 @@ use opentelemetry::trace::{
     TraceContextExt, TraceFlags, TraceId, TraceState, Tracer as _, TracerProvider as _,
 };
 use opentelemetry::{Array, Context, InstrumentationScope, Key, KeyValue, StringValue, Value};
-use opentelemetry_otlp::{LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig};
+use opentelemetry_otlp::{
+    LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig, WithHttpConfig,
+    WithTonicConfig,
+};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::{IdGenerator, SdkTracerProvider};
+use tonic::metadata::{MetadataMap, MetadataValue};
 
 use crate::delivery::{CountedLogs, CountedMetrics, CountedSpans, Tally};
 use crate::model::{Ctx, DATASET_ATTR, Fixture, SpanKind, SpanRec, Status};
@@ -46,6 +50,25 @@ impl Transport {
             Transport::Http => "http://127.0.0.1:4318",
         }
     }
+}
+
+/// The request header a Toudai gateway resolves the dataset from (Decision 0002
+/// D3). A producer `toudai.dataset` on the resource is accepted only when it
+/// equals the resolved dataset, so each dataset's send names it here; a write
+/// key, when the destination needs one, goes in the standard
+/// `OTEL_EXPORTER_OTLP_HEADERS`, which the exporters merge with this header.
+/// Lowercase because gRPC metadata keys must be.
+pub const DATASET_HEADER: &str = "x-toudai-dataset";
+
+fn grpc_headers(dataset: &str) -> Result<MetadataMap, String> {
+    let mut metadata = MetadataMap::new();
+    let value = MetadataValue::try_from(dataset).map_err(|e| e.to_string())?;
+    metadata.insert(DATASET_HEADER, value);
+    Ok(metadata)
+}
+
+fn http_headers(dataset: &str) -> HashMap<String, String> {
+    HashMap::from([(DATASET_HEADER.to_string(), dataset.to_string())])
 }
 
 fn time(ns: u64) -> SystemTime {
@@ -179,46 +202,60 @@ impl IdGenerator for QueuedIds {
     }
 }
 
-fn log_exporter(protocol: Transport, endpoint: &str) -> Result<LogExporter, String> {
+fn log_exporter(protocol: Transport, endpoint: &str, dataset: &str) -> Result<LogExporter, String> {
     match protocol {
         Transport::Grpc => LogExporter::builder()
             .with_tonic()
             .with_endpoint(endpoint)
+            .with_metadata(grpc_headers(dataset)?)
             .build(),
         Transport::Http => LogExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .with_endpoint(format!("{endpoint}/v1/logs"))
+            .with_headers(http_headers(dataset))
             .build(),
     }
     .map_err(|e| e.to_string())
 }
 
-fn span_exporter(protocol: Transport, endpoint: &str) -> Result<SpanExporter, String> {
+fn span_exporter(
+    protocol: Transport,
+    endpoint: &str,
+    dataset: &str,
+) -> Result<SpanExporter, String> {
     match protocol {
         Transport::Grpc => SpanExporter::builder()
             .with_tonic()
             .with_endpoint(endpoint)
+            .with_metadata(grpc_headers(dataset)?)
             .build(),
         Transport::Http => SpanExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .with_endpoint(format!("{endpoint}/v1/traces"))
+            .with_headers(http_headers(dataset))
             .build(),
     }
     .map_err(|e| e.to_string())
 }
 
-fn metric_exporter(protocol: Transport, endpoint: &str) -> Result<MetricExporter, String> {
+fn metric_exporter(
+    protocol: Transport,
+    endpoint: &str,
+    dataset: &str,
+) -> Result<MetricExporter, String> {
     match protocol {
         Transport::Grpc => MetricExporter::builder()
             .with_tonic()
             .with_endpoint(endpoint)
+            .with_metadata(grpc_headers(dataset)?)
             .build(),
         Transport::Http => MetricExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .with_endpoint(format!("{endpoint}/v1/metrics"))
+            .with_headers(http_headers(dataset))
             .build(),
     }
     .map_err(|e| e.to_string())
@@ -286,7 +323,7 @@ fn emit_dataset(
             .with_id_generator(QueuedIds(queued.clone()))
             .with_resource(resource(&first.ctx)?)
             .with_batch_exporter(CountedSpans(
-                span_exporter(protocol, endpoint)?,
+                span_exporter(protocol, endpoint, dataset)?,
                 tally.clone(),
             ))
             .build();
@@ -304,7 +341,7 @@ fn emit_dataset(
         let provider = SdkLoggerProvider::builder()
             .with_resource(resource(&first.ctx)?)
             .with_batch_exporter(CountedLogs(
-                log_exporter(protocol, endpoint)?,
+                log_exporter(protocol, endpoint, dataset)?,
                 tally.clone(),
             ))
             .build();
@@ -352,7 +389,7 @@ fn emit_dataset(
         let provider = SdkMeterProvider::builder()
             .with_resource(resource(&first.ctx)?)
             .with_periodic_exporter(CountedMetrics(
-                metric_exporter(protocol, endpoint)?,
+                metric_exporter(protocol, endpoint, dataset)?,
                 tally.clone(),
             ))
             .build();
