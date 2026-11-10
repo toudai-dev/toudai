@@ -9,6 +9,8 @@
 pub mod admit;
 pub mod auth;
 pub mod batcher;
+#[cfg(test)]
+mod fuzzing;
 pub mod grpc;
 pub mod http;
 pub mod mapping;
