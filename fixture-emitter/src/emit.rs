@@ -22,7 +22,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::{IdGenerator, SdkTracerProvider};
 
 use crate::delivery::{CountedLogs, CountedMetrics, CountedSpans, Tally};
-use crate::model::{Ctx, Fixture, SpanKind, SpanRec, Status, WORKSPACE_ATTR};
+use crate::model::{Ctx, DATASET_ATTR, Fixture, SpanKind, SpanRec, Status};
 use crate::value::{Attrs, Val};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,18 +224,18 @@ fn metric_exporter(protocol: Transport, endpoint: &str) -> Result<MetricExporter
     .map_err(|e| e.to_string())
 }
 
-fn workspace_of(ctx: &Ctx) -> String {
-    match ctx.resource.iter().find(|(k, _)| k == WORKSPACE_ATTR) {
+fn dataset_of(ctx: &Ctx) -> String {
+    match ctx.resource.iter().find(|(k, _)| k == DATASET_ATTR) {
         Some((_, Val::Str(s))) => s.clone(),
         _ => String::new(),
     }
 }
 
-/// Send the whole fixture. Each tenant gets its own providers and resource, as
-/// separate producers (or a gateway stamping each tenant's scope) would.
+/// Send the whole fixture. Each dataset gets its own providers and resource, so
+/// every request carries one dataset, as a Toudai gateway requires.
 pub fn emit(fixture: &Fixture, protocol: Transport, endpoint: &str) -> Result<(), String> {
     let endpoint = endpoint.trim_end_matches('/');
-    let mut workspaces: Vec<String> = Vec::new();
+    let mut datasets: Vec<String> = Vec::new();
     for ctx in fixture
         .logs
         .iter()
@@ -243,37 +243,37 @@ pub fn emit(fixture: &Fixture, protocol: Transport, endpoint: &str) -> Result<()
         .chain(fixture.spans.iter().map(|r| &r.ctx))
         .chain(fixture.metrics.iter().map(|r| &r.ctx))
     {
-        let w = workspace_of(ctx);
-        if !workspaces.contains(&w) {
-            workspaces.push(w);
+        let d = dataset_of(ctx);
+        if !datasets.contains(&d) {
+            datasets.push(d);
         }
     }
-    for workspace in &workspaces {
-        emit_tenant(fixture, workspace, protocol, endpoint)?;
+    for dataset in &datasets {
+        emit_dataset(fixture, dataset, protocol, endpoint)?;
     }
     Ok(())
 }
 
-fn emit_tenant(
+fn emit_dataset(
     fixture: &Fixture,
-    workspace: &str,
+    dataset: &str,
     protocol: Transport,
     endpoint: &str,
 ) -> Result<(), String> {
     let logs: Vec<_> = fixture
         .logs
         .iter()
-        .filter(|r| workspace_of(&r.ctx) == workspace)
+        .filter(|r| dataset_of(&r.ctx) == dataset)
         .collect();
     let spans: Vec<_> = fixture
         .spans
         .iter()
-        .filter(|r| workspace_of(&r.ctx) == workspace)
+        .filter(|r| dataset_of(&r.ctx) == dataset)
         .collect();
     let metrics: Vec<_> = fixture
         .metrics
         .iter()
-        .filter(|r| workspace_of(&r.ctx) == workspace)
+        .filter(|r| dataset_of(&r.ctx) == dataset)
         .collect();
 
     // Traces first: log records carry the trace context of spans the model
@@ -370,7 +370,7 @@ fn emit_tenant(
         if let Err(e) = provider.shutdown() {
             errors.push(format!("metric shutdown: {e}"));
         }
-        // One export call carries every data point of the tenant.
+        // One export call carries every data point of the dataset.
         errors.extend(tally.verify("metrics", 1).err());
     }
 

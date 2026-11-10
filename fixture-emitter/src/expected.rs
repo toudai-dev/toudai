@@ -12,9 +12,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value as Json, json};
 use sha2::{Digest, Sha256};
 
-use crate::model::{
-    DATASET_ATTR, KEY_ATTR, LogRec, MetricRec, RESERVED_PREFIX, SpanRec, WORKSPACE_ATTR,
-};
+use crate::model::{DATASET_ATTR, KEY_ATTR, LogRec, MetricRec, RESERVED_PREFIX, SpanRec};
 use crate::value::{Attrs, Val, double_text, nodes, timestamp_text};
 
 pub const ROW_SCHEMA: &str = "toudai.fixture.expected/1";
@@ -33,7 +31,6 @@ pub enum Rec<'a> {
 
 /// One expected row plus the join identity.
 pub struct Row {
-    pub tenant_id: String,
     pub dataset: String,
     pub signal: &'static str,
     pub fixture_key: String,
@@ -42,10 +39,7 @@ pub struct Row {
 
 impl Row {
     pub fn join_key(&self) -> String {
-        format!(
-            "{}/{}/{}/{}",
-            self.tenant_id, self.dataset, self.signal, self.fixture_key
-        )
+        format!("{}/{}/{}", self.dataset, self.signal, self.fixture_key)
     }
 }
 
@@ -71,7 +65,7 @@ fn hex(bytes: &[u8]) -> String {
 fn find_str(attrs: &Attrs, key: &str) -> Result<String, String> {
     match attrs.iter().find(|(k, _)| k == key) {
         Some((_, Val::Str(s))) if !s.is_empty() => Ok(s.clone()),
-        _ => Err(format!("missing trusted scope attribute {key}")),
+        _ => Err(format!("missing attribute {key}")),
     }
 }
 
@@ -87,9 +81,9 @@ fn apply_policy(attrs: &Attrs, keep_scope_keys: bool) -> Namespace {
     let mut dropped = Vec::new();
     for (k, v) in attrs {
         let reserved = k.starts_with(RESERVED_PREFIX);
-        // The trusted workspace and dataset stay addressable as resource
-        // attributes; every other reserved key is dropped.
-        let trusted = keep_scope_keys && (k == WORKSPACE_ATTR || k == DATASET_ATTR);
+        // The trusted dataset stays addressable as a resource attribute; every
+        // other reserved key is dropped.
+        let trusted = keep_scope_keys && k == DATASET_ATTR;
         if reserved && !trusted {
             dropped.push(k.clone());
         } else {
@@ -169,10 +163,10 @@ struct Parts<'a> {
     payload: Option<String>,
 }
 
-type Ident<'a> = (&'a str, &'a str, &'static str, String);
+type Ident<'a> = (&'a str, &'static str, String);
 
 fn finish(ident: Ident, parts: Parts) -> Row {
-    let (tenant_id, dataset, signal, fixture_key) = ident;
+    let (dataset, signal, fixture_key) = ident;
     let Parts {
         class,
         disposition,
@@ -192,7 +186,6 @@ fn finish(ident: Ident, parts: Parts) -> Row {
     }
     let json = json!({
         "schema": ROW_SCHEMA,
-        "tenant_id": tenant_id,
         "dataset": dataset,
         "signal": signal,
         "fixture_key": fixture_key,
@@ -209,7 +202,6 @@ fn finish(ident: Ident, parts: Parts) -> Row {
         "payload_sha256": checksum,
     });
     Row {
-        tenant_id: tenant_id.to_string(),
         dataset: dataset.to_string(),
         signal,
         fixture_key,
@@ -245,15 +237,9 @@ fn rejected(ident: Ident, class: &str, reason: String, absent: &[String], table:
 }
 
 fn log_row(r: &LogRec) -> Result<Row, String> {
-    let tenant_id = find_str(&r.ctx.resource, WORKSPACE_ATTR)?;
     let dataset = find_str(&r.ctx.resource, DATASET_ATTR)?;
     let fixture_key = find_str(&r.attrs, KEY_ATTR)?;
-    let ctx = (
-        tenant_id.as_str(),
-        dataset.as_str(),
-        "logs",
-        fixture_key.clone(),
-    );
+    let ctx = (dataset.as_str(), "logs", fixture_key.clone());
 
     let resource = apply_policy(&r.ctx.resource, true);
     let scope = apply_policy(&r.ctx.scope_attrs, false);
@@ -283,7 +269,7 @@ fn log_row(r: &LogRec) -> Result<Row, String> {
         let mut doc = json!({
             "schema": PAYLOAD_SCHEMA,
             "kind": kind,
-            "identity": {"tenant_id": tenant_id, "dataset": dataset, "event_id": ""},
+            "identity": {"dataset": dataset, "event_id": ""},
             "time": {
                 "timestamp_ns": r.timestamp_ns.to_string(),
                 "observed_ns": r.observed_ns.to_string(),
@@ -302,7 +288,6 @@ fn log_row(r: &LogRec) -> Result<Row, String> {
             doc["trace"] = json!({"trace_id": hex(trace_id), "span_id": hex(span_id)});
         }
         let serving = json!({
-            "tenant_id": tenant_id,
             "dataset": dataset,
             "kind": kind,
             "timestamp": timestamp_text(served_ns),
@@ -382,15 +367,9 @@ pub fn span_timing(start: u64, end: u64) -> (Option<i64>, &'static str) {
 }
 
 fn span_row(r: &SpanRec) -> Result<Row, String> {
-    let tenant_id = find_str(&r.ctx.resource, WORKSPACE_ATTR)?;
     let dataset = find_str(&r.ctx.resource, DATASET_ATTR)?;
     let fixture_key = find_str(&r.attrs, KEY_ATTR)?;
-    let ctx = (
-        tenant_id.as_str(),
-        dataset.as_str(),
-        "spans",
-        fixture_key.clone(),
-    );
+    let ctx = (dataset.as_str(), "spans", fixture_key.clone());
 
     let resource = apply_policy(&r.ctx.resource, true);
     let scope = apply_policy(&r.ctx.scope_attrs, false);
@@ -431,7 +410,7 @@ fn span_row(r: &SpanRec) -> Result<Row, String> {
         let doc = json!({
             "schema": PAYLOAD_SCHEMA,
             "kind": "span",
-            "identity": {"tenant_id": tenant_id, "dataset": dataset, "event_id": ""},
+            "identity": {"dataset": dataset, "event_id": ""},
             "time": {
                 "timestamp_ns": r.start_ns.to_string(),
                 "observed_ns": r.start_ns.to_string(),
@@ -444,7 +423,6 @@ fn span_row(r: &SpanRec) -> Result<Row, String> {
             "span": span,
         });
         let serving = json!({
-            "tenant_id": tenant_id,
             "dataset": dataset,
             "kind": "span",
             "timestamp": timestamp_text(r.start_ns),
@@ -501,20 +479,14 @@ fn span_row(r: &SpanRec) -> Result<Row, String> {
 /// row, only the canonical sample. Timestamps are assigned by the SDK at
 /// collection time, so they are not part of the expected contents.
 fn metric_row(r: &MetricRec) -> Result<Row, String> {
-    let tenant_id = find_str(&r.ctx.resource, WORKSPACE_ATTR)?;
     let dataset = find_str(&r.ctx.resource, DATASET_ATTR)?;
     let fixture_key = find_str(&r.attrs, KEY_ATTR)?;
-    let ctx = (
-        tenant_id.as_str(),
-        dataset.as_str(),
-        "metrics",
-        fixture_key.clone(),
-    );
+    let ctx = (dataset.as_str(), "metrics", fixture_key.clone());
     let resource = apply_policy(&r.ctx.resource, true);
     let doc = json!({
         "schema": PAYLOAD_SCHEMA,
         "kind": "metric",
-        "identity": {"tenant_id": tenant_id, "dataset": dataset},
+        "identity": {"dataset": dataset},
         "resource": nodes(&resource.values)?,
         "scope": scope_json(&r.ctx.scope_attrs)?,
         "metric": {
@@ -544,7 +516,7 @@ fn metric_row(r: &MetricRec) -> Result<Row, String> {
     ))
 }
 
-/// All rows of a fixture, ordered by tenant (model order), then logs, spans,
+/// All rows of a fixture, ordered by dataset (model order), then logs, spans,
 /// metrics, each in definition order. Two rows with one join key are a fixture
 /// bug and an error.
 pub fn rows(logs: &[LogRec], spans: &[SpanRec], metrics: &[MetricRec]) -> Result<Vec<Row>, String> {
@@ -586,10 +558,10 @@ mod tests {
         rows(&f.logs, &f.spans, &f.metrics).unwrap()
     }
 
-    fn find<'a>(rows: &'a [Row], tenant_prefix: &str, key: &str) -> &'a Row {
+    fn find<'a>(rows: &'a [Row], dataset: &str, key: &str) -> &'a Row {
         rows.iter()
-            .find(|r| r.tenant_id.starts_with(tenant_prefix) && r.fixture_key == key)
-            .unwrap_or_else(|| panic!("no row {key}"))
+            .find(|r| r.dataset == dataset && r.fixture_key == key)
+            .unwrap_or_else(|| panic!("no row {dataset} {key}"))
     }
 
     #[test]
@@ -612,16 +584,16 @@ mod tests {
         }
     }
 
-    /// (tenant prefix, fixture key, disposition, JSON pointer checks)
+    /// (dataset, fixture key, disposition, JSON pointer checks)
     type Case<'a> = (&'a str, &'a str, &'a str, &'a [(&'a str, &'a str)]);
 
     #[test]
     fn expected_rows_per_class() {
         let rows = fixture_rows();
-        // (tenant prefix, key, expected disposition, serving checks as JSON pointers)
+        // (dataset, key, expected disposition, serving checks as JSON pointers)
         let cases: &[Case] = &[
             (
-                "1111",
+                "fixture",
                 "log.info",
                 "serve",
                 &[
@@ -630,23 +602,20 @@ mod tests {
                     ("/serving/record_double/cart.total", "129.95"),
                     ("/serving/record_string/http.route", "/checkout"),
                     ("/serving/resource_types/fixture.replica", "int"),
-                    (
-                        "/serving/resource/toudai.workspace_id",
-                        "11111111-1111-4111-8111-111111111111",
-                    ),
+                    ("/serving/resource/toudai.dataset", "fixture"),
                 ],
             ),
             (
-                "2222",
+                "fixture-b",
                 "log.info",
                 "serve",
                 &[
                     ("/serving/record_double/cart.total", "59.5"),
-                    ("/serving/resource/toudai.dataset", "checkout"),
+                    ("/serving/resource/toudai.dataset", "fixture-b"),
                 ],
             ),
             (
-                "1111",
+                "fixture",
                 "event.checkout.completed",
                 "serve",
                 &[
@@ -656,31 +625,31 @@ mod tests {
                 ],
             ),
             (
-                "1111",
+                "fixture",
                 "log.spoofed-scope",
                 "serve",
-                &[("/serving/tenant_id", "11111111-1111-4111-8111-111111111111")],
+                &[("/serving/dataset", "fixture")],
             ),
             (
-                "1111",
+                "fixture",
                 "invalid.bytes",
                 "serve",
                 &[("/serving/record_other/payload.raw", "bytes")],
             ),
             (
-                "1111",
+                "fixture",
                 "invalid.array",
                 "serve",
                 &[("/serving/record_other/payload.list", "array")],
             ),
             (
-                "1111",
+                "fixture",
                 "invalid.map",
                 "serve",
                 &[("/serving/record_other/payload.map", "map")],
             ),
             (
-                "1111",
+                "fixture",
                 "invalid.nonfinite",
                 "serve",
                 &[
@@ -691,7 +660,7 @@ mod tests {
                 ],
             ),
             (
-                "1111",
+                "fixture",
                 "invalid.bigint",
                 "serve",
                 &[
@@ -705,7 +674,7 @@ mod tests {
                 ],
             ),
             (
-                "1111",
+                "fixture",
                 "invalid.empty-vs-missing",
                 "serve",
                 &[
@@ -717,9 +686,9 @@ mod tests {
                     ("/serving/record_double/zero.float", "0.0"),
                 ],
             ),
-            ("1111", "invalid.duplicate-key", "reject", &[]),
+            ("fixture", "invalid.duplicate-key", "reject", &[]),
             (
-                "1111",
+                "fixture",
                 "span.root",
                 "serve",
                 &[
@@ -730,13 +699,13 @@ mod tests {
                 ],
             ),
             (
-                "2222",
+                "fixture-b",
                 "span.root",
                 "serve",
                 &[("/serving/status_code", "2")],
             ),
             (
-                "1111",
+                "fixture",
                 "span.zero-duration",
                 "serve",
                 &[
@@ -745,7 +714,7 @@ mod tests {
                 ],
             ),
             (
-                "1111",
+                "fixture",
                 "span.missing-start",
                 "serve",
                 &[
@@ -754,27 +723,27 @@ mod tests {
                 ],
             ),
             (
-                "1111",
+                "fixture",
                 "span.missing-end",
                 "serve",
                 &[("/serving/span_timing_status", "missing")],
             ),
             (
-                "1111",
+                "fixture",
                 "span.missing-both",
                 "serve",
                 &[("/serving/span_timing_status", "missing")],
             ),
             (
-                "1111",
+                "fixture",
                 "span.reversed",
                 "serve",
                 &[("/serving/span_timing_status", "end_before_start")],
             ),
         ];
-        for (tenant, key, disposition, checks) in cases {
-            let row = find(&rows, tenant, key);
-            assert_eq!(row.json["disposition"], *disposition, "{tenant} {key}");
+        for (dataset, key, disposition, checks) in cases {
+            let row = find(&rows, dataset, key);
+            assert_eq!(row.json["disposition"], *disposition, "{dataset} {key}");
             for (pointer, want) in *checks {
                 let got = row
                     .json
@@ -784,7 +753,7 @@ mod tests {
                     Json::String(s) => s.clone(),
                     other => other.to_string(),
                 };
-                assert_eq!(got, *want, "{tenant} {key} {pointer}");
+                assert_eq!(got, *want, "{dataset} {key} {pointer}");
             }
         }
     }
@@ -792,7 +761,7 @@ mod tests {
     #[test]
     fn null_duration_and_rejected_rows_have_no_values() {
         let rows = fixture_rows();
-        let reversed = find(&rows, "1111", "span.reversed");
+        let reversed = find(&rows, "fixture", "span.reversed");
         assert!(reversed.json["serving"]["duration_ns"].is_null());
         assert!(
             !reversed.json["payload"]
@@ -800,7 +769,7 @@ mod tests {
                 .unwrap()
                 .contains("duration_ns")
         );
-        let dup = find(&rows, "1111", "invalid.duplicate-key");
+        let dup = find(&rows, "fixture", "invalid.duplicate-key");
         assert!(dup.json["serving"].is_null());
         assert!(dup.json["payload"].is_null());
         assert!(dup.json["payload_sha256"].is_null());
@@ -815,32 +784,27 @@ mod tests {
     #[test]
     fn spoofed_reserved_keys_are_dropped_everywhere() {
         let rows = fixture_rows();
-        let spoof = find(&rows, "1111", "log.spoofed-scope");
-        assert_eq!(
-            spoof.json["dropped_keys"],
-            json!(["toudai.dataset", "toudai.workspace_id"])
-        );
+        let spoof = find(&rows, "fixture", "log.spoofed-scope");
+        assert_eq!(spoof.json["dropped_keys"], json!(["toudai.dataset"]));
         let payload = spoof.json["payload"].as_str().unwrap();
-        // The only toudai.* keys left are the trusted resource ones.
-        assert_eq!(payload.matches("2222").count(), 0);
-        assert_eq!(payload.matches("other-dataset").count(), 0);
+        // The only toudai.* key left is the trusted resource one.
+        assert_eq!(payload.matches("fixture-b").count(), 0);
         assert!(
             spoof.json["serving"]["record_string"]
-                .get("toudai.workspace_id")
+                .get("toudai.dataset")
                 .is_none()
         );
     }
 
     #[test]
-    fn colliding_dataset_and_identical_event_differ_only_by_scope() {
+    fn identical_event_in_two_datasets_differs_only_by_dataset() {
         let rows = fixture_rows();
-        let a = find(&rows, "1111", "log.collision");
-        let b = find(&rows, "2222", "log.collision");
-        assert_eq!(a.dataset, b.dataset);
-        assert_ne!(a.tenant_id, b.tenant_id);
+        let a = find(&rows, "fixture", "log.collision");
+        let b = find(&rows, "fixture-b", "log.collision");
+        assert_ne!(a.dataset, b.dataset);
         let strip = |r: &Row| {
             let mut v = r.json["serving"].clone();
-            for key in ["tenant_id", "resource", "payload_sha256"] {
+            for key in ["dataset", "resource", "payload_sha256"] {
                 v.as_object_mut().unwrap().remove(key);
             }
             v
@@ -871,7 +835,7 @@ mod tests {
     #[test]
     fn span_events_are_in_the_payload() {
         let rows = fixture_rows();
-        let root = find(&rows, "1111", "span.root");
+        let root = find(&rows, "fixture", "span.root");
         assert_eq!(
             root.json["span_event_names"],
             json!(["cart.loaded", "exception"])

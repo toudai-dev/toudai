@@ -363,12 +363,12 @@ mod tests {
                 "serving.kind",
             ),
             (
-                "tenant swapped",
+                "dataset swapped",
                 |o| {
                     let l = log(o, "log.info");
                     l.ctx.resource.iter_mut().for_each(|(k, v)| {
-                        if k == "toudai.workspace_id" {
-                            *v = Val::Str("33333333-3333-4333-8333-333333333333".into());
+                        if k == "toudai.dataset" {
+                            *v = Val::Str("fixture-c".into());
                         }
                     });
                 },
@@ -379,8 +379,8 @@ mod tests {
                 |o| {
                     let l = log(o, "log.spoofed-scope");
                     l.ctx.resource.iter_mut().for_each(|(k, v)| {
-                        if k == "toudai.workspace_id" {
-                            *v = Val::Str("22222222-2222-4222-8222-222222222222".into());
+                        if k == "toudai.dataset" {
+                            *v = Val::Str("fixture-b".into());
                         }
                     });
                 },

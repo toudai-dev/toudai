@@ -9,21 +9,18 @@ use crate::value::{Attrs, Val};
 pub const BASE_NS: u64 = 1_788_246_000_000_000_000;
 
 /// Attribute carrying the fixture's own event name. It is ordinary producer
-/// data (it lands in the record namespace), unique within a tenant and dataset,
-/// and lets any consumer join a stored event to its expected row.
+/// data (it lands in the record namespace), unique within a dataset, and lets
+/// any consumer join a stored event to its expected row.
 pub const KEY_ATTR: &str = "fixture.key";
 
-pub const WORKSPACE_ATTR: &str = "toudai.workspace_id";
 pub const DATASET_ATTR: &str = "toudai.dataset";
 /// Reserved namespace: producer-supplied attributes in it never override the
-/// trusted scope and are dropped from record, scope, and span attributes.
+/// trusted dataset and are dropped from record, scope, and span attributes.
 pub const RESERVED_PREFIX: &str = "toudai.";
 
-pub const DATASET: &str = "checkout";
-const TENANTS: [(&str, &str); 2] = [
-    ("tenant-a", "11111111-1111-4111-8111-111111111111"),
-    ("tenant-b", "22222222-2222-4222-8222-222222222222"),
-];
+/// Two datasets of one deployment (Decision 0002: the core has no tenant). The
+/// names match `DATASET` and `SECOND_DATASET` in `tests/common/mod.rs`.
+const DATASETS: [&str; 2] = ["fixture", "fixture-b"];
 
 /// Resource and instrumentation scope of one signal stream.
 #[derive(Clone, Debug)]
@@ -192,15 +189,14 @@ fn notes(class: &'static str) -> Notes {
     }
 }
 
-fn ctx(workspace_id: &str, signal: &str) -> Ctx {
+fn ctx(dataset: &str, signal: &str) -> Ctx {
     Ctx {
         resource: vec![
             attr("service.name", s("checkout-api")),
             attr("service.version", s("1.4.2")),
             attr("deployment.environment", s("staging")),
             attr("fixture.replica", Val::Int(3)),
-            attr(WORKSPACE_ATTR, s(workspace_id)),
-            attr(DATASET_ATTR, s(DATASET)),
+            attr(DATASET_ATTR, s(dataset)),
         ],
         scope_name: format!("toudai.fixture.{signal}"),
         scope_version: "1.0.0".to_string(),
@@ -218,16 +214,15 @@ pub fn build(seed: u64) -> Fixture {
         spans: Vec::new(),
         metrics: Vec::new(),
     };
-    for (index, (_, workspace_id)) in TENANTS.iter().enumerate() {
+    for (index, dataset) in DATASETS.iter().enumerate() {
         let mut rng = Rng::new(seed ^ ((index as u64 + 1) << 56));
-        tenant(&mut fixture, &mut rng, index, workspace_id);
+        add_dataset(&mut fixture, &mut rng, index, dataset);
     }
     fixture
 }
 
-fn tenant(f: &mut Fixture, rng: &mut Rng, index: usize, workspace_id: &str) {
-    let other_workspace = TENANTS[1 - index].1;
-    // Tenants differ in values, not in dataset name: both use `checkout`.
+fn add_dataset(f: &mut Fixture, rng: &mut Rng, index: usize, dataset: &str) {
+    let other_dataset = DATASETS[1 - index];
     let t0 = BASE_NS + (index as u64) * 1_000_000_000 + 123_456_789;
     let (status_code, total, root_status) = if index == 0 {
         (200, 129.95, Status::Ok)
@@ -235,9 +230,9 @@ fn tenant(f: &mut Fixture, rng: &mut Rng, index: usize, workspace_id: &str) {
         (500, 59.5, Status::Error)
     };
 
-    let spans = ctx(workspace_id, "spans");
-    let logs = ctx(workspace_id, "logs");
-    let events = ctx(workspace_id, "events");
+    let spans = ctx(dataset, "spans");
+    let logs = ctx(dataset, "logs");
+    let events = ctx(dataset, "events");
 
     // Trace 1: a server span with two children and two span events.
     let trace1 = rng.trace_id();
@@ -447,13 +442,13 @@ fn tenant(f: &mut Fixture, rng: &mut Rng, index: usize, workspace_id: &str) {
             Val::Int(17 + (rng.next_u64() % 8) as i64),
         )],
     ));
-    // Identical in both tenants (same dataset name, timestamp, body, attributes):
-    // only the trusted scope tells the two rows apart.
+    // Identical in both datasets (timestamp, body, attributes): only the
+    // trusted dataset tells the two rows apart.
     let mut collision = log(
         "log.collision",
         BASE_NS + 777_777_777,
         INFO,
-        Some("identical across tenants"),
+        Some("identical across datasets"),
         None,
         vec![attr("shared.attr", s("same"))],
     );
@@ -498,17 +493,15 @@ fn tenant(f: &mut Fixture, rng: &mut Rng, index: usize, workspace_id: &str) {
         ],
     ));
 
-    // A producer trying to override the trusted scope through record attributes.
+    // A producer trying to move a record into the other dataset through a
+    // reserved record attribute.
     let mut spoof = log(
         "log.spoofed-scope",
         t0 + 3_000_000,
         INFO,
         Some("spoofed scope"),
         None,
-        vec![
-            attr(WORKSPACE_ATTR, s(other_workspace)),
-            attr(DATASET_ATTR, s("other-dataset")),
-        ],
+        vec![attr(DATASET_ATTR, s(other_dataset))],
     );
     spoof.notes = notes("policy");
     f.logs.push(spoof);
@@ -600,10 +593,10 @@ fn tenant(f: &mut Fixture, rng: &mut Rng, index: usize, workspace_id: &str) {
         f.logs.push(rec);
     }
 
-    // One native metric sample, for the first tenant only.
+    // One native metric sample, for the first dataset only.
     if index == 0 {
         f.metrics.push(MetricRec {
-            ctx: ctx(workspace_id, "metrics"),
+            ctx: ctx(dataset, "metrics"),
             name: "checkout.requests".into(),
             unit: "{request}".into(),
             description: "Checkout requests handled.".into(),
@@ -641,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn tenants_collide_on_dataset_but_not_on_ids() {
+    fn datasets_are_distinct_and_ids_do_not_collide() {
         let f = build(1);
         let datasets: std::collections::BTreeSet<_> = f
             .logs
@@ -650,7 +643,7 @@ mod tests {
             .filter(|(k, _)| k == DATASET_ATTR)
             .map(|(_, v)| format!("{v:?}"))
             .collect();
-        assert_eq!(datasets.len(), 1);
+        assert_eq!(datasets.len(), DATASETS.len());
         let traces: std::collections::BTreeSet<_> = f.spans.iter().map(|s| s.trace_id).collect();
         assert_eq!(traces.len(), 2 * 6);
     }
