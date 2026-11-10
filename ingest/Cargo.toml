@@ -1,0 +1,11 @@
+[package]
+name = "toudai-ingest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+http = "1"
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "logs", "trace"] }
+toudai = { path = ".." }
+uuid = { version = "1", features = ["v7"] }

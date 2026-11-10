@@ -11,3 +11,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+
+# `ingest/` (toudai-ingest) is a member and a default member, so the plain
+# `cargo test`, `cargo clippy`, and `cargo fmt` that CI runs cover it.
+# `fixture-emitter/` stays a standalone crate with its own empty [workspace].
+[workspace]
+members = [".", "ingest"]
+default-members = [".", "ingest"]

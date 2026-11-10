@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-# Standalone crate: the root Cargo.toml has no [workspace], and the empty table
-# below keeps Cargo from treating this directory as a member of it.
+# Standalone crate: the empty table below keeps Cargo from treating this
+# directory as a member of the root workspace.
 [workspace]
 
 [dependencies]
