@@ -8,12 +8,14 @@ publish = false
 base64 = "0.22"
 clickhouse = "0.15"
 http = "1"
-opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "logs", "trace"] }
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic", "logs", "trace"] }
 ryu = "1.0.23"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
+tower = { version = "0.5", features = ["util"] }
 toudai = { path = ".." }
 uuid = { version = "1", features = ["v7"] }
 
