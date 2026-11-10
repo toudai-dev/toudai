@@ -44,7 +44,8 @@ correlation; it is not a deduplication key, because two legitimate events with
 identical content share it with a retransmission of the same request (the
 `retry-duplicate` twin control stored four rows under one identity). No
 notification-driven or proprietary batch ID is involved. Cross-workspace query
-isolation and the final application-event encoding remain open. See
+isolation and the final application-event encoding remained open (the encoding
+is now defined; see the application-event item below). See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
 Product tree and Experiment 024: Decision 0001 D5 is implemented. The `toudaigateway`
@@ -69,26 +70,26 @@ Split from the item above: Experiments 018, 021, and 024 resubmit fixtures with 
 so no recorded run exercises an SDK's own retry behavior against the gateway-assigned
 identity.
 
-* [ ] Define application-event encoding.
+* [x] Define application-event encoding.
 +
 Split from the identity item when it was implemented. Experiments 018 and 021
-characterize the typed mapping; the final application-event encoding remains open.
+characterize the typed mapping.
 +
-The Experiment 023 fixture emitter exercises one working encoding through the
-standard Rust SDK: an application event is an OTLP log record with `event_name` set,
-an optional body, and typed record attributes, served with `kind` `event`. It was
-checked only on the wire against its own expected contents, so the encoding stays
-open until it is decided and tested through the Collector path. See
-link:experiments/023-fixture-emitter-run.adoc[Experiment 023].
+The encoding is standard OTLP: an application event is an OTLP log record with a
+non-empty `event_name`, an optional body, and typed record attributes. It is
+stored with `kind` `event` in its serving row and canonical payload, and the
+payload keeps the `log` envelope; a log record without `event_name` stays `log`.
+The project owner chose it on 2026-11-10, after the Experiment 023 fixture emitter
+exercised it through the standard Rust SDK (see
+link:experiments/023-fixture-emitter-run.adoc[Experiment 023]) and against the Go
+exporter at collector `f780574`, which stores both as `log`.
 +
-`toudai-ingest` stores this encoding: a log record with a non-empty `event_name`
-gets `kind` `event` in its serving row and canonical payload, and keeps the `log`
-envelope; a record without one stays `log`. The Go exporter at collector
-`f780574` stores both as `log`. `ingest/tests/fixture_e2e.rs` checks it against
-the Experiment 023 expected contents and `ingest/tests/mapping_golden.rs` against
-the Go rows with this difference applied. The item stays open: the encoding is
-not yet written into the product contract's event envelope, and no ingestion
-validation differs by kind.
+`toudai-ingest`, the write path under Decision 0003, implements it.
+`ingest/tests/fixture_e2e.rs` checks it end to end against the Experiment 023
+expected contents, and `ingest/tests/mapping_golden.rs` against the Go rows with
+this difference applied. No ingestion validation differs by kind in the PoC;
+querying application events together with logs and spans is the open product
+contract item.
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
 +
