@@ -58,7 +58,9 @@ impl Drop for Service {
     }
 }
 
-fn spawn(clickhouse: &ClickHouseServer, default_dataset: &str) -> Service {
+/// `flush_interval` is short in most steps, so each request is not held for
+/// the default second waiting for others to share its insert.
+fn spawn(clickhouse: &ClickHouseServer, default_dataset: &str, flush_interval: &str) -> Service {
     let keys = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("ingest-write-keys.txt");
     std::fs::write(&keys, KEYS).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_toudai-ingest"))
@@ -70,6 +72,7 @@ fn spawn(clickhouse: &ClickHouseServer, default_dataset: &str) -> Service {
         .env("TOUDAI_CLICKHOUSE_PASSWORD", server::PASSWORD)
         .env("TOUDAI_CLICKHOUSE_DATABASE", DATABASE)
         .env("TOUDAI_DEFAULT_DATASET", default_dataset)
+        .env("TOUDAI_INGEST_FLUSH_INTERVAL", flush_interval)
         .stderr(Stdio::piped())
         .spawn()
         .expect("start toudai-ingest");
@@ -184,13 +187,14 @@ async fn ingests_over_http_and_grpc_into_a_real_clickhouse() {
         apply_ddl(&server, &sql, DATABASE).await;
     }
     {
-        let service = spawn(&server, "");
+        let service = spawn(&server, "", "50ms");
         http_requests_are_stored_or_refused(&server, &service).await;
         identical_events_get_distinct_ids(&server, &service).await;
         traces_are_stored(&server, &service).await;
         grpc_requests_are_stored_or_refused(&server, &service).await;
     }
     default_dataset_resolves_unnamed_requests(&server).await;
+    concurrent_requests_share_one_insert(&server).await;
     no_key_reaches_storage(&server).await;
 }
 
@@ -535,7 +539,7 @@ async fn grpc_requests_are_stored_or_refused(server: &ClickHouseServer, service:
 /// `TestGatewayDefaultDataset`: a request the header and key leave
 /// unresolved lands in the default, which is still held to the key's list.
 async fn default_dataset_resolves_unnamed_requests(server: &ClickHouseServer) {
-    let service = spawn(server, "staging");
+    let service = spawn(server, "staging", "50ms");
     let cases = [
         ("key without a list", KEY_ANY, "staging"),
         (
@@ -559,6 +563,70 @@ async fn default_dataset_resolves_unnamed_requests(server: &ClickHouseServer) {
         assert_eq!(rows.len(), 1, "{name}");
         assert_eq!(rows[0]["dataset"], dataset, "{name}");
     }
+}
+
+/// Group commit (Decision 0003 D2): concurrent requests within one flush
+/// interval are written by one canonical and one serving insert, and each is
+/// answered only once its rows are stored. The counters come from the
+/// binary's own `/metrics`, which needs no key.
+async fn concurrent_requests_share_one_insert(server: &ClickHouseServer) {
+    // Longer than the 1 s default, so the answer time shows the setting is
+    // read, and long enough that all ten requests land in one batch.
+    let service = spawn(server, "", "3s");
+    let client = reqwest::Client::new();
+    let health = client
+        .get(format!("{}/healthz", service.http))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+
+    let started = std::time::Instant::now();
+    let requests: Vec<_> = (0..10)
+        .map(|i| {
+            let body = log_body(&format!("group-case-{i}"), &[], &[]);
+            let http = service.http.clone();
+            tokio::spawn(async move {
+                post(&http, "/v1/logs", &body, &[("X-Toudai-Key", KEY_PROD)]).await
+            })
+        })
+        .collect();
+    for (i, request) in requests.into_iter().enumerate() {
+        let (status, text) = request.await.unwrap();
+        assert_eq!(status, StatusCode::OK, "request {i}: {text}");
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(2500),
+            "request {i} after {waited:?}"
+        );
+        // Answered means stored: the row is readable now.
+        let rows = stored(server, &format!("group-case-{i}")).await;
+        assert_eq!(rows.len(), 1, "request {i}");
+        assert_eq!(rows[0]["canonical_dataset"], "prod", "request {i}");
+    }
+
+    let metrics = client
+        .get(format!("{}/metrics", service.http))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(metrics.status(), StatusCode::OK);
+    let text = metrics.text().await.unwrap();
+    let series = |line: &str| text.lines().any(|l| l == line);
+    assert!(
+        series("toudai_ingest_batches_total{signal=\"logs\"} 1"),
+        "not one insert:\n{text}"
+    );
+    for destination in ["canonical", "serving"] {
+        let line = format!(
+            "toudai_ingest_records_total{{signal=\"logs\",destination=\"{destination}\"}} 10"
+        );
+        assert!(series(&line), "missing {line}:\n{text}");
+    }
+    assert!(
+        series("toudai_ingest_requests_total{signal=\"logs\",outcome=\"accepted\"} 10"),
+        "{text}"
+    );
 }
 
 /// No credential reached any stored column or payload.

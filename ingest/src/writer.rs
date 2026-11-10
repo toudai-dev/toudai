@@ -34,7 +34,25 @@ const MAX_BACKOFF: Duration = Duration::from_secs(1);
 /// crate sends an insert from a spawned task that keeps running when the
 /// caller stops waiting, so an insert started at the deadline can commit after
 /// the request has already been answered with an error.
-const MIN_ATTEMPT: Duration = Duration::from_millis(100);
+pub const MIN_ATTEMPT: Duration = Duration::from_millis(100);
+
+/// A serving row type: the table it goes to and its counter label.
+pub trait ServingRow:
+    Row + RowWrite + for<'a> Row<Value<'a> = Self> + Send + Sync + 'static
+{
+    const LABEL: &'static str;
+    const SIGNAL: Signal;
+}
+
+impl ServingRow for LogRow {
+    const LABEL: &'static str = "logs";
+    const SIGNAL: Signal = Signal::Logs;
+}
+
+impl ServingRow for SpanRow {
+    const LABEL: &'static str = "spans";
+    const SIGNAL: Signal = Signal::Spans;
+}
 
 #[derive(Debug, Clone)]
 pub struct WriterConfig {
@@ -125,7 +143,7 @@ impl Writer {
         mapped: &Mapped<LogRow>,
         deadline: Instant,
     ) -> Result<(), WriteError> {
-        self.write("logs", Signal::Logs, mapped, deadline).await
+        self.write(mapped, deadline).await
     }
 
     pub async fn write_spans(
@@ -133,19 +151,15 @@ impl Writer {
         mapped: &Mapped<SpanRow>,
         deadline: Instant,
     ) -> Result<(), WriteError> {
-        self.write("spans", Signal::Spans, mapped, deadline).await
+        self.write(mapped, deadline).await
     }
 
-    async fn write<R>(
+    pub async fn write<R: ServingRow>(
         &self,
-        label: &'static str,
-        signal: Signal,
         mapped: &Mapped<R>,
         deadline: Instant,
-    ) -> Result<(), WriteError>
-    where
-        R: Row + RowWrite + for<'a> Row<Value<'a> = R>,
-    {
+    ) -> Result<(), WriteError> {
+        let (label, signal) = (R::LABEL, R::SIGNAL);
         let counters = &self.counters;
         for r in &mapped.rejections {
             counters.add(

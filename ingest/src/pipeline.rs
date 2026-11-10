@@ -21,9 +21,11 @@ use toudai::auth::{Keys, valid_dataset};
 
 use crate::admit::{admit_logs, admit_traces};
 use crate::auth::{Scope, authorize};
+use crate::batcher::{Batcher, FlushConfig, Outcome};
+use crate::mapping::{LogRow, Mapped, SpanRow};
 use crate::mapping::{map_logs, map_traces};
 use crate::metrics::Counters;
-use crate::writer::{WriteError, Writer};
+use crate::writer::{ServingRow, Writer};
 use crate::{Refusal, Rejection};
 
 /// The signal a request carries, which is also its counter label.
@@ -80,6 +82,8 @@ pub struct Settings {
     /// record once decoded. A request that needs more than the whole budget
     /// is refused as invalid, since no retry could pass.
     pub memory_budget: usize,
+    /// When concurrent requests' rows are written together.
+    pub flush: FlushConfig,
 }
 
 impl Default for Settings {
@@ -89,6 +93,7 @@ impl Default for Settings {
             routing_epoch: 1,
             budget: Duration::from_secs(5),
             memory_budget: 256 * 1024 * 1024,
+            flush: FlushConfig::default(),
         }
     }
 }
@@ -108,7 +113,9 @@ pub struct Pipeline {
     budget: Duration,
     memory_budget: usize,
     admission: Arc<Semaphore>,
-    writer: Writer,
+    writer: Arc<Writer>,
+    logs: Batcher<LogRow>,
+    spans: Batcher<SpanRow>,
 }
 
 /// A request's share of the admission budget, given back when it is dropped.
@@ -124,8 +131,10 @@ impl Held {
 impl Pipeline {
     /// An empty default dataset means none. A name that is set must be valid,
     /// so a misconfigured default fails at startup rather than turning every
-    /// request that falls back to it into a 400.
+    /// request that falls back to it into a 400. Starts the batching tasks,
+    /// so it must run on a Tokio runtime.
     pub fn new(keys: Keys, settings: Settings, writer: Writer) -> Result<Pipeline, String> {
+        let writer = Arc::new(writer);
         let default_dataset = settings
             .default_dataset
             .map(|d| d.trim().to_owned())
@@ -142,6 +151,8 @@ impl Pipeline {
             budget: settings.budget,
             memory_budget: settings.memory_budget,
             admission: Arc::new(Semaphore::new(settings.memory_budget)),
+            logs: Batcher::spawn(writer.clone(), settings.flush),
+            spans: Batcher::spawn(writer.clone(), settings.flush),
             writer,
         })
     }
@@ -219,6 +230,8 @@ impl Pipeline {
         refusal
     }
 
+    /// `held` is the request's share of the admission budget, given back
+    /// once the insert holding its rows has finished.
     pub async fn export_logs(
         &self,
         scope: &Scope,
@@ -230,9 +243,7 @@ impl Pipeline {
         let ids = admit_logs(request, scope).map_err(|r| self.reject(signal, r))?;
         self.hold_records(signal, &mut held, ids.len())?;
         let mapped = map_logs(request, &scope.dataset, &ids, self.routing_epoch);
-        let rejected = mapped.rejected_records();
-        let written = self.writer.write_logs(&mapped, deadline).await;
-        self.finish(signal, written, rejected)
+        self.store(signal, &self.logs, mapped, deadline, held).await
     }
 
     pub async fn export_traces(
@@ -246,14 +257,32 @@ impl Pipeline {
         let ids = admit_traces(request, scope).map_err(|r| self.reject(signal, r))?;
         self.hold_records(signal, &mut held, ids.len())?;
         let mapped = map_traces(request, &scope.dataset, &ids, self.routing_epoch);
+        self.store(signal, &self.spans, mapped, deadline, held)
+            .await
+    }
+
+    /// Write a request's rows with the next batch, or, when every record was
+    /// rejected, only count it: there is nothing to wait for.
+    async fn store<R: ServingRow>(
+        &self,
+        signal: Signal,
+        batcher: &Batcher<R>,
+        mapped: Mapped<R>,
+        deadline: Instant,
+        held: Held,
+    ) -> Result<Accepted, Refusal> {
         let rejected = mapped.rejected_records();
-        let written = self.writer.write_spans(&mapped, deadline).await;
-        self.finish(signal, written, rejected)
+        let outcome = if mapped.serving.is_empty() {
+            self.writer.write(&mapped, deadline).await.map_err(Arc::new)
+        } else {
+            batcher.submit(mapped, deadline, held).await
+        };
+        self.finish(signal, outcome, rejected)
     }
 
     /// Top up `held`, which covers the decompressed body, by
     /// [`RECORD_BYTES`] per record before mapping copies the records into
-    /// rows. `held` is given back once the request is answered.
+    /// rows.
     fn hold_records(&self, signal: Signal, held: &mut Held, records: usize) -> Result<(), Refusal> {
         let bytes = held
             .bytes()
@@ -268,7 +297,7 @@ impl Pipeline {
     fn finish(
         &self,
         signal: Signal,
-        written: Result<(), WriteError>,
+        written: Outcome,
         rejected: usize,
     ) -> Result<Accepted, Refusal> {
         match written {
@@ -283,9 +312,6 @@ impl Pipeline {
                 })
             }
             Err(error) => {
-                // The error names the destination and ClickHouse's reason. It
-                // never holds the key, which is not part of any row.
-                eprintln!("toudai-ingest: {} write: {error}", signal.label());
                 let refusal = if error.retryable() {
                     Refusal::UNAVAILABLE
                 } else {
@@ -391,8 +417,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn default_dataset_is_checked_at_startup() {
+    #[tokio::test]
+    async fn default_dataset_is_checked_at_startup() {
         for (default, ok) in [
             (None, true),
             (Some(""), true),
@@ -407,8 +433,8 @@ mod tests {
 
     /// An empty default is no default: a request the key does not resolve is
     /// "dataset is required", not "invalid dataset name".
-    #[test]
-    fn empty_default_means_none() {
+    #[tokio::test]
+    async fn empty_default_means_none() {
         let refusal = pipeline(Some(""))
             .unwrap()
             .authorize(Signal::Logs, &headers(ALL))
@@ -463,9 +489,9 @@ mod tests {
 
     /// A write error a retry cannot clear, such as a schema mismatch, is not
     /// answered as retryable: the producer would resend it forever.
-    #[test]
-    fn write_errors_map_by_retryability() {
-        use crate::writer::Destination;
+    #[tokio::test]
+    async fn write_errors_map_by_retryability() {
+        use crate::writer::{Destination, WriteError};
         let p = pipeline(None).unwrap();
         let error = |source| WriteError {
             destination: Destination::Canonical,
@@ -479,7 +505,10 @@ mod tests {
             ),
         ];
         for (source, expected) in cases {
-            assert_eq!(p.finish(Signal::Logs, Err(error(source)), 0), Err(expected));
+            assert_eq!(
+                p.finish(Signal::Logs, Err(Arc::new(error(source))), 0),
+                Err(expected)
+            );
         }
         let count = |outcome| {
             p.counters()
@@ -488,8 +517,8 @@ mod tests {
         assert_eq!((count("unavailable"), count("internal")), (1, 1));
     }
 
-    #[test]
-    fn admission_budget_is_held_until_dropped() {
+    #[tokio::test]
+    async fn admission_budget_is_held_until_dropped() {
         let p = testing::with(Settings {
             memory_budget: 100,
             ..Settings::default()
@@ -583,8 +612,37 @@ mod tests {
         assert_eq!(export_spans(4).await, Err(Refusal::OVER_BUDGET));
     }
 
-    #[test]
-    fn producer_deadline_wins_only_when_sooner() {
+    /// A producer that hangs up leaves its rows queued or being written, so
+    /// its share of the budget stays held until that write ends.
+    #[tokio::test]
+    async fn a_dropped_request_keeps_its_share_until_written() {
+        let memory_budget = 16 * RECORD_BYTES;
+        let p = testing::with(Settings {
+            memory_budget,
+            budget: Duration::from_millis(1500),
+            flush: FlushConfig {
+                interval: Duration::from_millis(100),
+                reserve: Duration::ZERO,
+                ..FlushConfig::default()
+            },
+            ..Settings::default()
+        })
+        .unwrap();
+        let scope = p.authorize(Signal::Logs, &headers(PROD)).unwrap();
+        let request = logs(vec![LogRecord::default()], vec![]);
+        let export = p.export_logs(&scope, &request, Held::default(), p.deadline(None));
+        let hung_up = tokio::time::timeout(Duration::from_millis(50), export).await;
+        assert!(hung_up.is_err(), "answered before its batch flushed");
+        let whole = |p: &Pipeline| p.hold(Signal::Logs, &mut Held::default(), memory_budget);
+        assert_eq!(whole(&p), Err(Refusal::OVERLOADED), "given back on hang-up");
+        // The write against the unreachable ClickHouse gives up by the
+        // request's 1.5 s deadline.
+        tokio::time::sleep(Duration::from_millis(1700)).await;
+        assert_eq!(whole(&p), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn producer_deadline_wins_only_when_sooner() {
         let p = pipeline(None).unwrap();
         let within = |requested, expected: u64| {
             let left = p.deadline(requested) - Instant::now();

@@ -132,7 +132,8 @@ fn scope<T>(request: &mut Request<T>) -> Scope {
         .expect("the interceptor authorizes every request")
 }
 
-/// The message's share of the admission budget, held until it is answered.
+/// The message's share of the admission budget, held until the insert holding
+/// its rows finishes.
 /// tonic has already decoded it, so this bounds how many decoded messages are
 /// held at once rather than the decoding itself, which the 4 MiB limit bounds.
 fn hold(
