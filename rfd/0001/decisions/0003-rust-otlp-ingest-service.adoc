@@ -1,0 +1,160 @@
+= Decision 0003: Rust OTLP ingest service
+:status: accepted
+:date: 2026-11-09
+
+link:../README.adoc[RFD 0001] · link:0001-poc-physical-layout.adoc[Decision 0001] ·
+link:0002-single-tenant-core.adoc[Decision 0002]
+
+This record replaces the server-side OpenTelemetry Collector distribution
+(`toudai-collector`) with `toudai-ingest`, a Rust OTLP ingest service in this
+repository. It changes what an OTLP success response means: success is
+returned only after both destinations of an accepted record have committed.
+It amends Decision 0001 D5 and the Decision 0002 consequences, and it reverses
+the 2026-10-17 owner call, not recorded in the RFD, to keep the Collector build
+until the qualification stage.
+
+== Context
+
+On 2026-10-17 the Collector build was kept, and the choice between it and a
+Rust ingest service was deferred to qualification, once acknowledgement and
+backpressure numbers existed. On 2026-11-09 that call was reversed. The
+reasons below do not rest on tenancy gaps or on the placeholder key files;
+both are temporary and would not justify either choice.
+
+* Toudai already owns three of the four server-side components: the exporter,
+  the auth extension, and the gateway processor. Only the OTLP receiver is
+  stock.
+* Acknowledgement, retry, and backpressure are today a combination of stock
+  Collector settings. Experiment 018 found that, with a sending queue enabled
+  as the gateway configuration has it, an OTLP success response means
+  admission to that queue, and Experiment 021 measured the
+  consequences: requests admitted to a stalled in-memory queue were lost when
+  the process stopped, a permanent canonical failure was dropped after the
+  retry budget while the producer saw 200, and a lost serving response
+  duplicated both destinations because the retry re-ran both inserts. Owning
+  the service makes each of these code Toudai controls and tests.
+* The DDL, the writer, and the reader live in one repository. The collector
+  repository carries a vendored copy of the DDL that has to be refreshed by
+  hand; a writer in this repository applies `clickhouse/schema` directly.
+* The otelcol-contrib pin treadmill goes away. The direction review named it as
+  a maintenance risk.
+* One language and one CI.
+
+Honeycomb's hosted ingest is the reference shape: standard SDKs and stock
+Collectors send OTLP to an owned endpoint, and the endpoint returns success
+only after the event is durable (for Honeycomb, written to its replicated
+Kafka log). Toudai's PoC has no log in front of ClickHouse, so its only durable
+point before overflow exists is the ClickHouse commit.
+
+The costs are stated rather than argued away:
+
+* OTLP receiver conformance becomes Toudai's to test. The stock receivers gave
+  it for free.
+* Server-side Collector processors are no longer available in the gateway. A
+  customer who wants them can still run a Collector in front of Toudai.
+* The single-tenant collector work (collector repository #5) is temporary.
+
+== Decisions
+
+=== D1. Component
+
+`toudai-ingest`, a Rust crate at `ingest/` in this repository, is the
+server-side OTLP endpoint. It receives OTLP logs and traces over gRPC and
+HTTP, applies the key and dataset rules of Decision 0002 D3, assigns
+`event_id`, and writes the Decision 0001 layout, as amended by Decision 0002
+D2, with its split canonical payload table. OTLP metrics stay out of scope, as
+they are in the Collector build. "The gateway" in Decision 0001 D5 and
+Decision 0002 D3 now means this service. Customers keep the same wire
+contract: they send OTLP from stock SDKs or Collectors with the same
+`X-Toudai-Key` and `X-Toudai-Dataset` headers. What a success response means
+changes as in D2.
+
+=== D2. Acknowledgement
+
+Amends Decision 0001 D5, which did not fix the acknowledgement point; the
+Collector's sending queue set it (Experiments 018 and 021).
+
+* A request succeeds only after the canonical and serving inserts holding all
+  of its accepted records have committed. Concurrent requests may share one
+  insert, either by group commit in the service or by a ClickHouse async
+  insert with `wait_for_async_insert`; each request is answered when the
+  insert holding its rows commits. Either mechanism satisfies this decision,
+  and the one-hour 10k events/s run chooses between them.
+* Records rejected individually, such as one with a duplicate attribute key,
+  are reported in OTLP `partial_success` with a fixed message instead of
+  being dropped silently.
+* Backpressure and unavailability are retryable responses, so the producer's
+  own retry queue is the buffer: HTTP 429 with `Retry-After` or gRPC
+  `UNAVAILABLE` when the service is full, and HTTP 503 or gRPC `UNAVAILABLE`
+  when ClickHouse cannot take the write.
+* In-service retry is bounded by the request deadline and retries only the
+  destination that failed. A producer retry after a failed request assigns new
+  `event_id`s, as Decision 0001 D5 already allows.
+* Durable overflow to object storage, which would let the service acknowledge
+  while ClickHouse is down, remains a qualification item together with
+  catch-up.
+
+=== D3. Bounds
+
+* Request body limits stay at the Collector's defaults: 20 MiB for OTLP/HTTP
+  and 4 MiB for OTLP/gRPC. A compressed body on either protocol is also
+  capped at the same decompressed size, so a compression bomb cannot exceed
+  it.
+* An admission budget in bytes bounds memory: a request holds its share from
+  decode until the insert holding its rows commits, and a full budget is
+  answered with the backpressure response of D2.
+
+=== D4. Unchanged
+
+* The Decision 0001 layout as amended by Decision 0002 D2, the
+  canonical-first pair of ordered inserts,
+  gateway-assigned UUIDv7 `event_id`, and at-least-once delivery with no
+  deduplication. The two inserts are still not atomic; a lost response on an
+  insert that did commit still duplicates that destination.
+* The Decision 0002 D3 rules in full: key validity with an optional dataset
+  list; dataset resolution from the header, else the key's single dataset,
+  else a configured default; refusal of a dataset outside the key's list
+  whatever its source; acceptance of a producer `toudai.dataset` resource
+  attribute only when it matches the resolved dataset; and rejection of a
+  producer-supplied `toudai.event_id`.
+* Static key files remain the placeholder for the key store. Write keys use
+  the same `<key> [<dataset>...]` file format as read keys, in a separate file;
+  which file a key is in decides its permission.
+
+=== D5. Collector repository
+
+Collector #5 merges as the Decision 0002 write path and stays the PoC write
+path until `toudai-ingest` reaches parity. After it merges, the collector
+repository is frozen: it takes security fixes, pin fixes, and dataset-rule
+changes kept in step with `toudai-ingest`, and no new features. Parity is
+shown by Experiment 025, which sends one fixture through both paths and
+replays the Experiment 021 failure cases against `toudai-ingest`. The
+repository is then marked deprecated and archived, not deleted, because
+Experiment 024 and the acceptance and tenant-policy `-impl` notes link its
+commits.
+
+== Consequences
+
+These amend the records and plans below; they are not rewritten here.
+
+* Decision 0002 Consequences, the bullet on the owned exporter, auth
+  extension, gateway processor, and vendored DDL: these become modules of
+  `toudai-ingest`, and the vendored DDL goes away.
+* link:../acceptance-and-replay.adoc[Acceptance and replay], "Collector-first
+  PoC" and "Reuse and Toudai ownership": Collector reuse moves to the customer
+  side. The server-side endpoint is owned.
+* link:../product-contract.adoc[Product contract], "Implementation language":
+  the sentence "Reusing the OTel Collector does not require rewriting its
+  components in Rust" no longer describes the plan.
+* The README PoC completion gate diagram shows `toudai-ingest` in place of
+  Collector authentication and validation plus the owned exporter.
+* The acknowledgement and duplicate items in the `-impl` checklists are tested
+  against `toudai-ingest`.
+* The one-hour 10k events/s run targets `toudai-ingest`, since that is the
+  path that will ship, and chooses between the two insert mechanisms of D2.
+
+== Superseding
+
+A later decision record may revise any item above. Returning success before
+the ClickHouse commit needs a durable write point in front of it, such as the
+qualification overflow path, named with its loss and duplicate measurements.
