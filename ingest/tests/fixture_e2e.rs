@@ -291,11 +291,6 @@ fn serving_problems(
     for (column, value) in want {
         let same = match column.as_str() {
             "payload_sha256" => true,
-            // The fixture serves an application event (a log record with
-            // `event_name` set) as kind `event`. Ingest stores `log`, as the
-            // Go exporter at collector `f780574` does: the application-event
-            // encoding is still open in `acceptance-and-replay-impl.adoc`.
-            "kind" if value == "event" => got[column] == "log",
             column if column == doubles => same_doubles(&got[column], value),
             column => got[column] == *value,
         };
@@ -323,10 +318,6 @@ fn payload_problems(what: &str, want: &Value, got: &Value, problems: &mut Vec<St
     for payload in [&mut want, &mut got] {
         payload["schema"] = Value::Null;
         payload["identity"]["event_id"] = Value::Null;
-    }
-    // An application event is stored as `log`, as in its serving row.
-    if want["kind"] == "event" && got["kind"] == "log" {
-        want["kind"] = "log".into();
     }
     if want != got {
         problems.push(format!("{what}: canonical payload {got}, expected {want}"));

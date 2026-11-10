@@ -148,7 +148,7 @@ async fn stores_every_column_as_mapped(server: &ClickHouseServer) {
     assert_eq!(got.len(), logs.serving.len());
     for (got, r) in got.iter().zip(&logs.serving) {
         let want = json!({
-            "dataset": r.dataset, "event_id": r.event_id, "routing_epoch": EPOCH, "kind": "log",
+            "dataset": r.dataset, "event_id": r.event_id, "routing_epoch": EPOCH, "kind": r.kind,
             "ts": r.timestamp, "observed": r.observed_ts, "service_name": r.service_name,
             "severity_text": r.severity_text, "severity_number": r.severity_number,
             "body": r.body, "trace_id": r.trace_id, "span_id": r.span_id,

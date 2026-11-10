@@ -81,9 +81,14 @@ checked only on the wire against its own expected contents, so the encoding stay
 open until it is decided and tested through the Collector path. See
 link:experiments/023-fixture-emitter-run.adoc[Experiment 023].
 +
-Through `toudai-ingest` (`ingest/tests/fixture_e2e.rs`) such a record is stored
-with `kind` `log`, as the Go exporter at collector `f780574` stores it. The test
-records the fixture's `event` as a known difference until the encoding is decided.
+`toudai-ingest` stores this encoding: a log record with a non-empty `event_name`
+gets `kind` `event` in its serving row and canonical payload, and keeps the `log`
+envelope; a record without one stays `log`. The Go exporter at collector
+`f780574` stores both as `log`. `ingest/tests/fixture_e2e.rs` checks it against
+the Experiment 023 expected contents and `ingest/tests/mapping_golden.rs` against
+the Go rows with this difference applied. The item stays open: the encoding is
+not yet written into the product contract's event envelope, and no ingestion
+validation differs by kind.
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
 +
@@ -201,8 +206,7 @@ through the query service (Experiment 022's retrieval fixtures are hand-authored
 fixture's two datasets. It compares every stored serving row and canonical payload
 with the fixture's expected contents, then retrieves every event through the query
 service's exact-event lookup: found under its own dataset, 404 under the other,
-and 403 for a key limited to the other. The only difference is application
-events stored with `kind` `log` (see the application-event item above). The item
+and 403 for a key limited to the other. Every row and payload matches. The item
 stays open for the same tenant-policy reasons.
 
 == PoC-required: independent health telemetry

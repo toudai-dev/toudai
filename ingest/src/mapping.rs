@@ -15,6 +15,8 @@
 //!   exporter drops them. So a span whose events repeat a key is rejected, and
 //!   producer `toudai.*` keys on events are dropped and counted, where the Go
 //!   exporter stores the span and ignores its events.
+//! - A log record with `event_name` set is an application event, `kind`
+//!   `event`; the Go exporter stores `log`.
 //!
 //! A record is rejected on its own when it, its scope, its resource, or one of
 //! its span events repeats an attribute key or nested map key; the rest of the
@@ -207,8 +209,15 @@ pub fn map_logs(
                 };
                 let trace_id = hex_id(&lr.trace_id);
                 let span_id = hex_id(&lr.span_id);
+                // The application-event encoding: standard OTLP, a log record
+                // that names its event. It keeps the `log` envelope.
+                let kind = if lr.event_name.is_empty() {
+                    "log"
+                } else {
+                    "event"
+                };
                 let (payload, payload_sha256) = canonical_payload(Canonical {
-                    kind: "log",
+                    kind,
                     dataset,
                     event_id: &event_id,
                     timestamp_ns: lr.time_unix_nano,
@@ -244,7 +253,7 @@ pub fn map_logs(
                     routing_epoch,
                     timestamp: served as i64,
                     observed_ts: lr.observed_time_unix_nano as i64,
-                    kind: "log".into(),
+                    kind: kind.into(),
                     service_name: service_name.clone(),
                     severity_text: lr.severity_text.clone(),
                     severity_number: lr.severity_number,
@@ -530,6 +539,7 @@ fn span_kind_name(kind: i32) -> &'static str {
 }
 
 struct Canonical<'a> {
+    /// `log`, `event`, or `span`.
     kind: &'static str,
     dataset: &'a str,
     event_id: &'a str,

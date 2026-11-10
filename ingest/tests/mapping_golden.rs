@@ -15,6 +15,7 @@
 //! the ones these requests exercise:
 //!
 //! - A span's canonical payload keeps its events (`span.events`).
+//! - A log record with `event_name` set is stored with `kind` `event`.
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -200,7 +201,17 @@ fn logs_match_the_go_exporter() {
         &mapped,
         log_row,
         include_str!("fixtures/mapping/logs.expected.jsonl"),
-        |_| {},
+        |row| {
+            if row["event_name"] != "" {
+                row["kind"] = "event".into();
+                // The top-level kind is the payload's only `"kind":"log"`: an
+                // attribute named `kind` holds a typed node, not a string.
+                edit_payload(row, |payload| {
+                    assert_eq!(payload.matches(r#""kind":"log""#).count(), 1);
+                    payload.replace(r#""kind":"log""#, r#""kind":"event""#)
+                });
+            }
+        },
         &[1, 1, 1, 2, 2],
     );
     assert_eq!(mapped.serving.len() + mapped.rejected_records(), ids.len());
