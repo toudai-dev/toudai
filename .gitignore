@@ -21,3 +21,5 @@ tmp/
 .cache/
 
 *.json
+# OTLP/JSON request fixtures are test inputs, not generated output.
+!/ingest/tests/fixtures/**/*.json

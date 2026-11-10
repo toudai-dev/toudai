@@ -1,0 +1,234 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "checkout"}},
+          {"key": "toudai.dataset", "value": {"stringValue": "fixture"}},
+          {"key": "res.int", "value": {"intValue": "-9223372036854775808"}},
+          {"key": "res.double", "value": {"doubleValue": 1.5}},
+          {"key": "res.neg_zero", "value": {"doubleValue": -0.0}},
+          {"key": "res.integral", "value": {"doubleValue": 1234567.0}},
+          {"key": "res.big", "value": {"doubleValue": 1e21}},
+          {"key": "res.below_big", "value": {"doubleValue": 123456789012345680000}},
+          {"key": "res.small", "value": {"doubleValue": 1e-7}},
+          {"key": "res.above_small", "value": {"doubleValue": 0.000001}},
+          {"key": "res.nan", "value": {"doubleValue": "NaN"}},
+          {"key": "res.inf", "value": {"doubleValue": "Infinity"}},
+          {"key": "res.ninf", "value": {"doubleValue": "-Infinity"}},
+          {"key": "res.bool", "value": {"boolValue": true}},
+          {"key": "res.bytes", "value": {"bytesValue": "AAH+/w=="}},
+          {"key": "res.empty", "value": {}},
+          {"key": "res.text", "value": {"stringValue": "<a&b> \"q\" \\ \u2028 \u2029 \u0001 \u007f \t\n é 😀"}},
+          {"key": "res.array", "value": {"arrayValue": {"values": [
+            {"stringValue": "<&>\u2028"},
+            {"intValue": "9007199254740993"},
+            {"boolValue": false},
+            {"doubleValue": 2.5},
+            {"doubleValue": 1e21},
+            {"doubleValue": 1e-7},
+            {"doubleValue": -0.0},
+            {"bytesValue": "AAE="},
+            {},
+            {"arrayValue": {"values": []}},
+            {"kvlistValue": {"values": []}}
+          ]}}},
+          {"key": "res.map", "value": {"kvlistValue": {"values": [
+            {"key": "z", "value": {"intValue": "1"}},
+            {"key": "a", "value": {"stringValue": "x"}},
+            {"key": "nested", "value": {"kvlistValue": {"values": [
+              {"key": "b", "value": {"bytesValue": "/w=="}},
+              {"key": "d", "value": {"doubleValue": 0.1}}
+            ]}}}
+          ]}}},
+          {"key": "res.tie", "value": {"doubleValue": 1731196800000000.25}},
+          {"key": "res.empty_bytes", "value": {"bytesValue": ""}},
+          {"key": "res.nested_empty_bytes", "value": {"arrayValue": {"values": [
+            {"bytesValue": ""},
+            {"kvlistValue": {"values": [{"key": "b", "value": {"bytesValue": ""}}]}}
+          ]}}},
+          {"key": "res.map_with_nan", "value": {"kvlistValue": {"values": [
+            {"key": "n", "value": {"doubleValue": "NaN"}}
+          ]}}}
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "checkout.lib",
+            "version": "1.2.3",
+            "attributes": [
+              {"key": "scope.attr", "value": {"stringValue": "scope-value"}},
+              {"key": "scope.int", "value": {"intValue": "7"}},
+              {"key": "toudai.dataset", "value": {"stringValue": "forged-scope"}}
+            ]
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "1788246000123456789",
+              "observedTimeUnixNano": "1788246000124456789",
+              "severityNumber": 9,
+              "severityText": "INFO",
+              "eventName": "checkout.completed",
+              "traceId": "0102030405060708090a0b0c0d0e0f10",
+              "spanId": "a1a2a3a4a5a6a7a8",
+              "body": {"stringValue": "every attribute kind"},
+              "attributes": [
+                {"key": "s", "value": {"stringValue": "x"}},
+                {"key": "s.empty", "value": {"stringValue": ""}},
+                {"key": "s.unicode", "value": {"stringValue": "\u2028<&>\u00e9"}},
+                {"key": "i.min", "value": {"intValue": "-9223372036854775808"}},
+                {"key": "i.max", "value": {"intValue": "9223372036854775807"}},
+                {"key": "d.half", "value": {"doubleValue": 0.5}},
+                {"key": "d.one", "value": {"doubleValue": 1.0}},
+                {"key": "d.neg_zero", "value": {"doubleValue": -0.0}},
+                {"key": "d.nan", "value": {"doubleValue": "NaN"}},
+                {"key": "d.inf", "value": {"doubleValue": "Infinity"}},
+                {"key": "d.ninf", "value": {"doubleValue": "-Infinity"}},
+                {"key": "d.g_exp_small", "value": {"doubleValue": 0.00001}},
+                {"key": "d.g_plain_small", "value": {"doubleValue": 0.0001}},
+                {"key": "d.g_plain", "value": {"doubleValue": 123456.0}},
+                {"key": "d.g_exp_large", "value": {"doubleValue": 1000000.0}},
+                {"key": "d.g_exp_digits", "value": {"doubleValue": 1234567.5}},
+                {"key": "d.g_exp_huge", "value": {"doubleValue": 1e300}},
+                {"key": "d.g_exp_tiny", "value": {"doubleValue": 5e-324}},
+                {"key": "d.tie", "value": {"doubleValue": 1731196800000000.25}},
+                {"key": "d.tie_odd", "value": {"doubleValue": 1533979136307259.25}},
+                {"key": "b.true", "value": {"boolValue": true}},
+                {"key": "b.false", "value": {"boolValue": false}},
+                {"key": "y", "value": {"bytesValue": "AAE="}},
+                {"key": "arr", "value": {"arrayValue": {"values": [{"intValue": "1"}, {"stringValue": "a"}]}}},
+                {"key": "map", "value": {"kvlistValue": {"values": [{"key": "k", "value": {"boolValue": true}}]}}},
+                {"key": "empty", "value": {}},
+                {"key": "toudai.dataset", "value": {"stringValue": "forged-record"}},
+                {"key": "toudai.anything", "value": {"stringValue": "dropped"}}
+              ]
+            },
+            {
+              "observedTimeUnixNano": "1788246000999999999",
+              "severityNumber": 17,
+              "traceId": "00000000000000000000000000000000",
+              "spanId": "0000000000000000",
+              "body": {"intValue": "7"}
+            },
+            {
+              "timeUnixNano": "1788246001000000000",
+              "body": {"kvlistValue": {"values": [
+                {"key": "msg", "value": {"stringValue": "<map body>"}},
+                {"key": "n", "value": {"doubleValue": 1e21}},
+                {"key": "list", "value": {"arrayValue": {"values": [{"boolValue": true}, {"bytesValue": "AA=="}]}}}
+              ]}}
+            },
+            {
+              "timeUnixNano": "1788246001000000001",
+              "body": {"arrayValue": {"values": [{"stringValue": "a"}, {"doubleValue": 0.000001}]}}
+            },
+            {
+              "timeUnixNano": "1788246001000000002",
+              "body": {"bytesValue": "3q2+7w=="}
+            },
+            {
+              "timeUnixNano": "1788246001000000003",
+              "body": {"doubleValue": -0.0}
+            },
+            {
+              "timeUnixNano": "1788246001000000004"
+            },
+            {
+              "timeUnixNano": "1788246001000000005",
+              "body": {"stringValue": "duplicate record key"},
+              "attributes": [
+                {"key": "dup", "value": {"stringValue": "a"}},
+                {"key": "dup", "value": {"intValue": "1"}}
+              ]
+            },
+            {
+              "timeUnixNano": "1788246001000000006",
+              "body": {"stringValue": "duplicate nested key"},
+              "attributes": [
+                {"key": "m", "value": {"kvlistValue": {"values": [
+                  {"key": "k", "value": {"intValue": "1"}},
+                  {"key": "k", "value": {"intValue": "2"}}
+                ]}}}
+              ]
+            },
+            {
+              "timeUnixNano": "1788246001000000007",
+              "body": {"kvlistValue": {"values": [
+                {"key": "k", "value": {"intValue": "1"}},
+                {"key": "k", "value": {"intValue": "2"}}
+              ]}}
+            },
+            {
+              "timeUnixNano": "1788246001000000008",
+              "body": {"stringValue": "duplicate reserved keys are dropped, not rejected"},
+              "attributes": [
+                {"key": "toudai.x", "value": {"stringValue": "a"}},
+                {"key": "toudai.x", "value": {"stringValue": "b"}},
+                {"key": "kept", "value": {"intValue": "3"}}
+              ]
+            }
+          ]
+        },
+        {
+          "scope": {
+            "name": "duplicate-scope-key",
+            "attributes": [
+              {"key": "same", "value": {"stringValue": "a"}},
+              {"key": "same", "value": {"stringValue": "b"}}
+            ]
+          },
+          "logRecords": [
+            {"timeUnixNano": "1788246002000000000", "body": {"stringValue": "rejected with its scope"}},
+            {"timeUnixNano": "1788246002000000001", "body": {"stringValue": "rejected with its scope"}}
+          ]
+        },
+        {
+          "logRecords": [
+            {"timeUnixNano": "1788246003000000000", "body": {"stringValue": "scope without attributes"}}
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "rejected"}},
+          {"key": "dup", "value": {"stringValue": "a"}},
+          {"key": "dup", "value": {"stringValue": "b"}}
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {"timeUnixNano": "1788246004000000000", "body": {"stringValue": "rejected with its resource"}},
+            {"timeUnixNano": "1788246004000000001", "body": {"stringValue": "rejected with its resource"}}
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"intValue": "5"}}
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {"timeUnixNano": "1788246005000000000", "severityNumber": 24, "severityText": "FATAL", "body": {"stringValue": "numeric service name"}}
+          ]
+        }
+      ]
+    },
+    {
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {"timeUnixNano": "1788246006000000000", "body": {"stringValue": "resource without attributes"}}
+          ]
+        }
+      ]
+    }
+  ]
+}

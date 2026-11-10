@@ -15,6 +15,7 @@ pub enum Rejection {
     DatasetMismatch,
     ReservedResource,
     ProducerEventId,
+    InvalidId,
 }
 
 /// The class of a rejection, which each transport maps to its own status:
@@ -50,7 +51,8 @@ impl Rejection {
             | InvalidDataset
             | DatasetMismatch
             | ReservedResource
-            | ProducerEventId => StatusKind::InvalidArgument,
+            | ProducerEventId
+            | InvalidId => StatusKind::InvalidArgument,
             DatasetNotPermitted => StatusKind::PermissionDenied,
         }
     }
@@ -71,6 +73,7 @@ impl Rejection {
             ReservedResource => {
                 "resource attribute in the reserved toudai. namespace is not accepted from producers"
             }
+            InvalidId => "a trace or span ID does not have the OTLP length of 16 or 8 bytes",
             ProducerEventId => {
                 "record attribute toudai.event_id is assigned by the gateway and is not accepted from producers"
             }

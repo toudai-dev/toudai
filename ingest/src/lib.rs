@@ -8,6 +8,8 @@
 
 pub mod admit;
 pub mod auth;
+pub mod mapping;
 mod rejection;
+pub mod value;
 
 pub use rejection::{Rejection, StatusKind};

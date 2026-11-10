@@ -362,6 +362,7 @@ mod tests {
             (DatasetMismatch, StatusKind::InvalidArgument, 400),
             (ReservedResource, StatusKind::InvalidArgument, 400),
             (ProducerEventId, StatusKind::InvalidArgument, 400),
+            (InvalidId, StatusKind::InvalidArgument, 400),
             (DatasetNotPermitted, StatusKind::PermissionDenied, 403),
         ];
         for (rejection, kind, status) in cases {

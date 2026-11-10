@@ -11,6 +11,7 @@ use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{KeyValue, any_value};
 use opentelemetry_proto::tonic::resource::v1::Resource;
+use opentelemetry_proto::tonic::trace::v1::Span;
 use uuid::Uuid;
 
 use crate::Rejection;
@@ -31,14 +32,18 @@ pub fn admit_logs(
     request: &ExportLogsServiceRequest,
     scope: &Scope,
 ) -> Result<Vec<Uuid>, Rejection> {
+    let records = || {
+        request
+            .resource_logs
+            .iter()
+            .flat_map(|r| &r.scope_logs)
+            .flat_map(|s| &s.log_records)
+    };
+    if !records().all(|r| valid_ids(&r.trace_id, &r.span_id)) {
+        return Err(Rejection::InvalidId);
+    }
     let resources = request.resource_logs.iter().map(|r| r.resource.as_ref());
-    let records = request
-        .resource_logs
-        .iter()
-        .flat_map(|r| &r.scope_logs)
-        .flat_map(|s| &s.log_records)
-        .map(|record| record.attributes.as_slice());
-    admit(resources, records, scope)
+    admit(resources, records().map(|r| r.attributes.as_slice()), scope)
 }
 
 /// Check a traces request and assign one `event_id` per span, in request
@@ -47,14 +52,31 @@ pub fn admit_traces(
     request: &ExportTraceServiceRequest,
     scope: &Scope,
 ) -> Result<Vec<Uuid>, Rejection> {
+    let spans = || {
+        request
+            .resource_spans
+            .iter()
+            .flat_map(|r| &r.scope_spans)
+            .flat_map(|s| &s.spans)
+    };
+    let ids_ok = |s: &Span| {
+        valid_ids(&s.trace_id, &s.span_id)
+            && valid_ids(&[], &s.parent_span_id)
+            && s.links.iter().all(|l| valid_ids(&l.trace_id, &l.span_id))
+    };
+    if !spans().all(ids_ok) {
+        return Err(Rejection::InvalidId);
+    }
     let resources = request.resource_spans.iter().map(|r| r.resource.as_ref());
-    let spans = request
-        .resource_spans
-        .iter()
-        .flat_map(|r| &r.scope_spans)
-        .flat_map(|s| &s.spans)
-        .map(|span| span.attributes.as_slice());
-    admit(resources, spans, scope)
+    admit(resources, spans().map(|s| s.attributes.as_slice()), scope)
+}
+
+/// Whether a trace ID and span ID have an OTLP length: absent, or 16 and 8
+/// bytes. pdata refuses any other length while decoding, so the Go collector
+/// answered such a request 400 before checking anything else; prost accepts
+/// any length, and the mapping would store it as hex of the wrong width.
+fn valid_ids(trace_id: &[u8], span_id: &[u8]) -> bool {
+    matches!(trace_id.len(), 0 | 16) && matches!(span_id.len(), 0 | 8)
 }
 
 fn admit<'a>(
@@ -410,6 +432,90 @@ mod tests {
             let got = admit_traces(&request, &scope);
             assert_eq!(got.as_ref().map(Vec::len), want.as_ref().copied(), "{name}");
         }
+    }
+
+    /// pdata's decode-time ID rule: absent, or exactly 16 (trace) and 8
+    /// (span) bytes, on records, spans, parents, and links. It runs before
+    /// the resource checks, as decoding did in the Go collector, so a bad ID
+    /// is a 400 even beside a dataset the key may not use.
+    #[test]
+    fn refuses_ids_of_the_wrong_length() {
+        use opentelemetry_proto::tonic::trace::v1::span::Link;
+        let log = |trace: usize, span: usize| {
+            let mut request = logs(vec![(vec![], vec![vec![]])]);
+            let record = &mut request.resource_logs[0].scope_logs[0].log_records[0];
+            record.trace_id = vec![1; trace];
+            record.span_id = vec![1; span];
+            admit_logs(&request, &scope("prod", &["prod"])).map(|ids| ids.len())
+        };
+        let span = |edit: &dyn Fn(&mut Span)| {
+            let mut request = traces(vec![], vec![vec![]]);
+            edit(&mut request.resource_spans[0].scope_spans[0].spans[0]);
+            admit_traces(&request, &scope("prod", &["prod"])).map(|ids| ids.len())
+        };
+        let link = |trace: usize, span: usize| Link {
+            trace_id: vec![1; trace],
+            span_id: vec![1; span],
+            ..Default::default()
+        };
+        let bad = Err(Rejection::InvalidId);
+        let cases = [
+            ("record without IDs", log(0, 0), Ok(1)),
+            ("record with full IDs", log(16, 8), Ok(1)),
+            ("record trace ID one byte short", log(15, 8), bad),
+            ("record trace ID one byte long", log(17, 0), bad),
+            ("record span ID one byte short", log(16, 7), bad),
+            ("record span ID one byte long", log(0, 9), bad),
+            (
+                "span with full IDs",
+                span(&|s| {
+                    s.trace_id = vec![1; 16];
+                    s.span_id = vec![1; 8];
+                    s.parent_span_id = vec![1; 8];
+                }),
+                Ok(1),
+            ),
+            (
+                "span trace ID of 4 bytes",
+                span(&|s| s.trace_id = vec![1; 4]),
+                bad,
+            ),
+            (
+                "span ID of 16 bytes",
+                span(&|s| s.span_id = vec![1; 16]),
+                bad,
+            ),
+            (
+                "parent span ID of 7 bytes",
+                span(&|s| s.parent_span_id = vec![1; 7]),
+                bad,
+            ),
+            (
+                "valid link",
+                span(&|s| s.links = vec![link(16, 8), link(0, 0)]),
+                Ok(1),
+            ),
+            (
+                "link trace ID of 8 bytes",
+                span(&|s| s.links = vec![link(16, 8), link(8, 8)]),
+                bad,
+            ),
+            (
+                "link span ID of 4 bytes",
+                span(&|s| s.links = vec![link(16, 4)]),
+                bad,
+            ),
+        ];
+        for (name, got, want) in cases {
+            assert_eq!(got, want, "{name}");
+        }
+        let mut request = logs(vec![(vec![s(DATASET_ATTR, "other")], vec![vec![]])]);
+        request.resource_logs[0].scope_logs[0].log_records[0].span_id = vec![1; 3];
+        assert_eq!(
+            admit_logs(&request, &scope("prod", &["prod"])),
+            Err(Rejection::InvalidId),
+            "a bad ID wins over a disallowed dataset"
+        );
     }
 
     /// Identical content everywhere, so only a random ID tells the records
