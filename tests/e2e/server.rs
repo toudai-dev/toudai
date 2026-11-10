@@ -115,7 +115,10 @@ fn native_binary() -> String {
 }
 
 fn scratch_dir(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    // Per package: workspace members share the target directory, and each
+    // one's tests start their own server.
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("{name}-{}", env!("CARGO_PKG_NAME")));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
     dir
@@ -334,9 +337,14 @@ pub async fn apply_ddl(server: &ClickHouseServer, sql: &str, database: &str) {
     assert!(status.is_success(), "clickhouse rejected the DDL: {body}");
 }
 
-/// The product DDL, in apply order.
+/// The product DDL, in apply order. Found from the including crate's manifest
+/// directory upwards, because `toudai-ingest`'s tests use this harness too.
 pub fn product_ddl() -> Vec<(String, String)> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("clickhouse/schema");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .map(|dir| dir.join("clickhouse/schema"))
+        .find(|dir| dir.is_dir())
+        .expect("clickhouse/schema in the workspace");
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("read clickhouse/schema")
         .map(|entry| entry.expect("schema entry").path())
