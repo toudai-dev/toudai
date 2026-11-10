@@ -12,11 +12,10 @@
 #[allow(dead_code)]
 #[path = "../../tests/e2e/server.rs"]
 mod server;
+#[allow(dead_code)]
+mod support;
 
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
 use std::time::Duration;
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -29,6 +28,7 @@ use tonic::Code;
 use uuid::Uuid;
 
 use server::{ClickHouseServer, apply_ddl, execute, product_ddl};
+use support::Service;
 
 const DATABASE: &str = "toudai_ingest_receivers_e2e";
 
@@ -45,60 +45,18 @@ tk_example_staging_0123456789abcdef staging
 tk_example_any_0123456789abcdef
 ";
 
-struct Service {
-    child: Child,
-    http: String,
-    grpc: String,
-}
-
-impl Drop for Service {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
 /// `flush_interval` is short in most steps, so each request is not held for
 /// the default second waiting for others to share its insert.
 fn spawn(clickhouse: &ClickHouseServer, default_dataset: &str, flush_interval: &str) -> Service {
-    let keys = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("ingest-write-keys.txt");
-    std::fs::write(&keys, KEYS).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_toudai-ingest"))
-        .env("TOUDAI_WRITE_KEYS_FILE", &keys)
-        .env("TOUDAI_OTLP_GRPC_LISTEN", "127.0.0.1:0")
-        .env("TOUDAI_OTLP_HTTP_LISTEN", "127.0.0.1:0")
-        .env("TOUDAI_CLICKHOUSE_URL", &clickhouse.url)
-        .env("TOUDAI_CLICKHOUSE_USER", server::USER)
-        .env("TOUDAI_CLICKHOUSE_PASSWORD", server::PASSWORD)
-        .env("TOUDAI_CLICKHOUSE_DATABASE", DATABASE)
-        .env("TOUDAI_DEFAULT_DATASET", default_dataset)
-        .env("TOUDAI_INGEST_FLUSH_INTERVAL", flush_interval)
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("start toudai-ingest");
-    let stderr = child.stderr.take().unwrap();
-    // Guard the child before waiting on it, so a hang or early exit below
-    // still reaps it.
-    let mut service = Service {
-        child,
-        http: String::new(),
-        grpc: String::new(),
-    };
-    let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            eprintln!("[toudai-ingest] {line}");
-            if let Some(rest) = line.strip_prefix("toudai-ingest listening on grpc://")
-                && let Some((grpc, http)) = rest.split_once(" and ")
-            {
-                let _ = sender.send((format!("http://{grpc}"), http.to_owned()));
-            }
-        }
-    });
-    (service.grpc, service.http) = receiver
-        .recv_timeout(Duration::from_secs(30))
-        .expect("toudai-ingest did not report its addresses");
-    service
+    support::spawn(
+        clickhouse,
+        KEYS,
+        DATABASE,
+        &[
+            ("TOUDAI_DEFAULT_DATASET", default_dataset),
+            ("TOUDAI_INGEST_FLUSH_INTERVAL", flush_interval),
+        ],
+    )
 }
 
 /// The Go suite's request: one record under a `service.name` resource, with
