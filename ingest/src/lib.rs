@@ -14,6 +14,7 @@ pub mod http;
 pub mod mapping;
 pub mod metrics;
 pub mod pipeline;
+pub mod protojson;
 mod rejection;
 pub mod value;
 pub mod writer;

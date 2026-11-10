@@ -40,6 +40,7 @@ use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 
 use crate::pipeline::{Accepted, Held, Pipeline, Signal};
+use crate::protojson::{self, AnyValues};
 use crate::{Refusal, StatusKind};
 
 /// The largest body accepted, as sent and once decompressed: the
@@ -247,7 +248,7 @@ async fn receive<M>(
     body: Body,
 ) -> Result<(crate::auth::Scope, Format, M, Held), Box<Response>>
 where
-    M: Message + Default + DeserializeOwned + Send + 'static,
+    M: Message + Default + DeserializeOwned + AnyValues + Send + 'static,
 {
     let pipeline = &shared.pipeline;
     let error_format = Format::of(headers).unwrap_or(Format::Json);
@@ -434,10 +435,10 @@ impl Format {
         }
     }
 
-    fn decode<M: Message + Default + DeserializeOwned>(self, body: &[u8]) -> Option<M> {
+    fn decode<M: Message + Default + DeserializeOwned + AnyValues>(self, body: &[u8]) -> Option<M> {
         match self {
             Format::Protobuf => M::decode(body).ok(),
-            Format::Json => serde_json::from_slice(body).ok(),
+            Format::Json => protojson::decode(body),
         }
     }
 
@@ -623,6 +624,27 @@ mod tests {
         &'static str,
         i64,
     );
+
+    /// OTLP/JSON as a Collector `otlphttp` exporter with `encoding: json`
+    /// writes it, with string doubles and `null` fields, is accepted.
+    #[tokio::test]
+    async fn protojson_bodies_are_accepted() {
+        let record = json!({
+            "attributes": [
+                {"key": "a", "value": {"doubleValue": "NaN"}},
+                {"key": "a", "value": {"doubleValue": "-Infinity"}},
+            ],
+            "body": null,
+        });
+        let body = json!({"resourceLogs": [{"resource": null, "scopeLogs": [
+            {"logRecords": [record]}
+        ]}]});
+        let headers = [("x-toudai-key", PROD), (CONTENT_TYPE.as_str(), JSON)];
+        let reply = send(Method::POST, "/v1/logs", &headers, body.to_string().into()).await;
+        assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+        let reply: Value = serde_json::from_slice(&reply.body).unwrap();
+        assert_eq!(reply["partialSuccess"]["rejectedLogRecords"], json!(1));
+    }
 
     #[tokio::test]
     async fn logs_requests() {
