@@ -13,16 +13,17 @@
 //! stalls cannot keep one, or a body buffer, open indefinitely.
 
 use std::io::Read;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::body::{Body, Bytes};
+use axum::body::{Body, Bytes, HttpBody as _};
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
-use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
-use http::{HeaderMap, Method, StatusCode};
+use http::header::{CONTENT_ENCODING, CONTENT_TYPE, RETRY_AFTER};
+use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::GracefulShutdown;
@@ -38,7 +39,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 
-use crate::pipeline::{Accepted, Pipeline, Signal};
+use crate::pipeline::{Accepted, Held, Pipeline, Signal};
 use crate::{Refusal, StatusKind};
 
 /// The largest body accepted, as sent and once decompressed: the
@@ -61,6 +62,10 @@ const BAD_COMPRESSION: Refusal = Refusal {
 const MALFORMED: Refusal = Refusal {
     kind: StatusKind::InvalidArgument,
     message: "request body is not a valid OTLP export request",
+};
+const DECODER_FAILED: Refusal = Refusal {
+    kind: StatusKind::Internal,
+    message: "request body could not be decoded",
 };
 
 /// How long a client may take to send its request. The headers get the
@@ -181,13 +186,13 @@ async fn logs(
 ) -> Response {
     let signal = Signal::Logs;
     let pipeline = &shared.pipeline;
-    let (scope, format, request) =
+    let (scope, format, request, held) =
         match receive::<ExportLogsServiceRequest>(&shared, signal, &method, &headers, body).await {
             Ok(received) => received,
             Err(response) => return *response,
         };
     let deadline = pipeline.deadline(None);
-    match pipeline.export_logs(&scope, &request, deadline).await {
+    match pipeline.export_logs(&scope, &request, held, deadline).await {
         Ok(accepted) => format.accepted(accepted, |a| ExportLogsServiceResponse {
             partial_success: Some(ExportLogsPartialSuccess {
                 rejected_log_records: a.rejected,
@@ -206,7 +211,7 @@ async fn traces(
 ) -> Response {
     let signal = Signal::Traces;
     let pipeline = &shared.pipeline;
-    let (scope, format, request) = match receive::<ExportTraceServiceRequest>(
+    let (scope, format, request, held) = match receive::<ExportTraceServiceRequest>(
         &shared, signal, &method, &headers, body,
     )
     .await
@@ -215,7 +220,10 @@ async fn traces(
         Err(response) => return *response,
     };
     let deadline = pipeline.deadline(None);
-    match pipeline.export_traces(&scope, &request, deadline).await {
+    match pipeline
+        .export_traces(&scope, &request, held, deadline)
+        .await
+    {
         Ok(accepted) => format.accepted(accepted, |a| ExportTraceServiceResponse {
             partial_success: Some(ExportTracePartialSuccess {
                 rejected_spans: a.rejected,
@@ -227,21 +235,21 @@ async fn traces(
 }
 
 /// Authorize, check the method and content type, then read, decompress, and
-/// decode the body, in that order. A refusal is the finished response, boxed
-/// because a `Response` is large and the happy path should not carry it.
+/// decode the body, in that order, holding the body's share of the admission
+/// budget as received and then as decompressed. A refusal is the finished
+/// response, boxed because a `Response` is large and the happy path should
+/// not carry it.
 async fn receive<M>(
     shared: &Shared,
     signal: Signal,
     method: &Method,
     headers: &HeaderMap,
     body: Body,
-) -> Result<(crate::auth::Scope, Format, M), Box<Response>>
+) -> Result<(crate::auth::Scope, Format, M, Held), Box<Response>>
 where
-    M: Message + Default + DeserializeOwned,
+    M: Message + Default + DeserializeOwned + Send + 'static,
 {
     let pipeline = &shared.pipeline;
-    let refuse =
-        |format: Format, refusal| Box::new(format.refusal(pipeline.refuse(signal, refusal)));
     let error_format = Format::of(headers).unwrap_or(Format::Json);
     let scope = pipeline
         .authorize(signal, headers)
@@ -255,24 +263,76 @@ where
             "415 unsupported media type, supported: [application/json, application/x-protobuf]";
         return Err(Box::new(plain(StatusCode::UNSUPPORTED_MEDIA_TYPE, text)));
     };
-    let body = tokio::time::timeout(shared.body_read, axum::body::to_bytes(body, MAX_BODY_BYTES))
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .ok_or_else(|| refuse(format, BODY_TOO_LARGE))?;
-    let body = decompress(headers, body).map_err(|refusal| refuse(format, refusal))?;
-    let message = format
-        .decode(&body)
-        .ok_or_else(|| refuse(format, MALFORMED))?;
-    Ok((scope, format, message))
+    // A body the budget has no room for is refused before any of it is
+    // buffered, so producers retrying against a full service cost little.
+    // hyper sizes a body exactly from `Content-Length`, which it enforces; a
+    // chunked body declares nothing and is only charged as it arrives.
+    let declared = usize::try_from(body.size_hint().lower())
+        .unwrap_or(usize::MAX)
+        .min(MAX_BODY_BYTES);
+    pipeline
+        .has_room(signal, declared)
+        .map_err(|refusal| Box::new(format.refusal(refusal)))?;
+    let mut held = Held::default();
+    let body = tokio::time::timeout(
+        shared.body_read,
+        read_body(pipeline, signal, body, &mut held),
+    )
+    .await
+    .unwrap_or_else(|_| Err(pipeline.refuse(signal, BODY_TOO_LARGE)))
+    .map_err(|refusal| Box::new(format.refusal(refusal)))?;
+    let encoding = headers.get(CONTENT_ENCODING).cloned();
+    let pipeline = shared.pipeline.clone();
+    // Decompressing and decoding up to 20 MiB is CPU work, so it runs on the
+    // blocking pool rather than stalling the other requests on this worker.
+    let decoded = tokio::task::spawn_blocking(move || {
+        let refuse = |refusal| pipeline.refuse(signal, refusal);
+        let body = decompress(encoding.as_ref(), body).map_err(refuse)?;
+        pipeline.hold(signal, &mut held, body.len())?;
+        let message = format.decode(&body).ok_or_else(|| refuse(MALFORMED))?;
+        Ok((message, held))
+    })
+    .await
+    // A decoder that panics on a crafted body refuses that body instead of
+    // failing the connection. It is a service bug, so it is counted and
+    // answered as internal, which is as final as a 400.
+    .unwrap_or_else(|_| Err(shared.pipeline.refuse(signal, DECODER_FAILED)));
+    let (message, held) = decoded.map_err(|refusal| Box::new(format.refusal(refusal)))?;
+    Ok((scope, format, message, held))
+}
+
+/// Read the body as it arrives, growing `held` to cover what has been
+/// received so far, so a slow or stalled upload holds only what it has sent.
+/// Each refusal is already counted.
+async fn read_body(
+    pipeline: &Pipeline,
+    signal: Signal,
+    mut body: Body,
+    held: &mut Held,
+) -> Result<Bytes, Refusal> {
+    let mut out = Vec::new();
+    while let Some(frame) = std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await {
+        // An error is a client that broke off or sent less than it declared.
+        let frame = frame.map_err(|_| pipeline.refuse(signal, BODY_TOO_LARGE))?;
+        let Ok(data) = frame.into_data() else {
+            continue; // Trailers carry nothing OTLP uses.
+        };
+        let received = out.len() + data.len();
+        if received > MAX_BODY_BYTES {
+            return Err(pipeline.refuse(signal, BODY_TOO_LARGE));
+        }
+        pipeline.hold(signal, held, received)?;
+        out.extend_from_slice(&data);
+    }
+    Ok(out.into())
 }
 
 /// The body as sent, decompressed per its `Content-Encoding`. Only the first
 /// header value counts, and names match exactly, as in `confighttp`: no
 /// encoding, `gzip`, `zstd`, `zlib` and its alias `deflate`, `snappy`, `lz4`,
 /// and `x-snappy-framed`.
-fn decompress(headers: &HeaderMap, body: Bytes) -> Result<Bytes, Refusal> {
-    let encoding = match headers.get(CONTENT_ENCODING) {
+fn decompress(encoding: Option<&HeaderValue>, body: Bytes) -> Result<Bytes, Refusal> {
+    let encoding = match encoding {
         None => "",
         Some(value) => value.to_str().map_err(|_| UNSUPPORTED_ENCODING)?,
     };
@@ -398,7 +458,14 @@ impl Format {
             }))
             .expect("a status serializes to JSON"),
         };
-        self.reply(refusal.kind.http_status(), body)
+        let mut response = self.reply(refusal.kind.http_status(), body);
+        if refusal.kind == StatusKind::Overloaded {
+            // OTLP exporters honour Retry-After on a 429.
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from_static("1"));
+        }
+        response
     }
 }
 
@@ -1007,8 +1074,13 @@ mod tests {
         let address = listener.local_addr().unwrap();
         // ClickHouse is unreachable, so a storable request takes the whole
         // one-second budget before it is answered 503.
-        let pipeline =
-            Arc::new(crate::pipeline::testing::with_budget(None, Duration::from_secs(1)).unwrap());
+        let pipeline = Arc::new(
+            crate::pipeline::testing::with(crate::pipeline::Settings {
+                budget: Duration::from_secs(1),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
         let timeouts = Timeouts {
             drain: Duration::from_secs(2),
             ..Timeouts::default()
@@ -1050,6 +1122,240 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// A router whose admission budget is `memory_budget` bytes and whose
+    /// requests take up to `budget` against the unreachable ClickHouse, with
+    /// its pipeline, so a test can hold part of the budget itself.
+    fn budgeted(memory_budget: usize, budget: Duration) -> (Router, Arc<Pipeline>) {
+        let settings = crate::pipeline::Settings {
+            memory_budget,
+            budget,
+            ..Default::default()
+        };
+        let pipeline = Arc::new(crate::pipeline::testing::with(settings).unwrap());
+        (router(pipeline.clone(), Timeouts::default()), pipeline)
+    }
+
+    async fn post_logs(router: &Router, headers: &[(&str, &str)], body: Vec<u8>) -> Response {
+        let mut request = http::Request::builder()
+            .method(Method::POST)
+            .uri("/v1/logs");
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        router
+            .clone()
+            .oneshot(request.body(Body::from(body)).unwrap())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn full_admission_budget_is_backpressure() {
+        use crate::pipeline::RECORD_BYTES;
+        use tokio::io::AsyncWriteExt;
+        let protobuf = [("x-toudai-key", PROD), (CONTENT_TYPE.as_str(), PROTOBUF)];
+        let gzipped = [
+            ("x-toudai-key", PROD),
+            (CONTENT_TYPE.as_str(), PROTOBUF),
+            (CONTENT_ENCODING.as_str(), "gzip"),
+        ];
+        // One record that compresses well, so it can fit the budget as sent
+        // but not decompressed.
+        let mut request =
+            serde_json::from_slice::<ExportLogsServiceRequest>(&rejected_logs_json()).unwrap();
+        request.resource_logs[0].scope_logs[0].log_records[0].body = Some(AnyValue {
+            value: Some(any_value::Value::StringValue("a".repeat(10_000))),
+        });
+        let body = request.encode_to_vec();
+        // Room for the whole request, but another request holds all of it
+        // except one byte short of this body.
+        let (small, pipeline) =
+            budgeted(2 * (body.len() + RECORD_BYTES), Duration::from_millis(300));
+        let mut other = Held::default();
+        let total = 2 * (body.len() + RECORD_BYTES);
+        pipeline
+            .hold(Signal::Logs, &mut other, total - (body.len() - 1))
+            .unwrap();
+
+        // Over the budget as sized by Content-Length: refused before the body
+        // is read (none is ever sent here), with Retry-After.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(serve(
+            listener,
+            pipeline.clone(),
+            Timeouts::default(),
+            std::future::pending(),
+        ));
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        let head = format!(
+            "POST /v1/logs HTTP/1.1\r\nHost: x\r\nX-Toudai-Key: {PROD}\r\n\
+             Content-Type: {PROTOBUF}\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(head.as_bytes()).await.unwrap();
+        let reply = until_closed(&mut stream, Duration::from_secs(5)).await;
+        assert!(reply.starts_with("HTTP/1.1 429"), "{reply}");
+        assert!(
+            reply.to_ascii_lowercase().contains("retry-after: 1"),
+            "{reply}"
+        );
+
+        // The same through the router, for the retryable code in the body.
+        let response = post_logs(&small, &protobuf, body.clone()).await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[RETRY_AFTER], "1");
+        let reply = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(RpcStatus::decode(&reply[..]).unwrap().code, 14);
+
+        // Within it as received, over it once decompressed.
+        let compressed = gzip(&body);
+        assert!(compressed.len() < body.len() - 1);
+        let response = post_logs(&small, &gzipped, compressed).await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // More than the whole budget once its record is charged: no retry
+        // could pass, so a 400 rather than a 429.
+        let storable = storable_logs_protobuf();
+        let charge = storable.len() + RECORD_BYTES;
+        let (tiny, _) = budgeted(charge - 1, Duration::from_millis(300));
+        let response = post_logs(&tiny, &protobuf, storable.clone()).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(response.headers().get(RETRY_AFTER).is_none());
+        let reply = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(RpcStatus::decode(&reply[..]).unwrap().code, 3);
+
+        // Room for one storable request at a time: while one is held against
+        // the unreachable ClickHouse for its one-second budget, a second is
+        // refused, and once the first is answered its share is back.
+        let (one, _) = budgeted(charge, Duration::from_secs(1));
+        let first = tokio::spawn({
+            let one = one.clone();
+            let storable = storable.clone();
+            async move { post_logs(&one, &protobuf, storable).await.status() }
+        });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let second = post_logs(&one, &protobuf, storable.clone()).await;
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(first.await.unwrap(), StatusCode::SERVICE_UNAVAILABLE);
+        let third = post_logs(&one, &protobuf, storable).await;
+        assert_eq!(
+            third.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the share was not returned"
+        );
+    }
+
+    /// A body is charged as it arrives, not as declared: an upload that
+    /// declares nearly the whole budget and sends nothing holds none of it,
+    /// and a chunked body, which declares nothing, is refused once what it
+    /// has sent no longer fits.
+    #[tokio::test]
+    async fn uploads_are_charged_as_they_arrive() {
+        use crate::pipeline::RECORD_BYTES;
+        use tokio::io::AsyncWriteExt;
+        let memory_budget = 16 * RECORD_BYTES;
+        let (_, pipeline) = budgeted(memory_budget, Duration::from_millis(300));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(serve(
+            listener,
+            pipeline.clone(),
+            Timeouts::default(),
+            std::future::pending(),
+        ));
+        let head = |length: &str| {
+            format!(
+                "POST /v1/logs HTTP/1.1\r\nHost: x\r\nX-Toudai-Key: {PROD}\r\n\
+                 Content-Type: {PROTOBUF}\r\n{length}\r\n\r\n"
+            )
+        };
+        let chunked = |body: &[u8]| {
+            let mut wire = head("Transfer-Encoding: chunked").into_bytes();
+            wire.extend(format!("{:x}\r\n", body.len()).into_bytes());
+            wire.extend_from_slice(body);
+            wire.extend_from_slice(b"\r\n0\r\n\r\n");
+            wire
+        };
+        let status = |wire: Vec<u8>| async move {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            stream.write_all(&wire).await.unwrap();
+            let reply = until_closed_or_answered(&mut stream).await;
+            reply.get(9..12).unwrap_or_default().to_owned()
+        };
+
+        // Declares all but a few bytes of the budget, then stalls.
+        let mut idle = tokio::net::TcpStream::connect(address).await.unwrap();
+        let declared = format!("Content-Length: {}", memory_budget - 8);
+        idle.write_all(head(&declared).as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Another tenant's small chunked request is still admitted, and fails
+        // only on the unreachable ClickHouse.
+        assert_eq!(status(chunked(&storable_logs_protobuf())).await, "503");
+
+        // With all but 8 KiB held elsewhere, a chunked body is refused with
+        // backpressure once it has sent 16 KiB, without waiting for the rest
+        // (here, its end never comes).
+        let mut other = Held::default();
+        pipeline
+            .hold(Signal::Logs, &mut other, memory_budget - 2 * RECORD_BYTES)
+            .unwrap();
+        let mut unfinished = chunked(&[0; 4 * RECORD_BYTES]);
+        unfinished.truncate(unfinished.len() - b"\r\n0\r\n\r\n".len());
+        assert_eq!(status(unfinished).await, "429");
+        // What counts is the running total: two 6 KiB chunks, sent apart so
+        // they arrive as separate frames, each fit the 8 KiB alone but not
+        // together.
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        let mut first = head("Transfer-Encoding: chunked").into_bytes();
+        first.extend(format!("{:x}\r\n", 6 * 1024).into_bytes());
+        first.extend_from_slice(&[0; 6 * 1024]);
+        first.extend_from_slice(b"\r\n");
+        stream.write_all(&first).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut second = format!("{:x}\r\n", 6 * 1024).into_bytes();
+        second.extend_from_slice(&[0; 6 * 1024]);
+        second.extend_from_slice(b"\r\n");
+        stream.write_all(&second).await.unwrap();
+        let reply = until_closed_or_answered(&mut stream).await;
+        assert!(reply.starts_with("HTTP/1.1 429"), "{reply}");
+
+        // A body cut off short of its Content-Length is refused, not decoded
+        // from what arrived: a truncated protobuf can still parse.
+        let body = storable_logs_protobuf();
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        let declared = format!("Content-Length: {}", body.len() + 10);
+        stream.write_all(head(&declared).as_bytes()).await.unwrap();
+        stream.write_all(&body).await.unwrap();
+        stream.shutdown().await.unwrap();
+        let reply = until_closed_or_answered(&mut stream).await;
+        assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+        drop(idle);
+    }
+
+    /// The status line and headers of the first response, or everything
+    /// until the server closed the connection.
+    async fn until_closed_or_answered(stream: &mut tokio::net::TcpStream) -> String {
+        use tokio::io::AsyncReadExt;
+        let mut out = Vec::new();
+        let mut buffer = [0; 4096];
+        while !out.windows(4).any(|w| w == b"\r\n\r\n") {
+            let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer))
+                .await
+                .expect("no answer")
+                .unwrap();
+            if read == 0 {
+                break;
+            }
+            out.extend_from_slice(&buffer[..read]);
+        }
+        String::from_utf8_lossy(&out).into_owned()
     }
 
     #[tokio::test]

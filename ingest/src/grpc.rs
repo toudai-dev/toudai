@@ -33,7 +33,7 @@ use tower::util::MapResponseLayer;
 
 use crate::Refusal;
 use crate::auth::{KEY_HEADER, Scope};
-use crate::pipeline::{Pipeline, Signal};
+use crate::pipeline::{Held, Pipeline, Signal};
 
 /// The largest message accepted, after decompression: grpc-go's default,
 /// which the Collector's OTLP receiver kept (Decision 0003 D3).
@@ -132,6 +132,21 @@ fn scope<T>(request: &mut Request<T>) -> Scope {
         .expect("the interceptor authorizes every request")
 }
 
+/// The message's share of the admission budget, held until it is answered.
+/// tonic has already decoded it, so this bounds how many decoded messages are
+/// held at once rather than the decoding itself, which the 4 MiB limit bounds.
+fn hold(
+    pipeline: &Pipeline,
+    signal: Signal,
+    message: &impl prost::Message,
+) -> Result<Held, Status> {
+    let mut held = Held::default();
+    pipeline
+        .hold(signal, &mut held, message.encoded_len())
+        .map_err(status)?;
+    Ok(held)
+}
+
 fn status(refusal: Refusal) -> Status {
     Status::new(Code::from_i32(refusal.kind.rpc_code()), refusal.message)
 }
@@ -168,9 +183,10 @@ impl LogsService for Logs {
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
         let deadline = self.0.deadline(grpc_timeout(request.metadata()));
         let scope = scope(&mut request);
+        let held = hold(&self.0, Signal::Logs, request.get_ref())?;
         let accepted = self
             .0
-            .export_logs(&scope, request.get_ref(), deadline)
+            .export_logs(&scope, request.get_ref(), held, deadline)
             .await
             .map_err(status)?;
         Ok(Response::new(ExportLogsServiceResponse {
@@ -192,9 +208,10 @@ impl TraceService for Traces {
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
         let deadline = self.0.deadline(grpc_timeout(request.metadata()));
         let scope = scope(&mut request);
+        let held = hold(&self.0, Signal::Traces, request.get_ref())?;
         let accepted = self
             .0
-            .export_traces(&scope, request.get_ref(), deadline)
+            .export_traces(&scope, request.get_ref(), held, deadline)
             .await
             .map_err(status)?;
         Ok(Response::new(ExportTraceServiceResponse {
@@ -557,6 +574,39 @@ mod tests {
             &[("signal", "logs"), ("destination", "canonical")],
         );
         assert_eq!(attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn full_admission_budget_is_unavailable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let settings = crate::pipeline::Settings {
+            memory_budget: 1 << 20,
+            ..Default::default()
+        };
+        let pipeline = Arc::new(crate::pipeline::testing::with(settings).unwrap());
+        // Another request holds all but 16 bytes.
+        let mut other = Held::default();
+        pipeline
+            .hold(Signal::Logs, &mut other, (1 << 20) - 16)
+            .unwrap();
+        tokio::spawn(serve(
+            listener,
+            pipeline,
+            std::future::pending(),
+            Duration::from_secs(10),
+        ));
+        let mut client = LogsServiceClient::connect(format!("http://{address}"))
+            .await
+            .unwrap();
+        let message = logs(vec![duplicate_record(), duplicate_record()], vec![]);
+        assert!(prost::Message::encoded_len(&message) > 16);
+        let refused = client
+            .export(with_headers(message, &[("x-toudai-key", PROD)]))
+            .await
+            .unwrap_err();
+        // RESOURCE_EXHAUSTED would not be retried without RetryInfo.
+        assert_eq!(refused.code(), Code::Unavailable);
     }
 
     #[test]

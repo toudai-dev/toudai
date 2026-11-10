@@ -17,6 +17,15 @@
 //!   name none (default none, so such a request is a 400). It must be a valid
 //!   dataset name and is still checked against the key's list.
 //! * `TOUDAI_ROUTING_EPOCH`: stamped on every row (default 1).
+//! * `TOUDAI_INGEST_MEMORY_BUDGET`: request memory held at once, in bytes or
+//!   with a `KiB`, `MiB`, or `GiB` suffix (default `256MiB`). Each request is
+//!   charged its bytes plus 4 KiB per record. A request that does not fit
+//!   beside the others is answered 429 (HTTP) or `UNAVAILABLE` (gRPC) for the
+//!   producer to retry; one that needs more than the whole budget is a 400 or
+//!   `INVALID_ARGUMENT`, so the default admits at most about 60,000 records
+//!   in one request (SDKs send 512, Collector exporters 8192). It must be at
+//!   least the 20 MiB body limit, or the largest body could never be
+//!   admitted, and below 4 GiB, the most one request's share can count.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -31,6 +40,29 @@ use toudai_ingest::{grpc, http};
 
 fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// `TOUDAI_INGEST_MEMORY_BUDGET`: a byte count from the body limit to below
+/// 4 GiB.
+fn memory_budget(text: &str) -> Option<usize> {
+    parse_bytes(text).filter(|&bytes| bytes >= http::MAX_BODY_BYTES && u32::try_from(bytes).is_ok())
+}
+
+/// A byte count, optionally with a binary unit: `268435456` or `256MiB`.
+fn parse_bytes(text: &str) -> Option<usize> {
+    let text = text.trim();
+    let (digits, unit) = match text.find(|c: char| !c.is_ascii_digit()) {
+        Some(i) => text.split_at(i),
+        None => (text, ""),
+    };
+    let scale: usize = match unit.trim() {
+        "" => 1,
+        "KiB" => 1 << 10,
+        "MiB" => 1 << 20,
+        "GiB" => 1 << 30,
+        _ => return None,
+    };
+    digits.parse::<usize>().ok()?.checked_mul(scale)
 }
 
 async fn bind(variable: &str, default: &str) -> Result<TcpListener, String> {
@@ -64,9 +96,16 @@ async fn run() -> Result<(), String> {
         Arc::default(),
     )
     .map_err(|e| format!("TOUDAI_CLICKHOUSE_DATABASE: {e}"))?;
+    let memory_budget = match env("TOUDAI_INGEST_MEMORY_BUDGET") {
+        None => Settings::default().memory_budget,
+        Some(value) => memory_budget(&value).ok_or(
+            "TOUDAI_INGEST_MEMORY_BUDGET must be from 20MiB to below 4GiB, such as 256MiB",
+        )?,
+    };
     let settings = Settings {
         default_dataset: env("TOUDAI_DEFAULT_DATASET"),
         routing_epoch,
+        memory_budget,
         ..Settings::default()
     };
     let pipeline = Arc::new(
@@ -119,6 +158,36 @@ async fn main() -> ExitCode {
         Err(error) => {
             eprintln!("toudai-ingest: {error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::memory_budget;
+
+    #[test]
+    fn parses_memory_budgets() {
+        let cases = [
+            ("268435456", Some(268_435_456)),
+            ("256MiB", Some(256 << 20)),
+            ("20 MiB", Some(20 << 20)),
+            ("1GiB", Some(1 << 30)),
+            ("4095MiB", Some(4095 << 20)),
+            // A share of 4 GiB would not fit a permit count.
+            ("4GiB", None),
+            ("20480KiB", Some(20 << 20)),
+            // Below the 20 MiB body limit.
+            ("20479KiB", None),
+            ("20971519", None),
+            ("256MB", None),
+            ("256mib", None),
+            ("MiB", None),
+            ("-1", None),
+            ("99999999999999999999GiB", None),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(memory_budget(text), expected, "{text:?}");
         }
     }
 }

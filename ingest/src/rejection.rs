@@ -19,15 +19,25 @@ pub enum Rejection {
 }
 
 /// The class of a refused request, which each transport maps to its own
-/// status: HTTP 401, 400, 403, 503, or 500, and gRPC `UNAUTHENTICATED`,
-/// `INVALID_ARGUMENT`, `PERMISSION_DENIED`, `UNAVAILABLE`, or `INTERNAL`.
-/// Only `Unavailable` tells an OTLP producer to retry.
+/// status: HTTP 401, 400, 403, 503, 429, or 500, and gRPC `UNAUTHENTICATED`,
+/// `INVALID_ARGUMENT` (for both `InvalidArgument` and `OverBudget`),
+/// `PERMISSION_DENIED`, `UNAVAILABLE` (for both `Unavailable` and
+/// `Overloaded`), or `INTERNAL`. Only `Unavailable` and `Overloaded` tell an
+/// OTLP producer to retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusKind {
     Unauthenticated,
     InvalidArgument,
     PermissionDenied,
     Unavailable,
+    /// The service is full: HTTP 429 with `Retry-After`. gRPC answers
+    /// `UNAVAILABLE`, because the OTLP spec retries `RESOURCE_EXHAUSTED` only
+    /// when the server attaches `RetryInfo`.
+    Overloaded,
+    /// The request alone needs more than the whole admission budget: a 400
+    /// like any bad request, counted apart so an operator can tell a budget
+    /// too small for its producers' batches from malformed input.
+    OverBudget,
     Internal,
 }
 
@@ -35,9 +45,10 @@ impl StatusKind {
     pub fn http_status(self) -> StatusCode {
         match self {
             StatusKind::Unauthenticated => StatusCode::UNAUTHORIZED,
-            StatusKind::InvalidArgument => StatusCode::BAD_REQUEST,
+            StatusKind::InvalidArgument | StatusKind::OverBudget => StatusCode::BAD_REQUEST,
             StatusKind::PermissionDenied => StatusCode::FORBIDDEN,
             StatusKind::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            StatusKind::Overloaded => StatusCode::TOO_MANY_REQUESTS,
             StatusKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -46,10 +57,10 @@ impl StatusKind {
     /// `google.rpc.Status` body of an OTLP/HTTP error.
     pub fn rpc_code(self) -> i32 {
         match self {
-            StatusKind::InvalidArgument => 3,
+            StatusKind::InvalidArgument | StatusKind::OverBudget => 3,
             StatusKind::PermissionDenied => 7,
             StatusKind::Internal => 13,
-            StatusKind::Unavailable => 14,
+            StatusKind::Unavailable | StatusKind::Overloaded => 14,
             StatusKind::Unauthenticated => 16,
         }
     }
@@ -61,6 +72,8 @@ impl StatusKind {
             StatusKind::InvalidArgument => "invalid_argument",
             StatusKind::PermissionDenied => "permission_denied",
             StatusKind::Unavailable => "unavailable",
+            StatusKind::Overloaded => "overloaded",
+            StatusKind::OverBudget => "over_budget",
             StatusKind::Internal => "internal",
         }
     }
@@ -80,6 +93,18 @@ impl Refusal {
     pub const UNAVAILABLE: Refusal = Refusal {
         kind: StatusKind::Unavailable,
         message: "storage is unavailable, retry later",
+    };
+    /// The admission budget cannot hold the request now; the producer
+    /// retries.
+    pub const OVERLOADED: Refusal = Refusal {
+        kind: StatusKind::Overloaded,
+        message: "the service is at capacity, retry later",
+    };
+    /// The request alone needs more than the whole admission budget, so no
+    /// retry could be admitted.
+    pub const OVER_BUDGET: Refusal = Refusal {
+        kind: StatusKind::OverBudget,
+        message: "request needs more memory than the service admits at once, send smaller batches",
     };
     /// ClickHouse refused the rows in a way a retry cannot fix, such as a
     /// schema that does not match the service.
