@@ -114,6 +114,7 @@ async fn writes_both_destinations_to_a_real_clickhouse() {
     stores_every_column_as_mapped(&server).await;
     retries_only_the_destination_that_failed(&server).await;
     nothing_commits_behind_a_deadline_error(&server).await;
+    recovers_from_a_column_type_change(&server).await;
 }
 
 /// Every stored row reads back as mapped, and every serving row joins its
@@ -245,6 +246,9 @@ async fn stores_every_column_as_mapped(server: &ClickHouseServer) {
 async fn retries_only_the_destination_that_failed(server: &ClickHouseServer) {
     let counters = Arc::new(Counters::default());
     let writer = writer(server, counters.clone());
+    // Warm the client's column cache, so the serving insert itself fails
+    // once the table is gone, not only the column lookup before it.
+    write_fixture_logs(&writer).await.unwrap();
     let request = logs_request();
     let ids = admit_logs(&request, &scope("fixture")).unwrap();
     let mapped = map_logs(&request, "fixture", &ids, EPOCH);
@@ -285,8 +289,9 @@ async fn retries_only_the_destination_that_failed(server: &ClickHouseServer) {
     assert_eq!(count(server, &serving_rows).await, records);
     let canonical_labels = [("signal", "logs"), ("destination", "canonical")];
     assert_eq!(counters.get("insert_failures", &canonical_labels), 0);
-    assert_eq!(counters.get("records", &canonical_labels), records);
-    assert_eq!(counters.get("records", &serving_labels), records);
+    // The warm-up write stored one set of records too.
+    assert_eq!(counters.get("records", &canonical_labels), 2 * records);
+    assert_eq!(counters.get("records", &serving_labels), 2 * records);
     assert_eq!(
         counters.get("partial_write_batches", &[("signal", "logs")]),
         0
@@ -319,4 +324,28 @@ async fn nothing_commits_behind_a_deadline_error(server: &ClickHouseServer) {
             "{table} holds rows from a write reported as failed"
         );
     }
+}
+
+/// The client caches each table's columns and sends them with every insert.
+/// After a column changes type, the cached header no longer matches the table,
+/// so the writer must fetch the columns again rather than fail every insert
+/// until it restarts.
+async fn recovers_from_a_column_type_change(server: &ClickHouseServer) {
+    let writer = writer(server, Arc::new(Counters::default()));
+    write_fixture_logs(&writer).await.unwrap();
+    let serving = format!("{DATABASE}.serving_logs");
+    let alter = |to: &str| format!("ALTER TABLE {serving} MODIFY COLUMN severity_text {to}");
+    execute(server, &alter("String"), None).await;
+    let changed = write_fixture_logs(&writer).await;
+    execute(server, &alter("LowCardinality(String)"), None).await;
+    changed.unwrap();
+}
+
+async fn write_fixture_logs(writer: &Writer) -> Result<(), toudai_ingest::writer::WriteError> {
+    let request = logs_request();
+    let ids = admit_logs(&request, &scope("fixture")).unwrap();
+    let mapped = map_logs(&request, "fixture", &ids, EPOCH);
+    writer
+        .write_logs(&mapped, Instant::now() + Duration::from_secs(5))
+        .await
 }
