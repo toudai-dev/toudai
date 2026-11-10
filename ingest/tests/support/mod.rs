@@ -1,9 +1,11 @@
 //! The `toudai-ingest` binary as the end-to-end tests run it: on ports the
-//! system picks, against a test ClickHouse, with its log kept for scanning.
+//! system picks, against a test ClickHouse, with its log kept for scanning
+//! once it stops.
 
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::server::{self, ClickHouseServer};
@@ -12,8 +14,20 @@ pub struct Service {
     child: Child,
     pub http: String,
     pub grpc: String,
-    /// Every line the service has written to stderr so far.
-    pub log: Arc<Mutex<Vec<String>>>,
+    log: Arc<Mutex<Vec<String>>>,
+    reader: Option<JoinHandle<()>>,
+}
+
+impl Service {
+    /// Stop the service and return every line it wrote to stderr.
+    pub fn stop(&mut self) -> Vec<String> {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            reader.join().expect("the log reader panicked");
+        }
+        self.log.lock().unwrap().clone()
+    }
 }
 
 impl Drop for Service {
@@ -54,20 +68,21 @@ pub fn spawn(
         http: String::new(),
         grpc: String::new(),
         log: Arc::default(),
+        reader: None,
     };
     let log = service.log.clone();
     let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
+    service.reader = Some(std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
             eprintln!("[toudai-ingest] {line}");
+            log.lock().unwrap().push(line.clone());
             if let Some(rest) = line.strip_prefix("toudai-ingest listening on grpc://")
                 && let Some((grpc, http)) = rest.split_once(" and ")
             {
                 let _ = sender.send((format!("http://{grpc}"), http.to_owned()));
             }
-            log.lock().unwrap().push(line);
         }
-    });
+    }));
     (service.grpc, service.http) = receiver
         .recv_timeout(Duration::from_secs(30))
         .expect("toudai-ingest did not report its addresses");
