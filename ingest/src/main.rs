@@ -99,19 +99,14 @@ async fn run() -> Result<(), String> {
             let _ = stopped.changed().await;
         }
     };
+    let timeouts = http::Timeouts::default();
     let grpc = async {
-        grpc::serve(grpc_listener, pipeline.clone(), shutdown())
+        grpc::serve(grpc_listener, pipeline.clone(), shutdown(), timeouts.drain)
             .await
             .map_err(|e| format!("OTLP/gRPC: {e}"))
     };
     let http = async {
-        http::serve(
-            http_listener,
-            pipeline.clone(),
-            http::Timeouts::default(),
-            shutdown(),
-        )
-        .await;
+        http::serve(http_listener, pipeline.clone(), timeouts, shutdown()).await;
         Ok(())
     };
     tokio::try_join!(grpc, http).map(|_| ())

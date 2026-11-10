@@ -2,7 +2,9 @@
 //! bodies (Decision 0003 D1), following the Collector's OTLP receiver at the
 //! version collector `f780574` pins: replies use the request's content type,
 //! and errors are a `google.rpc.Status` in it (JSON when it is neither).
-//! Metrics are not served (404).
+//! OTLP metrics are not served (404). `GET /healthz` answers while the
+//! process runs, and `GET /metrics` serves the process counters as Prometheus
+//! text, so both stay readable while ClickHouse is down.
 //!
 //! The write key and dataset are checked from the headers before the body is
 //! read. A body is held to 20 MiB as sent and again once decompressed, so a
@@ -18,7 +20,7 @@ use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
-use axum::routing::any;
+use axum::routing::{any, get};
 use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use http::{HeaderMap, Method, StatusCode};
 use hyper::server::conn::http1;
@@ -73,6 +75,11 @@ pub struct Timeouts {
     pub header_read: Duration,
     /// For the whole body, after the headers.
     pub body_read: Duration,
+    /// How long shutdown waits for open connections. Requests in flight
+    /// finish within their own budget; without a bound, a client stalled in
+    /// its headers would hold shutdown for the whole header timeout, past
+    /// Kubernetes' default 30 s grace period.
+    pub drain: Duration,
 }
 
 impl Default for Timeouts {
@@ -80,6 +87,7 @@ impl Default for Timeouts {
         Timeouts {
             header_read: Duration::from_secs(60),
             body_read: Duration::from_secs(60),
+            drain: Duration::from_secs(10),
         }
     }
 }
@@ -94,6 +102,8 @@ pub fn router(pipeline: Arc<Pipeline>, timeouts: Timeouts) -> Router {
     Router::new()
         .route("/v1/logs", any(logs))
         .route("/v1/traces", any(traces))
+        .route("/healthz", get(healthz))
+        .route("/metrics", get(metrics))
         .with_state(Shared {
             pipeline,
             body_read: timeouts.body_read,
@@ -101,8 +111,9 @@ pub fn router(pipeline: Arc<Pipeline>, timeouts: Timeouts) -> Router {
 }
 
 /// Serve [`router`] on `listener` until `shutdown` completes, then wait for
-/// requests in flight. `axum::serve` is not used because it gives hyper no
-/// timer, which turns hyper's header read timeout off.
+/// requests in flight, up to [`Timeouts::drain`]. `axum::serve` is not used
+/// because it gives hyper no timer, which turns hyper's header read timeout
+/// off.
 pub async fn serve(
     listener: TcpListener,
     pipeline: Arc<Pipeline>,
@@ -135,7 +146,7 @@ pub async fn serve(
         });
     }
     drop(listener);
-    graceful.shutdown().await;
+    let _ = tokio::time::timeout(timeouts.drain, graceful.shutdown()).await;
 }
 
 /// A connection the client gave up on before it was accepted is routine.
@@ -150,6 +161,16 @@ async fn accept_failed(error: std::io::Error) {
         eprintln!("toudai-ingest: OTLP/HTTP accept failed: {error}");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+async fn healthz() -> Response {
+    plain(StatusCode::OK, "ok\n")
+}
+
+async fn metrics(State(shared): State<Shared>) -> Response {
+    let body = shared.pipeline.counters().render();
+    let content_type = "text/plain; version=0.0.4; charset=utf-8";
+    (StatusCode::OK, [(CONTENT_TYPE, content_type)], body).into_response()
 }
 
 async fn logs(
@@ -941,6 +962,7 @@ mod tests {
         let address = served(Timeouts {
             header_read: short,
             body_read: short,
+            ..Timeouts::default()
         })
         .await;
         let within = Duration::from_secs(5);
@@ -973,6 +995,111 @@ mod tests {
         let reply = until_closed(&mut stream, within).await;
         assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
         assert!(reply.contains(BODY_TOO_LARGE.message), "{reply}");
+    }
+
+    /// On shutdown a request already in flight is still answered, and a
+    /// client stalled in its headers holds shutdown only until the drain
+    /// bound, not for its whole header timeout.
+    #[tokio::test]
+    async fn shutdown_answers_requests_in_flight_then_stops() {
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        // ClickHouse is unreachable, so a storable request takes the whole
+        // one-second budget before it is answered 503.
+        let pipeline =
+            Arc::new(crate::pipeline::testing::with_budget(None, Duration::from_secs(1)).unwrap());
+        let timeouts = Timeouts {
+            drain: Duration::from_secs(2),
+            ..Timeouts::default()
+        };
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve(listener, pipeline, timeouts, async {
+            let _ = stopped.await;
+        }));
+
+        let mut stalled = tokio::net::TcpStream::connect(address).await.unwrap();
+        stalled
+            .write_all(b"POST /v1/logs HTTP/1.1\r\nHost: x\r\n")
+            .await
+            .unwrap();
+        let in_flight = tokio::spawn(
+            reqwest::Client::new()
+                .post(format!("http://{address}/v1/logs"))
+                .header("x-toudai-key", PROD)
+                .header(CONTENT_TYPE, PROTOBUF)
+                .body(storable_logs_protobuf())
+                .send(),
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let started = std::time::Instant::now();
+        stop.send(()).unwrap();
+
+        let reply = in_flight
+            .await
+            .unwrap()
+            .expect("the request in flight was cut off");
+        assert_eq!(reply.status(), StatusCode::SERVICE_UNAVAILABLE);
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("shutdown waited on the stalled client past the drain bound")
+            .unwrap();
+        // Not before the drain bound either: the stalled client was waited on.
+        assert!(
+            started.elapsed() >= Duration::from_millis(1500),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn health_and_counters_need_no_key() {
+        let health = send(Method::GET, "/healthz", &[], vec![]).await;
+        assert_eq!(health.status, StatusCode::OK);
+        assert_eq!(&health.body[..], b"ok\n");
+
+        // One refusal and one success, then the counters through the same
+        // router: `send` builds a fresh pipeline per request, so this one
+        // shares a router instead.
+        let router = router(Arc::new(pipeline(None).unwrap()), Timeouts::default());
+        let call = |method: Method, path: &str, headers: &[(&str, &str)], body: Vec<u8>| {
+            let mut request = http::Request::builder().method(method).uri(path);
+            for (name, value) in headers {
+                request = request.header(*name, *value);
+            }
+            router
+                .clone()
+                .oneshot(request.body(Body::from(body)).unwrap())
+        };
+        call(
+            Method::POST,
+            "/v1/logs",
+            &[(CONTENT_TYPE.as_str(), JSON)],
+            b"{}".to_vec(),
+        )
+        .await
+        .unwrap();
+        let headers = [("x-toudai-key", PROD), (CONTENT_TYPE.as_str(), JSON)];
+        call(Method::POST, "/v1/logs", &headers, b"{}".to_vec())
+            .await
+            .unwrap();
+        let response = call(Method::GET, "/metrics", &[], vec![]).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(text.to_vec()).unwrap();
+        for line in [
+            "# TYPE toudai_ingest_requests_total counter",
+            "toudai_ingest_requests_total{signal=\"logs\",outcome=\"accepted\"} 1",
+            "toudai_ingest_requests_total{signal=\"logs\",outcome=\"unauthenticated\"} 1",
+        ] {
+            assert!(
+                text.lines().any(|l| l == line),
+                "missing {line:?} in\n{text}"
+            );
+        }
+        assert!(!text.contains(PROD));
     }
 
     #[tokio::test]

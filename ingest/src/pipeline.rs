@@ -232,6 +232,13 @@ pub(crate) mod testing {
     pub const ALL: &str = "tk_test_every_dataset_0123456789";
 
     pub fn pipeline(default_dataset: Option<&str>) -> Result<Pipeline, String> {
+        with_budget(default_dataset, Duration::from_millis(300))
+    }
+
+    pub fn with_budget(
+        default_dataset: Option<&str>,
+        budget: Duration,
+    ) -> Result<Pipeline, String> {
         let writer = Writer::new(
             WriterConfig {
                 url: "http://127.0.0.1:1".into(),
@@ -243,7 +250,7 @@ pub(crate) mod testing {
         )?;
         let settings = Settings {
             default_dataset: default_dataset.map(String::from),
-            budget: Duration::from_millis(300),
+            budget,
             ..Settings::default()
         };
         Pipeline::new(
