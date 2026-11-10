@@ -267,16 +267,19 @@ where
     // buffered, so producers retrying against a full service cost little.
     // hyper sizes a body exactly from `Content-Length`, which it enforces; a
     // chunked body declares nothing and is only charged as it arrives.
+    // A body declared over the limit is refused from its header rather
+    // than read up to the limit first.
     let declared = usize::try_from(body.size_hint().lower())
-        .unwrap_or(usize::MAX)
-        .min(MAX_BODY_BYTES);
+        .ok()
+        .filter(|&n| n <= MAX_BODY_BYTES)
+        .ok_or_else(|| Box::new(format.refusal(pipeline.refuse(signal, BODY_TOO_LARGE))))?;
     pipeline
         .has_room(signal, declared)
         .map_err(|refusal| Box::new(format.refusal(refusal)))?;
     let mut held = Held::default();
     let body = tokio::time::timeout(
         shared.body_read,
-        read_body(pipeline, signal, body, &mut held),
+        read_body(pipeline, signal, body, declared, &mut held),
     )
     .await
     .unwrap_or_else(|_| Err(pipeline.refuse(signal, BODY_TOO_LARGE)))
@@ -301,16 +304,25 @@ where
     Ok((scope, format, message, held))
 }
 
-/// Read the body as it arrives, growing `held` to cover what has been
-/// received so far, so a slow or stalled upload holds only what it has sent.
-/// Each refusal is already counted.
+/// Read the body as it arrives into a buffer that grows by doubling, and
+/// charge `held` the capacity it grows to before that memory is allocated. A
+/// slow or stalled upload so holds at most twice what it has sent, never its
+/// whole declared length. A body of `declared` length grows to exactly that
+/// size, since hyper enforces the length. Each refusal is already counted.
 async fn read_body(
     pipeline: &Pipeline,
     signal: Signal,
     mut body: Body,
+    declared: usize,
     held: &mut Held,
 ) -> Result<Bytes, Refusal> {
-    let mut out = Vec::new();
+    let mut out: Vec<u8> = Vec::new();
+    let limit = if declared > 0 {
+        declared
+    } else {
+        MAX_BODY_BYTES
+    };
+    let mut capacity = 0;
     while let Some(frame) = std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await {
         // An error is a client that broke off or sent less than it declared.
         let frame = frame.map_err(|_| pipeline.refuse(signal, BODY_TOO_LARGE))?;
@@ -321,7 +333,12 @@ async fn read_body(
         if received > MAX_BODY_BYTES {
             return Err(pipeline.refuse(signal, BODY_TOO_LARGE));
         }
-        pipeline.hold(signal, held, received)?;
+        if received > capacity {
+            capacity = received.max(capacity * 2).min(limit);
+        }
+        // Charged before it is allocated.
+        pipeline.hold(signal, held, capacity)?;
+        out.reserve_exact(capacity - out.len());
         out.extend_from_slice(&data);
     }
     Ok(out.into())
@@ -1290,10 +1307,12 @@ mod tests {
             reply.get(9..12).unwrap_or_default().to_owned()
         };
 
-        // Declares all but a few bytes of the budget, then stalls.
+        // Declares all but a few bytes of the budget, sends one, then
+        // stalls: it holds what it sent, not what it declared.
         let mut idle = tokio::net::TcpStream::connect(address).await.unwrap();
         let declared = format!("Content-Length: {}", memory_budget - 8);
         idle.write_all(head(&declared).as_bytes()).await.unwrap();
+        idle.write_all(&[0]).await.unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;
         // Another tenant's small chunked request is still admitted, and fails
         // only on the unreachable ClickHouse.
@@ -1336,7 +1355,61 @@ mod tests {
         stream.shutdown().await.unwrap();
         let reply = until_closed_or_answered(&mut stream).await;
         assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
+
+        // A body declared over the 20 MiB limit is refused from its header,
+        // without waiting for (here, any of) its bytes. The default budget
+        // has room for it, so only the limit refuses it.
+        let roomy = served(Timeouts::default()).await;
+        let mut stream = tokio::net::TcpStream::connect(roomy).await.unwrap();
+        let declared = format!("Content-Length: {}", MAX_BODY_BYTES + 1);
+        stream.write_all(head(&declared).as_bytes()).await.unwrap();
+        let reply = until_closed_or_answered(&mut stream).await;
+        assert!(reply.starts_with("HTTP/1.1 400"), "{reply}");
         drop(idle);
+    }
+
+    /// A chunked body grows its buffer by doubling, and is charged that
+    /// capacity rather than the bytes in it: after 3 KiB and then 1 KiB the
+    /// buffer holds 6 KiB, which does not fit beside 5 KiB of room even
+    /// though the 4 KiB received would.
+    #[tokio::test]
+    async fn a_growing_buffer_is_charged_its_capacity() {
+        use crate::pipeline::RECORD_BYTES;
+        use tokio::io::AsyncWriteExt;
+        let memory_budget = 16 * RECORD_BYTES;
+        let (_, pipeline) = budgeted(memory_budget, Duration::from_millis(300));
+        let mut other = Held::default();
+        pipeline
+            .hold(Signal::Logs, &mut other, memory_budget - 5 * 1024)
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(serve(
+            listener,
+            pipeline.clone(),
+            Timeouts::default(),
+            std::future::pending(),
+        ));
+        let chunk = |n: usize| {
+            let mut out = format!("{n:x}\r\n").into_bytes();
+            out.extend(std::iter::repeat_n(0u8, n));
+            out.extend_from_slice(b"\r\n");
+            out
+        };
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        let mut first = format!(
+            "POST /v1/logs HTTP/1.1\r\nHost: x\r\nX-Toudai-Key: {PROD}\r\n\
+             Content-Type: {PROTOBUF}\r\nTransfer-Encoding: chunked\r\n\r\n"
+        )
+        .into_bytes();
+        first.extend(chunk(3 * 1024));
+        stream.write_all(&first).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut rest = chunk(1024);
+        rest.extend_from_slice(b"0\r\n\r\n");
+        stream.write_all(&rest).await.unwrap();
+        let reply = until_closed_or_answered(&mut stream).await;
+        assert!(reply.starts_with("HTTP/1.1 429"), "{reply}");
     }
 
     /// The status line and headers of the first response, or everything
