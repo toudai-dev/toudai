@@ -10,10 +10,11 @@ link:README.adoc#_cross_cutting_exit_criteria[exit criteria].
 The fixture definition precedes ingestion implementation. The operator test
 depends on the acceptance, raw query, and minimal acceleration milestones.
 
-* [x] Build one deterministic fixture emitter using standard OTel SDK/OTLP for two tenants with logs, spans, application events, and a native-metric compatibility sample; include invalid records and independently computed expected contents/checksums, and verify reproducibility without proprietary batch receipts.
+* [x] Build one deterministic fixture emitter using standard OTel SDK/OTLP for two datasets (two tenants before Decision 0002) with logs, spans, application events, and a native-metric compatibility sample; include invalid records and independently computed expected contents/checksums, and verify reproducibility without proprietary batch receipts.
 +
 The standalone `fixture-emitter/` crate (Rust OTel SDK 0.33 with `opentelemetry-otlp`
-over gRPC or HTTP) emits two workspaces that share the dataset name `checkout`:
+over gRPC or HTTP) emits two datasets, `fixture` and `fixture-b` (two workspaces
+sharing the dataset `checkout` until Decision 0002):
 logs, trace-correlated spans with span events and unset/reversed timing,
 application events (a log record with `event_name` set), one counter sample, and
 invalid and edge records (bytes, array, map, non-finite floats, integers above
