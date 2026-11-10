@@ -1,4 +1,4 @@
 # Test-only read keys for the end-to-end API test: <key> [<dataset>...].
 # A key without datasets may read every dataset of the deployment.
-test-key-all
-test-key-restricted fixture-b b-only
+test-key-all-0123456789
+test-key-restricted-0123 fixture-b b-only

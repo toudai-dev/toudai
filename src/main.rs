@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use toudai::api::{AppState, router};
-use toudai::auth::ReadKeys;
+use toudai::auth::Keys;
 use toudai::clickhouse::{ClickHouse, ClickHouseConfig};
 use toudai::query::ServingTables;
 
@@ -29,7 +29,7 @@ async fn run() -> Result<(), String> {
     )?;
     let keys = std::fs::read_to_string(&keys_path)
         .map_err(|e| format!("cannot read {keys_path}: {e}"))
-        .and_then(|text| ReadKeys::parse(&text).map_err(|e| format!("{keys_path}: {e}")))?;
+        .and_then(|text| Keys::parse(&text).map_err(|e| format!("{keys_path}: {e}")))?;
 
     let mut config = ClickHouseConfig::new(
         env("TOUDAI_CLICKHOUSE_URL").unwrap_or_else(|| "http://127.0.0.1:8123".into()),

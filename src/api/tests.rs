@@ -12,7 +12,7 @@ async fn serve() -> String {
     let state = Arc::new(AppState {
         clickhouse: ClickHouse::new(ClickHouseConfig::new("http://127.0.0.1:1")).unwrap(),
         tables: ServingTables::new("toudai").unwrap(),
-        keys: ReadKeys::parse("key-a\nkey-d d\n").unwrap(),
+        keys: Keys::parse("key-a-0123456789\nkey-d-0123456789 d\n").unwrap(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -58,10 +58,14 @@ async fn requests_are_authenticated_before_anything_else() {
     let cases = [
         (post.clone(), "/v1/query", None),
         (post.clone(), "/v1/query", Some("Bearer wrong")),
-        (post.clone(), "/v1/query", Some("Basic key-a")),
-        (post.clone(), "/v1/query", Some("key-a")),
+        (post.clone(), "/v1/query", Some("Basic key-a-0123456789")),
+        (post.clone(), "/v1/query", Some("key-a-0123456789")),
         (get.clone(), "/v1/events/d/e1", None),
-        (get.clone(), "/v1/events/d/e1", Some("Bearer key-a-")),
+        (
+            get.clone(),
+            "/v1/events/d/e1",
+            Some("Bearer key-a-01234567890"),
+        ),
     ];
     for (method, path, authorization) in cases {
         // An unparseable body must not be reported ahead of the credential.
@@ -96,7 +100,7 @@ async fn query_requests_are_rejected_before_any_statement_runs() {
         let (status, _, response) = call(
             reqwest::Method::POST,
             format!("{base}/v1/query"),
-            Some("Bearer key-a"),
+            Some("Bearer key-a-0123456789"),
             Some(body.clone()),
         )
         .await;
@@ -119,49 +123,49 @@ async fn datasets_outside_the_keys_list_are_refused() {
     let cases = [
         // An invalid request is a 400 before the dataset list is consulted.
         (
-            "key-d",
+            "key-d-0123456789",
             "/v1/query",
             Some(unscoped),
             StatusCode::BAD_REQUEST,
             "missing_scope",
         ),
         (
-            "key-d",
+            "key-d-0123456789",
             "/v1/query",
             Some(other.clone()),
             StatusCode::FORBIDDEN,
             "dataset_not_allowed",
         ),
         (
-            "key-d",
+            "key-d-0123456789",
             "/v1/events/other/e1",
             None,
             StatusCode::FORBIDDEN,
             "dataset_not_allowed",
         ),
         (
-            "key-d",
+            "key-d-0123456789",
             "/v1/query",
             Some(valid_query()),
             StatusCode::BAD_GATEWAY,
             "clickhouse_unavailable",
         ),
         (
-            "key-d",
+            "key-d-0123456789",
             "/v1/events/d/e1",
             None,
             StatusCode::BAD_GATEWAY,
             "clickhouse_unavailable",
         ),
         (
-            "key-a",
+            "key-a-0123456789",
             "/v1/query",
             Some(other),
             StatusCode::BAD_GATEWAY,
             "clickhouse_unavailable",
         ),
         (
-            "key-a",
+            "key-a-0123456789",
             "/v1/events/other/e1",
             None,
             StatusCode::BAD_GATEWAY,
@@ -195,7 +199,7 @@ async fn backend_outage_is_reported_without_detail() {
     let (status, _, body) = call(
         reqwest::Method::POST,
         format!("{base}/v1/query"),
-        Some("Bearer key-a"),
+        Some("Bearer key-a-0123456789"),
         Some(valid_query()),
     )
     .await;

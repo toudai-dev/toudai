@@ -27,7 +27,7 @@ use axum::routing::{get, post};
 use axum::{Json, http};
 use serde_json::{Value, json};
 
-use crate::auth::{DatasetAccess, ReadKeys, bearer_token};
+use crate::auth::{DatasetAccess, Keys, bearer_token};
 use crate::clickhouse::{ClickHouse, ClickHouseError};
 use crate::events::{self, EventError};
 use crate::query::{QueryError, ServingTables, interpret, plan};
@@ -37,7 +37,7 @@ use self::wire::QueryRequest;
 pub struct AppState {
     pub clickhouse: ClickHouse,
     pub tables: ServingTables,
-    pub keys: ReadKeys,
+    pub keys: Keys,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

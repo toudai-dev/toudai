@@ -26,9 +26,9 @@ use server::{ClickHouseServer, apply_ddl, execute, product_ddl};
 /// name as configuration (Decision 0002 D1), and the test proves they agree.
 const DATABASE: &str = "toudai_e2e";
 /// May read every dataset.
-const KEY_ALL: &str = "test-key-all";
+const KEY_ALL: &str = "test-key-all-0123456789";
 /// May read only `fixture-b` and `b-only` (`tests/fixtures/e2e/read-keys.txt`).
-const KEY_RESTRICTED: &str = "test-key-restricted";
+const KEY_RESTRICTED: &str = "test-key-restricted-0123";
 /// 2026-09-01T07:00:00.123456789Z, the fixture's event time.
 const TS: i64 = 1_788_246_000_123_456_789;
 const TS_TEXT: &str = "2026-09-01 07:00:00.123456789";
@@ -458,8 +458,8 @@ async fn health_and_authentication(api: &Api) {
     for key in [
         None,
         Some("wrong"),
-        Some("test-key-al"),
-        Some("test-key-all-"),
+        Some("test-key-all-012345678"),
+        Some("test-key-all-01234567890"),
     ] {
         let (status, response) = api.query(key, &body).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{key:?}");
