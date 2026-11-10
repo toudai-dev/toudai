@@ -363,12 +363,12 @@ mod tests {
                 "serving.kind",
             ),
             (
-                "tenant swapped",
+                "dataset swapped",
                 |o| {
                     let l = log(o, "log.info");
                     l.ctx.resource.iter_mut().for_each(|(k, v)| {
-                        if k == "toudai.workspace_id" {
-                            *v = Val::Str("33333333-3333-4333-8333-333333333333".into());
+                        if k == "toudai.dataset" {
+                            *v = Val::Str("fixture-c".into());
                         }
                     });
                 },
@@ -379,8 +379,8 @@ mod tests {
                 |o| {
                     let l = log(o, "log.spoofed-scope");
                     l.ctx.resource.iter_mut().for_each(|(k, v)| {
-                        if k == "toudai.workspace_id" {
-                            *v = Val::Str("22222222-2222-4222-8222-222222222222".into());
+                        if k == "toudai.dataset" {
+                            *v = Val::Str("fixture-b".into());
                         }
                     });
                 },
@@ -479,6 +479,37 @@ mod tests {
                     "{transport:?} {signal}"
                 );
             }
+        }
+    }
+
+    /// A Toudai gateway serves logs and traces and refuses metrics. Without
+    /// the metric, the run succeeds and both datasets' logs and traces arrive
+    /// in full.
+    #[test]
+    fn logs_and_traces_reach_a_destination_without_metrics() {
+        let mut fixture = model::build(9);
+        fixture.metrics.clear();
+        for transport in [Transport::Grpc, Transport::Http] {
+            let rt = runtime().unwrap();
+            let rejects = Rejects {
+                metrics: true,
+                ..Rejects::default()
+            };
+            let receiver = Receiver::start_rejecting(rt.handle(), rejects).unwrap();
+            send(&rt, &receiver, transport, &fixture).unwrap();
+            let observed = observe::observe(&receiver.shared.lock().unwrap()).unwrap();
+            let datasets = |ctxs: Vec<&crate::model::Ctx>| {
+                ctxs.iter()
+                    .flat_map(|c| &c.resource)
+                    .filter(|(k, _)| k == "toudai.dataset")
+                    .map(|(_, v)| format!("{v:?}"))
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+            };
+            assert_eq!(observed.logs.len(), fixture.logs.len(), "{transport:?}");
+            assert_eq!(observed.spans.len(), fixture.spans.len(), "{transport:?}");
+            assert_eq!(datasets(observed.logs.iter().map(|l| &l.ctx).collect()), 2);
+            assert_eq!(datasets(observed.spans.iter().map(|s| &s.ctx).collect()), 2);
         }
     }
 

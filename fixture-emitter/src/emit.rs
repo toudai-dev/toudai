@@ -4,7 +4,7 @@
 //! left to configure is transport: the same fixture goes out over OTLP/gRPC or
 //! OTLP/HTTP (protobuf) through the SDK's batch processors and `opentelemetry-otlp`.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,14 +15,18 @@ use opentelemetry::trace::{
     TraceContextExt, TraceFlags, TraceId, TraceState, Tracer as _, TracerProvider as _,
 };
 use opentelemetry::{Array, Context, InstrumentationScope, Key, KeyValue, StringValue, Value};
-use opentelemetry_otlp::{LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig};
+use opentelemetry_otlp::{
+    LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig, WithHttpConfig,
+    WithTonicConfig,
+};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::{IdGenerator, SdkTracerProvider};
+use tonic::metadata::{MetadataMap, MetadataValue};
 
 use crate::delivery::{CountedLogs, CountedMetrics, CountedSpans, Tally};
-use crate::model::{Ctx, Fixture, SpanKind, SpanRec, Status, WORKSPACE_ATTR};
+use crate::model::{Ctx, DATASET_ATTR, Fixture, SpanKind, SpanRec, Status};
 use crate::value::{Attrs, Val};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +50,25 @@ impl Transport {
             Transport::Http => "http://127.0.0.1:4318",
         }
     }
+}
+
+/// The request header a Toudai gateway resolves the dataset from (Decision 0002
+/// D3). A producer `toudai.dataset` on the resource is accepted only when it
+/// equals the resolved dataset, so each dataset's send names it here; a write
+/// key, when the destination needs one, goes in the standard
+/// `OTEL_EXPORTER_OTLP_HEADERS`, which the exporters merge with this header.
+/// Lowercase because gRPC metadata keys must be.
+pub const DATASET_HEADER: &str = "x-toudai-dataset";
+
+fn grpc_headers(dataset: &str) -> Result<MetadataMap, String> {
+    let mut metadata = MetadataMap::new();
+    let value = MetadataValue::try_from(dataset).map_err(|e| e.to_string())?;
+    metadata.insert(DATASET_HEADER, value);
+    Ok(metadata)
+}
+
+fn http_headers(dataset: &str) -> HashMap<String, String> {
+    HashMap::from([(DATASET_HEADER.to_string(), dataset.to_string())])
 }
 
 fn time(ns: u64) -> SystemTime {
@@ -179,63 +202,77 @@ impl IdGenerator for QueuedIds {
     }
 }
 
-fn log_exporter(protocol: Transport, endpoint: &str) -> Result<LogExporter, String> {
+fn log_exporter(protocol: Transport, endpoint: &str, dataset: &str) -> Result<LogExporter, String> {
     match protocol {
         Transport::Grpc => LogExporter::builder()
             .with_tonic()
             .with_endpoint(endpoint)
+            .with_metadata(grpc_headers(dataset)?)
             .build(),
         Transport::Http => LogExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .with_endpoint(format!("{endpoint}/v1/logs"))
+            .with_headers(http_headers(dataset))
             .build(),
     }
     .map_err(|e| e.to_string())
 }
 
-fn span_exporter(protocol: Transport, endpoint: &str) -> Result<SpanExporter, String> {
+fn span_exporter(
+    protocol: Transport,
+    endpoint: &str,
+    dataset: &str,
+) -> Result<SpanExporter, String> {
     match protocol {
         Transport::Grpc => SpanExporter::builder()
             .with_tonic()
             .with_endpoint(endpoint)
+            .with_metadata(grpc_headers(dataset)?)
             .build(),
         Transport::Http => SpanExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .with_endpoint(format!("{endpoint}/v1/traces"))
+            .with_headers(http_headers(dataset))
             .build(),
     }
     .map_err(|e| e.to_string())
 }
 
-fn metric_exporter(protocol: Transport, endpoint: &str) -> Result<MetricExporter, String> {
+fn metric_exporter(
+    protocol: Transport,
+    endpoint: &str,
+    dataset: &str,
+) -> Result<MetricExporter, String> {
     match protocol {
         Transport::Grpc => MetricExporter::builder()
             .with_tonic()
             .with_endpoint(endpoint)
+            .with_metadata(grpc_headers(dataset)?)
             .build(),
         Transport::Http => MetricExporter::builder()
             .with_http()
             .with_protocol(Protocol::HttpBinary)
             .with_endpoint(format!("{endpoint}/v1/metrics"))
+            .with_headers(http_headers(dataset))
             .build(),
     }
     .map_err(|e| e.to_string())
 }
 
-fn workspace_of(ctx: &Ctx) -> String {
-    match ctx.resource.iter().find(|(k, _)| k == WORKSPACE_ATTR) {
+fn dataset_of(ctx: &Ctx) -> String {
+    match ctx.resource.iter().find(|(k, _)| k == DATASET_ATTR) {
         Some((_, Val::Str(s))) => s.clone(),
         _ => String::new(),
     }
 }
 
-/// Send the whole fixture. Each tenant gets its own providers and resource, as
-/// separate producers (or a gateway stamping each tenant's scope) would.
+/// Send the whole fixture. Each dataset gets its own providers and resource, so
+/// every request carries one dataset, as a Toudai gateway requires.
 pub fn emit(fixture: &Fixture, protocol: Transport, endpoint: &str) -> Result<(), String> {
     let endpoint = endpoint.trim_end_matches('/');
-    let mut workspaces: Vec<String> = Vec::new();
+    let mut datasets: Vec<String> = Vec::new();
     for ctx in fixture
         .logs
         .iter()
@@ -243,37 +280,37 @@ pub fn emit(fixture: &Fixture, protocol: Transport, endpoint: &str) -> Result<()
         .chain(fixture.spans.iter().map(|r| &r.ctx))
         .chain(fixture.metrics.iter().map(|r| &r.ctx))
     {
-        let w = workspace_of(ctx);
-        if !workspaces.contains(&w) {
-            workspaces.push(w);
+        let d = dataset_of(ctx);
+        if !datasets.contains(&d) {
+            datasets.push(d);
         }
     }
-    for workspace in &workspaces {
-        emit_tenant(fixture, workspace, protocol, endpoint)?;
+    for dataset in &datasets {
+        emit_dataset(fixture, dataset, protocol, endpoint)?;
     }
     Ok(())
 }
 
-fn emit_tenant(
+fn emit_dataset(
     fixture: &Fixture,
-    workspace: &str,
+    dataset: &str,
     protocol: Transport,
     endpoint: &str,
 ) -> Result<(), String> {
     let logs: Vec<_> = fixture
         .logs
         .iter()
-        .filter(|r| workspace_of(&r.ctx) == workspace)
+        .filter(|r| dataset_of(&r.ctx) == dataset)
         .collect();
     let spans: Vec<_> = fixture
         .spans
         .iter()
-        .filter(|r| workspace_of(&r.ctx) == workspace)
+        .filter(|r| dataset_of(&r.ctx) == dataset)
         .collect();
     let metrics: Vec<_> = fixture
         .metrics
         .iter()
-        .filter(|r| workspace_of(&r.ctx) == workspace)
+        .filter(|r| dataset_of(&r.ctx) == dataset)
         .collect();
 
     // Traces first: log records carry the trace context of spans the model
@@ -286,7 +323,7 @@ fn emit_tenant(
             .with_id_generator(QueuedIds(queued.clone()))
             .with_resource(resource(&first.ctx)?)
             .with_batch_exporter(CountedSpans(
-                span_exporter(protocol, endpoint)?,
+                span_exporter(protocol, endpoint, dataset)?,
                 tally.clone(),
             ))
             .build();
@@ -304,7 +341,7 @@ fn emit_tenant(
         let provider = SdkLoggerProvider::builder()
             .with_resource(resource(&first.ctx)?)
             .with_batch_exporter(CountedLogs(
-                log_exporter(protocol, endpoint)?,
+                log_exporter(protocol, endpoint, dataset)?,
                 tally.clone(),
             ))
             .build();
@@ -352,7 +389,7 @@ fn emit_tenant(
         let provider = SdkMeterProvider::builder()
             .with_resource(resource(&first.ctx)?)
             .with_periodic_exporter(CountedMetrics(
-                metric_exporter(protocol, endpoint)?,
+                metric_exporter(protocol, endpoint, dataset)?,
                 tally.clone(),
             ))
             .build();
@@ -370,7 +407,7 @@ fn emit_tenant(
         if let Err(e) = provider.shutdown() {
             errors.push(format!("metric shutdown: {e}"));
         }
-        // One export call carries every data point of the tenant.
+        // One export call carries every data point of the dataset.
         errors.extend(tally.verify("metrics", 1).err());
     }
 
