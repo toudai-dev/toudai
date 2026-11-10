@@ -8,12 +8,21 @@
 //! exporter's "missing trusted scope" and "missing event_id" failures have no
 //! counterpart here.
 //!
-//! A record is rejected on its own when it, its scope, or its resource repeats
-//! an attribute key or nested map key; the rest of the request is still
-//! stored. Producer `toudai.*` keys on records, spans, and scopes are dropped
-//! and counted. On the resource, [`crate::admit`] has already refused every
-//! `toudai.*` key except a `toudai.dataset` equal to the resolved one, which is
-//! replaced by the trusted value.
+//! It differs from the Go exporter on purpose where the Experiment 023 fixture
+//! expects otherwise:
+//!
+//! - A span's events are kept in its canonical payload (`span.events`); the Go
+//!   exporter drops them. So a span whose events repeat a key is rejected, and
+//!   producer `toudai.*` keys on events are dropped and counted, where the Go
+//!   exporter stores the span and ignores its events.
+//!
+//! A record is rejected on its own when it, its scope, its resource, or one of
+//! its span events repeats an attribute key or nested map key; the rest of the
+//! request is still stored. Producer `toudai.*` keys on records, spans, span
+//! events, and scopes are dropped and counted. On the resource,
+//! [`crate::admit`] has already refused every `toudai.*` key except a
+//! `toudai.dataset` equal to the resolved one, which is replaced by the trusted
+//! value.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -23,13 +32,14 @@ use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::resource::v1::Resource;
+use opentelemetry_proto::tonic::trace::v1::span::Event;
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::admit::DATASET_ATTR;
-use crate::value::{Attributes, Value, canonical_nodes, decode_attributes};
+use crate::value::{Attributes, DuplicateKey, Value, canonical_nodes, decode_attributes};
 
 /// The `schema` field of every canonical payload and the `schema_version`
 /// column of `canonical_events`.
@@ -122,7 +132,8 @@ pub struct Mapped<R> {
     pub serving: Vec<R>,
     pub canonical: Vec<CanonicalRow>,
     pub rejections: Vec<RecordRejection>,
-    /// Producer `toudai.*` keys dropped from records, spans, and scopes.
+    /// Producer `toudai.*` keys dropped from records, spans, span events, and
+    /// scopes.
     pub dropped_reserved: usize,
 }
 
@@ -295,7 +306,15 @@ pub fn map_traces(
                     out.reject("duplicate_or_invalid_span_attributes", "span", 1);
                     continue;
                 };
-                out.dropped_reserved += record.dropped_reserved;
+                let Ok((events, events_dropped)) = span_events(&span.events) else {
+                    out.reject(
+                        "duplicate_or_invalid_span_event_attributes",
+                        "span_event",
+                        1,
+                    );
+                    continue;
+                };
+                out.dropped_reserved += record.dropped_reserved + events_dropped;
                 let (start, end) = (span.start_time_unix_nano, span.end_time_unix_nano);
                 // OTLP has no presence for timestamps, so 0 is unset. Missing
                 // timing wins over reversed timing: a missing start must not
@@ -320,6 +339,7 @@ pub fn map_traces(
                     "status_code": status_code.to_string(),
                     "start_ns": start.to_string(),
                     "end_ns": end.to_string(),
+                    "events": events,
                 });
                 if let Some(duration) = duration_ns {
                     envelope["duration_ns"] = duration.to_string().into();
@@ -392,6 +412,26 @@ fn skip(ids: &mut std::slice::Iter<'_, Uuid>, records: usize) {
     for _ in 0..records {
         next_id(ids);
     }
+}
+
+/// A span's events as stored in its canonical envelope, in producer order, and
+/// the producer `toudai.*` keys dropped from them. Their attributes follow the
+/// record rules, so an event that repeats a key rejects its span instead of
+/// being stored partly. Only the canonical payload keeps events; the serving
+/// row has no column for them.
+fn span_events(events: &[Event]) -> Result<(Json, usize), DuplicateKey> {
+    let mut dropped = 0;
+    let mut out = Vec::with_capacity(events.len());
+    for event in events {
+        let attributes = decode_attributes(&event.attributes, true)?;
+        dropped += attributes.dropped_reserved;
+        out.push(json!({
+            "name": event.name,
+            "time_ns": event.time_unix_nano.to_string(),
+            "attributes": canonical_nodes(attributes.values.iter()),
+        }));
+    }
+    Ok((Json::Array(out), dropped))
 }
 
 /// The resource namespace as stored: the producer's attributes without the
@@ -608,6 +648,92 @@ mod tests {
         // and non-ASCII raw.
         let want = "{\"a\":1,\"b\":\"<&>\\u2028x\\u2029\\u0001\u{7f}\\\"\\\\é\"}";
         assert_eq!(String::from_utf8(out).unwrap(), want);
+    }
+
+    /// Span events are kept in producer order in the canonical envelope, with
+    /// the record rules for their attributes.
+    #[test]
+    fn span_events_are_kept_in_the_canonical_payload() {
+        use opentelemetry_proto::tonic::common::v1::{AnyValue, any_value};
+        use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+
+        fn kv(key: &str, v: i64) -> KeyValue {
+            KeyValue {
+                key: key.into(),
+                value: Some(AnyValue {
+                    value: Some(any_value::Value::IntValue(v)),
+                }),
+                ..Default::default()
+            }
+        }
+        fn event(name: &str, time: u64, attributes: Vec<KeyValue>) -> Event {
+            Event {
+                name: name.into(),
+                time_unix_nano: time,
+                attributes,
+                ..Default::default()
+            }
+        }
+        let int = |v: &str| json!({"t": "int", "v": v});
+        // (events, stored `span.events` or None when the span is rejected,
+        // reserved keys dropped)
+        let cases = [
+            (vec![], Some(json!([])), 0),
+            (
+                // Producer order, not time order, and a repeated name.
+                vec![
+                    event("b", 20, vec![kv("x", 1), kv("toudai.x", 2)]),
+                    event("a", 10, vec![]),
+                    event("b", 5, vec![kv("toudai.y", 3), kv("toudai.y", 3)]),
+                ],
+                Some(json!([
+                    {"name": "b", "time_ns": "20", "attributes": {"x": int("1")}},
+                    {"name": "a", "time_ns": "10", "attributes": {}},
+                    {"name": "b", "time_ns": "5", "attributes": {}},
+                ])),
+                3,
+            ),
+            (
+                vec![
+                    event("ok", 1, vec![]),
+                    event("dup", 2, vec![kv("x", 1), kv("x", 2)]),
+                ],
+                None,
+                0,
+            ),
+        ];
+        for (events, want, dropped) in cases {
+            let request = ExportTraceServiceRequest {
+                resource_spans: vec![ResourceSpans {
+                    scope_spans: vec![ScopeSpans {
+                        spans: vec![Span {
+                            name: "s".into(),
+                            events,
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            };
+            let mapped = map_traces(&request, "d", &[Uuid::now_v7()], 0);
+            match &want {
+                Some(want) => {
+                    let payload: Json = serde_json::from_str(&mapped.canonical[0].payload).unwrap();
+                    assert_eq!(&payload["span"]["events"], want);
+                    assert!(mapped.rejections.is_empty());
+                }
+                None => assert_eq!(
+                    mapped.rejections,
+                    [RecordRejection {
+                        reason: "duplicate_or_invalid_span_event_attributes",
+                        namespace: "span_event",
+                        records: 1,
+                    }]
+                ),
+            }
+            assert_eq!(mapped.dropped_reserved, dropped, "{want:?}");
+        }
     }
 
     #[test]

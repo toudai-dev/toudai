@@ -7,11 +7,20 @@
 //! Both sides use the event_ids `0198a0c4-7b3e-7c11-8a52-<n as 12 hex digits>`
 //! for the n-th record, so canonical payloads and their SHA-256 must match
 //! byte for byte, not only as JSON values.
+//!
+//! `toudai-ingest` differs from the Go exporter on purpose, and the test
+//! applies each difference to the Go rows before comparing rather than
+//! regenerating them, so the files stay the Go exporter's output for
+//! Experiment 025. The mapping module's doc lists every difference; these are
+//! the ones these requests exercise:
+//!
+//! - A span's canonical payload keeps its events (`span.events`).
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use toudai::auth::DatasetAccess;
 use toudai_ingest::admit::{admit_logs, admit_traces};
 use toudai_ingest::auth::Scope;
@@ -109,15 +118,43 @@ fn span_row(row: &SpanRow, canonical_row: &CanonicalRow) -> Value {
     })
 }
 
+/// Replace the Go row's payload with `edit(payload)`, and its hashes with the
+/// new payload's. Edits are textual so the rest of the payload stays the Go
+/// exporter's bytes.
+fn edit_payload(row: &mut Value, edit: impl FnOnce(&str) -> String) {
+    let payload = edit(row["canonical"]["payload"].as_str().unwrap());
+    let sha: String = Sha256::digest(payload.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    row["canonical"]["payload"] = payload.into();
+    row["canonical"]["payload_sha256"] = sha.clone().into();
+    row["payload_sha256"] = sha.into();
+}
+
+/// Insert `events` (compact JSON) into the Go span envelope. Payload keys are
+/// sorted, so `events` comes right after `end_ns`, which every span has.
+fn with_span_events(row: &mut Value, events: &str) {
+    edit_payload(row, |payload| {
+        let span = payload.find("\"span\":{").unwrap();
+        let end_ns = span + payload[span..].find("\"end_ns\":\"").unwrap();
+        let value_end = end_ns + "\"end_ns\":\"".len();
+        let at = value_end + payload[value_end..].find('"').unwrap() + 1;
+        format!("{},\"events\":{events}{}", &payload[..at], &payload[at..])
+    });
+}
+
 /// Compare row by row, so a failure names the record and field.
 fn assert_rows<R>(
     signal: &str,
     mapped: &Mapped<R>,
     to_json: fn(&R, &CanonicalRow) -> Value,
     expected_text: &str,
+    differences: fn(&mut Value),
     rejected_records: &[usize],
 ) {
-    let (want_rows, want_rejections) = expected(expected_text);
+    let (mut want_rows, want_rejections) = expected(expected_text);
+    want_rows.iter_mut().for_each(differences);
     assert_eq!(mapped.serving.len(), want_rows.len(), "{signal} row count");
     assert_eq!(mapped.canonical.len(), mapped.serving.len());
     for ((row, canonical_row), want) in mapped.serving.iter().zip(&mapped.canonical).zip(&want_rows)
@@ -163,6 +200,7 @@ fn logs_match_the_go_exporter() {
         &mapped,
         log_row,
         include_str!("fixtures/mapping/logs.expected.jsonl"),
+        |_| {},
         &[1, 1, 1, 2, 2],
     );
     assert_eq!(mapped.serving.len() + mapped.rejected_records(), ids.len());
@@ -184,6 +222,17 @@ fn spans_match_the_go_exporter() {
         &mapped,
         span_row,
         include_str!("fixtures/mapping/traces.expected.jsonl"),
+        |row| {
+            // The request's one span event, on `GET /cart`; its reserved-key
+            // and rejection rules are table-tested in the mapping module.
+            let events = match row["span_name"].as_str().unwrap() {
+                "GET /cart" => {
+                    r#"[{"attributes":{"k":{"t":"string","v":"v"}},"name":"cache.miss","time_ns":"1788246000100000000"}]"#
+                }
+                _ => "[]",
+            };
+            with_span_events(row, events);
+        },
         &[1, 1, 1],
     );
     assert_eq!(mapped.serving.len() + mapped.rejected_records(), ids.len());

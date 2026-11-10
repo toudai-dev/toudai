@@ -328,14 +328,6 @@ fn payload_problems(what: &str, want: &Value, got: &Value, problems: &mut Vec<St
     if want["kind"] == "event" && got["kind"] == "log" {
         want["kind"] = "log".into();
     }
-    // Ingest stores no span events, as the Go exporter at collector
-    // `f780574` stores none; `product-contract-impl.adoc` records the gap.
-    // Once a payload holds `events`, they are compared.
-    if got["span"].get("events").is_none()
-        && let Some(span) = want.get_mut("span").and_then(Value::as_object_mut)
-    {
-        span.remove("events");
-    }
     if want != got {
         problems.push(format!("{what}: canonical payload {got}, expected {want}"));
     }

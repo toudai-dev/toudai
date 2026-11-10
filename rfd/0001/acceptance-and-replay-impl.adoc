@@ -201,11 +201,9 @@ through the query service (Experiment 022's retrieval fixtures are hand-authored
 fixture's two datasets. It compares every stored serving row and canonical payload
 with the fixture's expected contents, then retrieves every event through the query
 service's exact-event lookup: found under its own dataset, 404 under the other,
-and 403 for a key limited to the other. The only differences are application
-events stored with `kind` `log` and span events not stored (see the
-application-event item above and
-link:product-contract-impl.adoc[Product contract]). The item stays open for the
-same tenant-policy reasons.
+and 403 for a key limited to the other. The only difference is application
+events stored with `kind` `log` (see the application-event item above). The item
+stays open for the same tenant-policy reasons.
 
 == PoC-required: independent health telemetry
 
