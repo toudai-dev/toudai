@@ -80,6 +80,10 @@ an optional body, and typed record attributes, served with `kind` `event`. It wa
 checked only on the wire against its own expected contents, so the encoding stays
 open until it is decided and tested through the Collector path. See
 link:experiments/023-fixture-emitter-run.adoc[Experiment 023].
++
+Through `toudai-ingest` (`ingest/tests/fixture_e2e.rs`) such a record is stored
+with `kind` `log`, as the Go exporter at collector `f780574` stores it. The test
+records the fixture's `event` as a known difference until the encoding is decided.
 
 * [ ] Test the stock ClickHouse exporter against the required schema, routing, and canonical payload preservation; document any gap before implementing a custom component.
 +
@@ -191,6 +195,17 @@ normal-path ingestion checked against independent expectations and canonical and
 rows joined by the assigned identity. The item stays open: tenant policy is still a static
 file without rotation, revocation, or caching, and Experiment 024's rows were not retrieved
 through the query service (Experiment 022's retrieval fixtures are hand-authored). See link:experiments/024-key-derived-trusted-scope.adoc[Experiment 024].
++
+`ingest/tests/fixture_e2e.rs` sends the Experiment 023 fixture through
+`toudai-ingest` over OTLP/gRPC and OTLP/HTTP with a write key limited to the
+fixture's two datasets. It compares every stored serving row and canonical payload
+with the fixture's expected contents, then retrieves every event through the query
+service's exact-event lookup: found under its own dataset, 404 under the other,
+and 403 for a key limited to the other. The only differences are application
+events stored with `kind` `log` and span events not stored (see the
+application-event item above and
+link:product-contract-impl.adoc[Product contract]). The item stays open for the
+same tenant-policy reasons.
 
 == PoC-required: independent health telemetry
 
