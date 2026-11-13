@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+# Exposes `fuzzing`, the checks the cargo-fuzz targets in `fuzz/` run.
+fuzzing = []
+
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 base64 = "0.22"
@@ -28,4 +32,5 @@ uuid = { version = "1", features = ["v7"] }
 zstd = "0.14"
 
 [dev-dependencies]
+proptest = "1.12"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }

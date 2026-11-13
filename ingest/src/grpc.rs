@@ -131,7 +131,7 @@ const GRPC_ENCODING: &str = "grpc-encoding";
 /// (what `serve` makes of tonic's own size refusal too), and `INTERNAL` for a
 /// message that does not decompress, as tonic answers for gzip. Framing tonic
 /// would refuse anyway is passed through for it to refuse.
-async fn unsnappy(mut body: Body) -> Result<Bytes, Status> {
+pub(crate) async fn unsnappy(mut body: Body) -> Result<Bytes, Status> {
     let too_large = || Status::resource_exhausted("request message is larger than 4 MiB");
     // A unary request is one message: its 5-byte prefix and at most the limit.
     let max = MAX_MESSAGE_BYTES + 5;

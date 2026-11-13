@@ -349,7 +349,7 @@ async fn read_body(
 /// header value counts, and names match exactly, as in `confighttp`: no
 /// encoding, `gzip`, `zstd`, `zlib` and its alias `deflate`, `snappy`, `lz4`,
 /// and `x-snappy-framed`.
-fn decompress(encoding: Option<&HeaderValue>, body: Bytes) -> Result<Bytes, Refusal> {
+pub(crate) fn decompress(encoding: Option<&HeaderValue>, body: Bytes) -> Result<Bytes, Refusal> {
     let encoding = match encoding {
         None => "",
         Some(value) => value.to_str().map_err(|_| UNSUPPORTED_ENCODING)?,
@@ -400,7 +400,7 @@ fn read_limited(reader: impl Read) -> Result<Bytes, Refusal> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Format {
+pub(crate) enum Format {
     Protobuf,
     Json,
 }
@@ -435,7 +435,10 @@ impl Format {
         }
     }
 
-    fn decode<M: Message + Default + DeserializeOwned + AnyValues>(self, body: &[u8]) -> Option<M> {
+    pub(crate) fn decode<M: Message + Default + DeserializeOwned + AnyValues>(
+        self,
+        body: &[u8],
+    ) -> Option<M> {
         match self {
             Format::Protobuf => M::decode(body).ok(),
             Format::Json => protojson::decode(body),

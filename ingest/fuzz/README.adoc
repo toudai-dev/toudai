@@ -1,0 +1,44 @@
+= toudai-ingest fuzz targets
+
+cargo-fuzz targets for the input an OTLP client controls. Each target calls a
+check in `toudai_ingest::fuzzing`, which panics when ingest breaks an
+invariant; the property tests in that module run the same checks on every
+`cargo test`. The `fuzz` workflow runs each target daily for 15 minutes on a
+pinned nightly and keeps its corpus between runs.
+
+[cols="1,3"]
+|===
+|Target |Input and check
+
+|`http_body`
+|An OTLP/HTTP body, decompressed, decoded, admitted, and mapped. Every record
+is stored once or counted as rejected, under the trusted dataset, with a
+distinct `event_id`, a payload matching its hash, and no producer `toudai.*`
+key.
+
+|`grpc_body`
+|A gRPC request body through the snappy layer. A body with no compressed
+message passes through unchanged.
+
+|`json_round_trip`
+|A protobuf request, written as OTLP/JSON with NaN and the infinities as
+strings, as pdata spells them, decodes to the same request bit for bit.
+|===
+
+This is a standalone crate, outside the root Cargo workspace, because
+cargo-fuzz builds with `-Zsanitizer=address`, which only a nightly compiler
+accepts. Use the nightly the workflow pins (`NIGHTLY` in
+`.github/workflows/fuzz.yml`):
+
+[source,sh]
+----
+cd ingest
+cargo install cargo-fuzz --version 0.13.2 --locked
+fuzz/seed.sh                                    # corpus from the test fixtures
+cargo +nightly-2026-11-08 fuzz run http_body -- -max_total_time=60
+cargo +nightly-2026-11-08 fuzz run http_body fuzz/artifacts/http_body/<crash>  # replay a crash
+----
+
+When a run fails, the workflow uploads the crashing input as an artifact. Fix
+the bug, and add the input's case to the module's tests if a property test
+would not have found it.
