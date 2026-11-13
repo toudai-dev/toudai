@@ -5,7 +5,16 @@ edition = "2024"
 publish = false
 
 [dependencies]
+base64 = "0.22"
+clickhouse = "0.15"
 http = "1"
 opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "logs", "trace"] }
+ryu = "1.0.23"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
 toudai = { path = ".." }
 uuid = { version = "1", features = ["v7"] }
+
+[dev-dependencies]
+prost = "0.14"

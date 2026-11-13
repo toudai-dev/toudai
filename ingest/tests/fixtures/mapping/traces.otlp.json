@@ -1,0 +1,145 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "frontend"}},
+          {"key": "host.cpu", "value": {"doubleValue": 0.25}},
+          {"key": "toudai.dataset", "value": {"stringValue": "fixture"}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "frontend.http",
+            "version": "0.9",
+            "attributes": [
+              {"key": "scope.attr", "value": {"boolValue": true}},
+              {"key": "toudai.scope_reserved", "value": {"stringValue": "dropped"}}
+            ]
+          },
+          "spans": [
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "eee19b7ec3c1b174",
+              "parentSpanId": "eee19b7ec3c1b173",
+              "traceState": "vendor=1",
+              "flags": 1,
+              "name": "GET /cart",
+              "kind": 2,
+              "startTimeUnixNano": "1788246000000000000",
+              "endTimeUnixNano": "1788246000250000000",
+              "attributes": [
+                {"key": "http.status_code", "value": {"intValue": "200"}},
+                {"key": "http.route", "value": {"stringValue": "/cart"}},
+                {"key": "ratio", "value": {"doubleValue": 0.75}},
+                {"key": "cached", "value": {"boolValue": false}},
+                {"key": "raw", "value": {"bytesValue": "AQI="}},
+                {"key": "tags", "value": {"arrayValue": {"values": [{"stringValue": "a"}]}}},
+                {"key": "ctx", "value": {"kvlistValue": {"values": [{"key": "k", "value": {"intValue": "1"}}]}}},
+                {"key": "nothing", "value": {}},
+                {"key": "toudai.span_reserved", "value": {"stringValue": "dropped"}}
+              ],
+              "events": [
+                {"timeUnixNano": "1788246000100000000", "name": "cache.miss", "attributes": [{"key": "k", "value": {"stringValue": "v"}}]}
+              ],
+              "links": [
+                {"traceId": "5b8efff798038103d269b633813fc60d", "spanId": "eee19b7ec3c1b175"}
+              ],
+              "status": {"code": 1, "message": "fine"}
+            },
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "0000000000000001",
+              "name": "unspecified kind, zero duration",
+              "startTimeUnixNano": "1788246000300000000",
+              "endTimeUnixNano": "1788246000300000000"
+            },
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "0000000000000002",
+              "name": "internal, missing timing",
+              "kind": 1
+            },
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "0000000000000003",
+              "name": "client, missing start",
+              "kind": 3,
+              "endTimeUnixNano": "1788246000400000000"
+            },
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "0000000000000004",
+              "name": "producer, missing end",
+              "kind": 4,
+              "startTimeUnixNano": "1788246000500000000",
+              "status": {"code": 2, "message": "boom"}
+            },
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "0000000000000005",
+              "name": "consumer, end before start",
+              "kind": 5,
+              "startTimeUnixNano": "1788246000700000000",
+              "endTimeUnixNano": "1788246000600000000"
+            },
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "0000000000000006",
+              "name": "unknown kind",
+              "kind": 9,
+              "startTimeUnixNano": "1788246000800000000",
+              "endTimeUnixNano": "1788246000800000001"
+            },
+            {
+              "name": "no trace or span id",
+              "kind": 1,
+              "startTimeUnixNano": "1788246000900000000",
+              "endTimeUnixNano": "1788246000900000002"
+            },
+            {
+              "traceId": "5b8efff798038103d269b633813fc60c",
+              "spanId": "0000000000000007",
+              "name": "duplicate span key",
+              "startTimeUnixNano": "1788246001000000000",
+              "endTimeUnixNano": "1788246001000000001",
+              "attributes": [
+                {"key": "dup", "value": {"stringValue": "a"}},
+                {"key": "dup", "value": {"stringValue": "b"}}
+              ]
+            }
+          ]
+        },
+        {
+          "scope": {
+            "attributes": [
+              {"key": "same", "value": {"intValue": "1"}},
+              {"key": "same", "value": {"intValue": "2"}}
+            ]
+          },
+          "spans": [
+            {"name": "rejected with its scope", "startTimeUnixNano": "1788246002000000000", "endTimeUnixNano": "1788246002000000001"}
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          {"key": "m", "value": {"kvlistValue": {"values": [
+            {"key": "k", "value": {"intValue": "1"}},
+            {"key": "k", "value": {"intValue": "2"}}
+          ]}}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "spans": [
+            {"name": "rejected with its resource", "startTimeUnixNano": "1788246003000000000", "endTimeUnixNano": "1788246003000000001"}
+          ]
+        }
+      ]
+    }
+  ]
+}
