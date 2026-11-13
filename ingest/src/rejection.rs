@@ -18,14 +18,17 @@ pub enum Rejection {
     InvalidId,
 }
 
-/// The class of a rejection, which each transport maps to its own status:
-/// HTTP 401, 400, or 403, and gRPC `UNAUTHENTICATED`, `INVALID_ARGUMENT`, or
-/// `PERMISSION_DENIED`.
+/// The class of a refused request, which each transport maps to its own
+/// status: HTTP 401, 400, 403, 503, or 500, and gRPC `UNAUTHENTICATED`,
+/// `INVALID_ARGUMENT`, `PERMISSION_DENIED`, `UNAVAILABLE`, or `INTERNAL`.
+/// Only `Unavailable` tells an OTLP producer to retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusKind {
     Unauthenticated,
     InvalidArgument,
     PermissionDenied,
+    Unavailable,
+    Internal,
 }
 
 impl StatusKind {
@@ -34,6 +37,63 @@ impl StatusKind {
             StatusKind::Unauthenticated => StatusCode::UNAUTHORIZED,
             StatusKind::InvalidArgument => StatusCode::BAD_REQUEST,
             StatusKind::PermissionDenied => StatusCode::FORBIDDEN,
+            StatusKind::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            StatusKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    /// The `google.rpc.Code` of the class, for gRPC statuses and for the
+    /// `google.rpc.Status` body of an OTLP/HTTP error.
+    pub fn rpc_code(self) -> i32 {
+        match self {
+            StatusKind::InvalidArgument => 3,
+            StatusKind::PermissionDenied => 7,
+            StatusKind::Internal => 13,
+            StatusKind::Unavailable => 14,
+            StatusKind::Unauthenticated => 16,
+        }
+    }
+
+    /// The counter label of the class.
+    pub fn label(self) -> &'static str {
+        match self {
+            StatusKind::Unauthenticated => "unauthenticated",
+            StatusKind::InvalidArgument => "invalid_argument",
+            StatusKind::PermissionDenied => "permission_denied",
+            StatusKind::Unavailable => "unavailable",
+            StatusKind::Internal => "internal",
+        }
+    }
+}
+
+/// The answer to a request that stored nothing: a status class and a fixed
+/// message, never a producer value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refusal {
+    pub kind: StatusKind,
+    pub message: &'static str,
+}
+
+impl Refusal {
+    /// ClickHouse could not take the write before the deadline; the producer
+    /// retries.
+    pub const UNAVAILABLE: Refusal = Refusal {
+        kind: StatusKind::Unavailable,
+        message: "storage is unavailable, retry later",
+    };
+    /// ClickHouse refused the rows in a way a retry cannot fix, such as a
+    /// schema that does not match the service.
+    pub const INTERNAL: Refusal = Refusal {
+        kind: StatusKind::Internal,
+        message: "storage refused the write",
+    };
+}
+
+impl From<Rejection> for Refusal {
+    fn from(rejection: Rejection) -> Refusal {
+        Refusal {
+            kind: rejection.kind(),
+            message: rejection.message(),
         }
     }
 }
