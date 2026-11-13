@@ -1,0 +1,1 @@
+export calls succeeded for 28 log records, 16 spans, 0 metrics over Http to http://127.0.0.1:14318 (request-level; partial-success rejections are not visible to the SDK exporter)

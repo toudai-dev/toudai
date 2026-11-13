@@ -1,0 +1,11 @@
+[stall] 08:40:47.622 listening on 127.0.0.1:18327 (no responses)
+[stall] 08:40:47.804 connection 1: 127.0.0.1:37566 accepted; reading without responding
+[stall] 08:40:47.804 connection 1: closed
+[stall] 08:40:47.961 connection 2: 127.0.0.1:37570 accepted; reading without responding
+[stall] 08:40:52.858 connection 2: closed
+[stall] 08:40:52.859 connection 3: 127.0.0.1:46278 accepted; reading without responding
+[stall] 08:40:52.861 connection 3: closed
+[stall] 08:40:52.861 connection 4: 127.0.0.1:46292 accepted; reading without responding
+[stall] 08:40:52.861 connection 4: closed
+[stall] 08:40:53.808 connection 5: 127.0.0.1:46306 accepted; reading without responding
+[stall] 08:40:58.710 connection 5: closed

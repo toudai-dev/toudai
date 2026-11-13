@@ -2,10 +2,12 @@
 
 link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 
-- *Status:* Running
+- *Status:* Completed (bounded slice); node loss, SDK retry, the 10k events/s load, and failure cases over gRPC left open
+- *Run:* 2026-11-13T08:39:20Z-08:41:33Z (`run.sh`, exit 0)
 - *Source mutation:* None; disposable local ClickHouse, synthetic keys and fixtures, loopback only
-- *Product revisions:* toudai `toudai-ingest` at the revision recorded in `results/revisions.txt`; https://github.com/toudai-dev/collector/pull/5[collector #5] at `f780574` for the Go path
+- *Product revisions:* toudai at `8615978bd5c65032f52b356090d3242f4c4b47d0`, which adds only this harness to `main` at `de9dbf47`, so `toudai-ingest` is the merged code (no uncommitted changes); https://github.com/toudai-dev/collector/pull/5[collector #5] at `f7805740c2b2e34d5bde25778ef7bd7903861c66` for the Go path
 - *Harness:* `025-ingest-parity-and-acknowledgement/` (`run.sh`, `relay.py`, `compare.py`, ClickHouse config); evidence in `025-ingest-parity-and-acknowledgement/results/`
+- *Result:* 78 checks passed, 0 failed. Both paths store the same fixture rows apart from the documented differences, and no acknowledged request was lost in this run.
 
 == Question
 
@@ -91,3 +93,199 @@ budget, 1 s flush):
 |Two stored records with two distinct `event_id`s
 |Two records with one content-derived identity
 |===
+
+== Environment
+
+[cols="1,4"]
+|===
+|Host |Amp orb (Linux sandbox), 8 vCPU Intel Xeon 2.60 GHz, 15 GiB RAM, 64 GB root disk, kernel 6.1.189+; everything on loopback
+|ClickHouse |26.8.2.7 native server binary from the dev shell (no Docker in the orb), ports 19225/18325, `clickhouse/schema/*.sql` applied without the S3 TTL and storage policy
+|`toudai-ingest` |debug build at the revision in `results/revisions.txt`, defaults except the keys file, database, listen addresses, and the stall phase's 20 MiB budget
+|Go path |collector #5 at `f780574`, built with Go 1.26.8 from its Nix shell, run with `config/gateway.example.yaml` unmodified plus a telemetry port
+|Producer |the Experiment 023 fixture emitter (OpenTelemetry Rust SDK) for parity; `curl` with OTLP/JSON over HTTP for the failure phases
+|Tools |rustc 1.97.1, cargo 1.97.0, Python 3.11.6
+|===
+
+== Commands
+
+[source,sh]
+----
+git clone https://github.com/toudai-dev/collector /tmp/collector
+git -C /tmp/collector checkout f7805740c2b2e34d5bde25778ef7bd7903861c66
+COLLECTOR_REPO=/tmp/collector nix develop --command \
+  bash rfd/0001/experiments/025-ingest-parity-and-acknowledgement/run.sh
+----
+
+The script builds `toudai-ingest`, the fixture emitter, and the collector; starts
+ClickHouse; and runs every phase in order. Each parity run writes its own
+database; the failure phases share one and count their rows by label. Every check writes its expected and observed
+values to `results/checks.tsv`; expected values come from the hypothesis and the
+injection, never from the observed rows. It exits nonzero if any check fails.
+
+* *Parity.* For each transport, the emitter sends the fixture to the collector and
+  then to `toudai-ingest`, each writing its own database. `compare.py` joins the
+  stored rows on dataset, signal, and `fixture.key`, and allows a difference only
+  in the exact form `ingest/src/mapping.rs` documents. `event_id` and
+  `payload_sha256` are not compared. The Go path stores no span events, so only
+  the shape of ingest's `span.events` is checked here; `ingest/tests/fixture_e2e.rs`
+  checks their content against the fixture. The row dumps are kept in
+  `results/parity/dump/`.
+* *Failure phases.* `toudai-ingest` reaches ClickHouse through `relay.py`, an HTTP
+  relay that can let an INSERT commit and then reset the connection or withhold the
+  response. ClickHouse is stopped with SIGTERM, the canonical `payload` column is
+  renamed, and `serving_logs` is renamed away. The stall phase points
+  `toudai-ingest` at Experiment 021's stalled listener, which accepts connections
+  and never answers. Each request carries one record with a unique label, and rows
+  are counted by that label as canonical/serving.
+* *Process stops.* A loader sends one single-record request every 40 ms; SIGKILL
+  lands 1.5 s into a run of 60 requests, SIGTERM 0.4 s into a run of 20; requests sent after the signal find the port closed.
+
+== Results
+
+All 78 checks passed, and every case in the hypothesis table matched. One behavior outside the table was not predicted (see Interpretation). Row counts are written canonical/serving: 2/1 means two canonical rows and one serving row.
+
+=== Both paths stored the same fixture rows
+
+[cols="3,1,1"]
+|===
+|Per transport (gRPC and HTTP identical) |Go path |`toudai-ingest`
+
+|Serving logs / spans / canonical rows |26 / 16 / 42 |26 / 16 / 42, counted as soon as the emitter's last export succeeded
+|Repeated-key records rejected |2 (`rejected_records`) |2 (`rejected_records`)
+|Spoofed `toudai.dataset` record attributes dropped |2 (not counted) |2 (`reserved_attributes_dropped`)
+|Unexpected differences |— |0
+|===
+
+The differences `compare.py` found are all documented ones (`results/parity/compare-*.json`):
+
+[cols="4,1"]
+|===
+|Expected difference |Rows
+
+|`schema_version` and payload `schema`: Go `toudai.canonical.event/1`, ingest `/2` |42 each
+|Payload `span.events`: kept by ingest, absent from Go (empty list) |14
+|Payload `span.events`: kept by ingest, absent from Go (with events) |2
+|`kind` in the serving row and payload: Go `log`, ingest `event` for application events |4 each
+|===
+
+=== Stored acknowledgement held in every failure case
+
+[cols="2,5"]
+|===
+|Case |Observed with `toudai-ingest`
+
+|Acknowledgement
+|5 of 5 records readable from both tables at their 200, answered in 1.01–1.08 s, because a single-record request waits for the 1 s flush
+
+|Valid and invalid records in one request
+|200 with `partialSuccess.rejectedLogRecords: 1` and a fixed message; valid record 1/1, invalid 0/0; `rejected_records` +1
+
+|Producer resend of an identical request
+|Two 200s; 2/2 rows under 2 distinct `event_id`s
+
+|ClickHouse stopped
+|503 (`UNAVAILABLE`) in 4.42 s after 8 failed attempts; while down, `/healthz` answered 200 and `/metrics` showed `insert_failures` 0 → 8; nothing stored; resend after restart 1/1
+
+|Canonical destination permanently broken
+|500 (`INTERNAL`) in 1.11 s, the flush wait with no retry; nothing in either table; resend after repair 1/1. The `clickhouse` crate's row check refused the insert because the table had no `payload` column.
+
+|Split write (serving table missing)
+|503 after 8 failed serving attempts with exactly 1 canonical row; after repair, the resend left 2/1, one canonical row orphaned
+
+|Ambiguous canonical insert, connection reset
+|200; 2/1 under one `event_id`
+
+|Ambiguous serving insert, connection reset
+|200; 1/2 under one `event_id`: only the serving insert was retried
+
+|Ambiguous insert, response withheld
+|503 at 5.00 s in both directions; the committed destination kept its row (canonical 1/0, serving 1/1); a serving-side resend gave 2/2 under 2 `event_id`s
+
+|Stalled destination, 20 MiB budget (default 256 MiB), 8 concurrent 1,200-record requests
+|4 × 429 with `Retry-After: 1` in about 16 ms; 4 × 503 at about 5.014 s; a lone request was admitted afterwards, so the budget came back; nothing stored
+
+|SIGKILL under load
+|23 answered 200, all 1/1: none acknowledged and lost. None of the 37 unanswered requests (cut off or refused at connect) had a row in either table.
+
+|SIGTERM under load
+|The 9 requests in flight were answered 200 and stored; the 11 sent after the signal were refused at connect (each in under 10 ms, so none was cut off); no error statuses
+
+|Credentials
+|The key text appears in no log, response, or table
+|===
+
+== Interpretation
+
+*Parity holds for the fixture.* Over both transports, `toudai-ingest` stores the
+rows the Go path stores, with the same rejections and drops, and differs only where
+`ingest/src/mapping.rs` says it does. That is the parity condition of
+link:../decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] D5 for the
+Experiment 023 fixture. Archiving the collector is the next plan step and waits on
+collector #5 merging.
+
+*A 200 now means stored.* No acknowledged request was lost to SIGKILL, and none
+was unreadable at its 200. What the producer sees is now honest in each case
+where the Go path returned 200 regardless: an unreachable ClickHouse or a missing
+table is a retryable 503, a write the client refuses outright (here the row check
+against a renamed column) a non-retryable 500, a full budget an immediate 429, and
+a rejected record appears in `partial_success`. The price is latency: at low
+traffic a request waits for the 1 s flush, about 1.0–1.1 s. Experiment 021 saw
+one Go row about 0.3 s after an immediate 200, an observation rather than a
+latency measurement. The 10k events/s run measures latency under load.
+
+*Duplicates remain, in smaller shapes.* Retrying only the failed destination
+removes Experiment 021's 2/2 shape after a lost serving response; a lost response
+now duplicates only the destination that lost it (2/1 or 1/2, one `event_id`).
+When a failure outlasts the budget, the producer's resend adds a second identity,
+so a split write leaves one orphan canonical row and a withheld serving response
+leaves 2/2 under two identities. These are the at-least-once costs Decision 0001
+D5 accepts; nothing deduplicates them.
+
+*Unpredicted: an INSERT whose response never comes keeps its connection.* After
+the relay withheld ClickHouse's answer to a fully sent INSERT, `toudai-ingest`
+answered 503 at the deadline but left the connection open: the relay saw both
+withheld connections close at 08:40:47.594, about 5.9 s after the canonical
+one's 503 and 28 ms before the stall listener's start time, which is when
+`toudai-ingest` had just been stopped (`results/phases/relay.log`,
+`stall-listener.log`). The stalled destination did not show this: there
+`toudai-ingest` closed every held connection at the 5 s deadline (two more
+connections opened and closed within 2 ms at that deadline; this run does not
+show what they carried). The cause is in
+the `clickhouse` crate (0.15.3): it awaits an INSERT's response in a spawned task
+and, when the insert is dropped, aborts only the request body, so once the body
+is sent the task keeps the connection until the server answers. The stall phase
+probably timed out earlier, in the crate's schema query, which is not spawned;
+this run does not show which request was pending there. A ClickHouse that
+accepts INSERTs and stops answering would hold one connection per timed-out
+insert.
+
+What the results do not cover:
+
+* One run on one orb, with the debug build. Node loss, ClickHouse replicas, and
+  the 10k events/s load are not exercised.
+* The failure phases use OTLP/HTTP with JSON and logs only. gRPC status mapping
+  and spans are covered by the crate's tests, not by this ClickHouse run.
+* No SDK retry: resends are `curl` repeats of the same bytes.
+* A kill between the canonical and serving commits of one flush was not targeted.
+  It would leave canonical rows without serving rows for unanswered requests; none
+  appeared in this run.
+* Durable overflow does not exist yet, so ClickHouse unavailability is pushed back
+  to producers rather than absorbed.
+* Three Experiment 021 phases were not replayed: the identical-legitimate-events
+  control (two byte-identical records in one request), `no-trust` (a request
+  reaching the writer without its trusted scope, which `toudai-ingest` cannot
+  produce because scope is a typed field set at admission), and the bounded
+  serving-row repair, a SQL statement that does not depend on the write path.
+
+== Follow-ups
+
+* Bound the connection a timed-out INSERT leaves behind, for example with the
+  crate's insert `end_timeout` (`Insert::with_timeouts`) set below the request
+  deadline, which aborts the spawned task when it fires; test it with the
+  relay's withhold mode.
+* The 10k events/s hour against `toudai-ingest`, choosing between group commit and
+  async inserts with wait (Decision 0003 D2).
+* Real SDK retry behavior against stored acknowledgement (acceptance item "Verify
+  what survives automatic retries of real OTLP SDK exporters").
+* Collector deprecation and archive, with the RFD plan wording, once collector #5
+  merges.

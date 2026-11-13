@@ -1,0 +1,4 @@
+# The repository ignores *.json and *.log; here they are evidence: the parity
+# comparison output and the service logs the credential check reads.
+!results/**/*.json
+!results/**/*.log

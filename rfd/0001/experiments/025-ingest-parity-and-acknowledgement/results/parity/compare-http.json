@@ -1,0 +1,21 @@
+{
+  "counts": {
+    "logs": {
+      "go": 26,
+      "ingest": 26
+    },
+    "spans": {
+      "go": 16,
+      "ingest": 16
+    }
+  },
+  "expected_differences": {
+    "payload kind: Go log, ingest event (application event)": 4,
+    "payload schema: Go /1, ingest /2": 42,
+    "payload span.events: kept by ingest only (empty list)": 14,
+    "payload span.events: kept by ingest only (non-empty)": 2,
+    "schema_version: Go /1, ingest /2": 42,
+    "serving kind: Go log, ingest event (application event)": 4
+  },
+  "unexpected": []
+}

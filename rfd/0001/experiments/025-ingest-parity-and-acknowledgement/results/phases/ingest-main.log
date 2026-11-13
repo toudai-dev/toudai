@@ -1,0 +1,22 @@
+toudai-ingest listening on grpc://127.0.0.1:14417 and http://127.0.0.1:14418
+toudai-ingest: logs write: canonical insert failed: network error: client error (SendRequest)
+toudai-ingest: logs write: canonical insert failed: schema mismatch: While processing struct CanonicalRow: database schema has no column named payload.
+#### All struct fields:
+- dataset
+- signal
+- event_id
+- timestamp
+- schema_version
+- payload
+- payload_sha256
+#### All schema columns:
+- dataset: LowCardinality(String)
+- signal: LowCardinality(String)
+- event_id: String
+- timestamp: DateTime64(9)
+- schema_version: LowCardinality(String)
+- payload_moved: String
+- payload_sha256: String
+toudai-ingest: logs write: serving insert failed: bad response: Code: 60. DB::Exception: Table exp025_fail.serving_logs does not exist. Maybe you meant exp025_fail.serving_spans?. (UNKNOWN_TABLE) (version 26.8.2.7)
+toudai-ingest: logs write: canonical insert failed: timeout expired
+toudai-ingest: logs write: serving insert failed: timeout expired

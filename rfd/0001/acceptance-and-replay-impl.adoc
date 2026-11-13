@@ -241,6 +241,12 @@ received rather than rows written, so the component counters are the write-side
 authority. Overflow backlog and catch-up progress signals remain
 unimplemented in this slice. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
++
+Experiment 025 repeated the outage check on `toudai-ingest`: with ClickHouse
+stopped, `/healthz` answered 200 and `/metrics` showed `insert_failures` at 8,
+up from 0, while ClickHouse was down. Overflow backlog and catch-up progress
+still have no source. See
+link:experiments/025-ingest-parity-and-acknowledgement.adoc[Experiment 025].
 
 == PoC-required: reconstruction and recovery decision
 
@@ -300,6 +306,15 @@ non-retryable), and the producer still sees 200 either way. A queue-disabled
 variant of that phase was not run. Node loss and multi-consumer queues remain
 open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
++
+Experiment 025 measured the boundary Decision 0003 D2 sets for `toudai-ingest`,
+which has no queue: a 200 is sent after the canonical and serving inserts commit.
+Five of five records were readable from both tables at their 200, answered in
+1.01–1.08 s because a lone record waits for the 1 s flush. A SIGKILL under load
+lost none of the 23 acknowledged requests, and the 37 unanswered ones stored
+nothing; a SIGTERM answered and stored the 9 requests in flight. Node loss and a
+kill between the two commits of one flush were not tested. See
+link:experiments/025-ingest-parity-and-acknowledgement.adoc[Experiment 025].
 
 * [ ] Exercise OTLP partial success, permanent/retryable errors, full queues, retry expiry, and simultaneous destination failure; verify rejection/drop counters and producer-visible behavior rather than assuming all-or-nothing acceptance.
 +
@@ -320,6 +335,17 @@ per-record rejection; a bounded queue with a stalled destination returned
 were not written when the process stopped. Simultaneous destination failure and
 OTLP partial success remain untested. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
++
+Experiment 025 ran these cases against `toudai-ingest`. A request mixing a valid
+and a repeated-key record returned 200 with `partialSuccess.rejectedLogRecords: 1`
+and stored only the valid record. A permanently broken canonical destination
+returned 500 in 1.11 s without retrying and stored nothing. A full admission
+budget refused four requests with 429 and `Retry-After: 1` in about 16 ms, while
+the four admitted to a stalled destination got 503 at the 5 s budget. Retry
+expiry is now that budget: with ClickHouse stopped, the request got 503 in 4.42 s
+after 8 attempts. Simultaneous ClickHouse and object-store failure needs overflow,
+which does not exist yet. See
+link:experiments/025-ingest-parity-and-acknowledgement.adoc[Experiment 025].
 
 * [ ] Inject an ambiguous successful ClickHouse insert, repeated object notifications, and Collector restart/rebatching; quantify duplicates and verify raw and derived results against fixture expectations before choosing deduplication mechanisms.
 +
@@ -348,6 +374,17 @@ deduplication key. Deduplication is unselected, so these duplicates are measured
 rather than suppressed; repeated object notifications and derived results remain
 open. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
++
+Experiment 025 repeated the ambiguous insert against `toudai-ingest`, which
+retries only the destination that failed. A reset after a committed canonical
+insert left 2/1 (canonical/serving) and after a committed serving insert 1/2,
+each under one `event_id`, so the 2/2 shape above is gone. A withheld response
+used the whole 5 s budget and returned 503 with the committed row kept (1/0 or
+1/1); the producer's resend added a second `event_id`, as did a resend after a
+split write, which left one orphan canonical row. A resend of identical bytes
+stored two rows under two `event_id`s. Repeated object notifications and derived
+results remain open. See
+link:experiments/025-ingest-parity-and-acknowledgement.adoc[Experiment 025].
 * [ ] Stop ClickHouse, verify overflow object contents, restore it, and drain catch-up; test failed inserts and missing/expired notifications, then verify recovery and object-cleanup safety.
 +
 Experiment 018 stopped ClickHouse, verified the spilled object's contents (trusted
