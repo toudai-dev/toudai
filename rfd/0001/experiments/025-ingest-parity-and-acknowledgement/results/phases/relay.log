@@ -1,0 +1,15 @@
+[relay] 08:39:37.356 listening on 127.0.0.1:18326, relaying to 127.0.0.1:18325
+[relay] 08:40:18.340 conn 3: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:18.393 conn 4: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:18.561 conn 5: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:18.841 conn 6: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:19.623 conn 7: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:20.463 conn 8: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:21.245 conn 9: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:21.751 conn 10: upstream unreachable ([Errno 111] Connection refused)
+[relay] 08:40:33.783 conn 11: reset the response to 'INSERT INTO `canonical_events`(`dataset`,`signal`,`event_id`,`timestamp`,`schema_version`,`payload`,`payload_sha256`)' (ClickHouse answered 200)
+[relay] 08:40:35.278 conn 12: reset the response to 'INSERT INTO `serving_logs`(`dataset`,`event_id`,`routing_epoch`,`timestamp`,`observed_ts`,`kind`,`service_name`,`severity_text`,`severity_number`,`body`,`trace_id`,`span_id`,`event_name`,`resource`,`scope`,`resource_types`,`scope_types`,`record_int`,`record_double`,`record_string`,`record_bool`,`record_other`,`payload_sha256`)' (ClickHouse answered 200)
+[relay] 08:40:36.713 conn 13: withhold the response to 'INSERT INTO `canonical_events`(`dataset`,`signal`,`event_id`,`timestamp`,`schema_version`,`payload`,`payload_sha256`)' (ClickHouse answered 200)
+[relay] 08:40:42.099 conn 14: withhold the response to 'INSERT INTO `serving_logs`(`dataset`,`event_id`,`routing_epoch`,`timestamp`,`observed_ts`,`kind`,`service_name`,`severity_text`,`severity_number`,`body`,`trace_id`,`span_id`,`event_name`,`resource`,`scope`,`resource_types`,`scope_types`,`record_int`,`record_double`,`record_string`,`record_bool`,`record_other`,`payload_sha256`)' (ClickHouse answered 200)
+[relay] 08:40:47.594 conn 13: the client closed the withheld connection
+[relay] 08:40:47.594 conn 14: the client closed the withheld connection

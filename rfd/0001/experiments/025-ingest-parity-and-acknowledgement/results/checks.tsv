@@ -1,0 +1,79 @@
+name	expected	observed	result
+parity.grpc.go_rows	26 16 42	26 16 42	pass
+parity.grpc.go_rejected_records	2	2	pass
+parity.grpc.ingest_rows_at_ack	26 16 42	26 16 42	pass
+parity.grpc.ingest_rejected_records	2	2	pass
+parity.grpc.ingest_dropped_reserved	2	2	pass
+parity.grpc.unexpected_differences	0	0	pass
+parity.grpc.compare_exit	0	0	pass
+parity.http.go_rows	26 16 42	26 16 42	pass
+parity.http.go_rejected_records	2	2	pass
+parity.http.ingest_rows_at_ack	26 16 42	26 16 42	pass
+parity.http.ingest_rejected_records	2	2	pass
+parity.http.ingest_dropped_reserved	2	2	pass
+parity.http.unexpected_differences	0	0	pass
+parity.http.compare_exit	0	0	pass
+ack.visible_at_200	5	5	pass
+mixed.status	200	200	pass
+mixed.partial_success_rejected	1	1	pass
+mixed.valid_rows	1/1	1/1	pass
+mixed.invalid_rows	0/0	0/0	pass
+mixed.rejected_counter_delta	1	1	pass
+resend.first	200	200	pass
+resend.second	200	200	pass
+resend.rows	2/2	2/2	pass
+resend.distinct_event_ids	2	2	pass
+outage.status_while_down	503	503	pass
+outage.answered_within_budget	under 6 s (5 s budget)	4.416014 s	pass
+outage.healthz_while_down	200	200	pass
+outage.failures_visible_while_down	insert_failures increased	0 -> 8	pass
+outage.rows_after_restart_before_resend	0/0	0/0	pass
+outage.resend_status	200	200	pass
+outage.rows_after_resend	1/1	1/1	pass
+permanent.status	500	500	pass
+permanent.answered_without_retrying	under 2 s	1.106021 s	pass
+permanent.serving_rows	0	0	pass
+permanent.canonical_rows	0	0	pass
+permanent.resend_after_repair	200	200	pass
+permanent.rows_after_repair	1/1	1/1	pass
+split.status	503	503	pass
+split.serving_retried	at least 2 failed serving attempts	8	pass
+split.canonical_rows	1	1	pass
+split.serving_rows_in_moved_table	0	0	pass
+split.resend_status	200	200	pass
+split.rows_after_resend	2/1	2/1	pass
+split.orphan_canonical_rows	1	1	pass
+ambiguous-canonical-reset.injected	0	0	pass
+ambiguous-canonical-reset.status	200	200	pass
+ambiguous-canonical-reset.rows	2/1	2/1	pass
+ambiguous-canonical-reset.distinct_event_ids	1	1	pass
+ambiguous-serving-reset.injected	0	0	pass
+ambiguous-serving-reset.status	200	200	pass
+ambiguous-serving-reset.rows	1/2	1/2	pass
+ambiguous-serving-reset.distinct_event_ids	1	1	pass
+ambiguous-canonical-withhold.injected	0	0	pass
+ambiguous-canonical-withhold.status	503	503	pass
+ambiguous-canonical-withhold.rows	1/0	1/0	pass
+ambiguous-canonical-withhold.distinct_event_ids	1	1	pass
+ambiguous-serving-withhold.injected	0	0	pass
+ambiguous-serving-withhold.status	503	503	pass
+ambiguous-serving-withhold.rows	1/1	1/1	pass
+ambiguous-serving-withhold.distinct_event_ids	1	1	pass
+ambiguous-serving-withhold.resend_status	200	200	pass
+ambiguous-serving-withhold.rows_after_resend	2/2	2/2	pass
+ambiguous-serving-withhold.ids_after_resend	2	2	pass
+stall.other_statuses	0	0	pass
+stall.some_refused_some_admitted	both 429s and 503s	4 x 429, 4 x 503	pass
+stall.refusals_immediate	1	1	pass
+stall.refusals_carry_retry_after	1	1	pass
+stall.admitted_answered_at_budget	1	1	pass
+stall.budget_returned	503	503	pass
+stall.rows	0/0	0/0	pass
+crash.acknowledged_but_lost	0	0	pass
+crash.kill_landed_mid_load	some answered, some not	23 answered 200, 37 not	pass
+term.acknowledged_but_lost	0	0	pass
+term.error_statuses	0	0	pass
+term.unanswered_cut_off	0	0	pass
+term.in_flight_answered	at least one 200	9 answered 200, 11 refused at connect	pass
+credentials.key_in_logs_and_responses	0	0	pass
+credentials.key_in_tables	0	0	pass

@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<!-- Disposable ClickHouse for Experiment 025; loopback only, state under the run root.
+     Ports differ from Experiments 018-024 so they can coexist. -->
+<clickhouse>
+    <logger>
+        <level>warning</level>
+        <console>false</console>
+        <log from_env="EXP025_CH_LOG"/>
+        <errorlog from_env="EXP025_CH_ERRORLOG"/>
+    </logger>
+    <http_port>18325</http_port>
+    <tcp_port>19225</tcp_port>
+    <listen_host>127.0.0.1</listen_host>
+    <max_server_memory_usage>1073741824</max_server_memory_usage>
+    <mlock_executable>false</mlock_executable>
+    <!-- The harness reads INSERT statements back from the query log. -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>500</flush_interval_milliseconds>
+    </query_log>
+    <path from_env="EXP025_CH_PATH"/>
+    <tmp_path from_env="EXP025_CH_TMP"/>
+    <user_files_path from_env="EXP025_CH_USER_FILES"/>
+    <format_schema_path from_env="EXP025_CH_FORMAT_SCHEMAS"/>
+    <users_config from_env="EXP025_CH_USERS"/>
+    <default_profile>default</default_profile>
+    <default_database>default</default_database>
+</clickhouse>

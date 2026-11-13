@@ -1,0 +1,12 @@
+# TYPE toudai_ingest_batches_total counter
+toudai_ingest_batches_total{signal="logs"} 9
+# TYPE toudai_ingest_insert_failures_total counter
+toudai_ingest_insert_failures_total{signal="logs",destination="canonical"} 8
+# TYPE toudai_ingest_records_total counter
+toudai_ingest_records_total{signal="logs",destination="canonical"} 8
+toudai_ingest_records_total{signal="logs",destination="serving"} 8
+# TYPE toudai_ingest_rejected_records_total counter
+toudai_ingest_rejected_records_total{signal="logs",reason="duplicate_or_invalid_record_attributes",namespace="record"} 1
+# TYPE toudai_ingest_requests_total counter
+toudai_ingest_requests_total{signal="logs",outcome="accepted"} 8
+toudai_ingest_requests_total{signal="logs",outcome="unavailable"} 1
