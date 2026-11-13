@@ -180,8 +180,8 @@ impl Pipeline {
     /// Refuse a request whose body, `bytes` as declared, the budget has no
     /// room for now, before any of it is read. Nothing is taken: the body is
     /// charged as it arrives ([`Pipeline::hold`]), so a client that declares
-    /// a large body and sends it slowly, or never, holds nothing it has not
-    /// sent.
+    /// a large body and sends it slowly, or never, holds at most about twice
+    /// what it has sent (its read buffer), not what it declared.
     pub fn has_room(&self, signal: Signal, bytes: usize) -> Result<(), Refusal> {
         if bytes > self.memory_budget {
             Err(self.refuse(signal, Refusal::OVER_BUDGET))

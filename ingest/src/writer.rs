@@ -249,6 +249,18 @@ impl Writer {
                 Err(error) => error,
             };
             self.counters.add("insert_failures", &labels, 1);
+            // The client caches each table's columns and sends them as the
+            // insert's header, so after a column changes type ClickHouse
+            // refuses every insert, and a schema check can fail against stale
+            // columns. Fetching them again costs one query per failure and
+            // spares a restart.
+            if matches!(
+                error,
+                clickhouse::error::Error::BadResponse(_)
+                    | clickhouse::error::Error::SchemaMismatch(_)
+            ) {
+                self.client.clear_cached_metadata().await;
+            }
             let wait = jitter(backoff);
             if !retryable(&error) || Instant::now() + wait + MIN_ATTEMPT > deadline {
                 return Err(error);
