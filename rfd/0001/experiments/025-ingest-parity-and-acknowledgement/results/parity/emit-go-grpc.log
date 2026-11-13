@@ -1,0 +1,1 @@
+export calls succeeded for 28 log records, 16 spans, 0 metrics over Grpc to http://127.0.0.1:14317 (request-level; partial-success rejections are not visible to the SDK exporter)
