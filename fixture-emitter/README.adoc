@@ -114,8 +114,8 @@ set. `event_name` is the event type, `body` is optional, and the event's fields
 are typed record attributes. A log record with an empty `event_name` is a log.
 The serving row's `kind` is `event` for the first and `log` for the second; the
 event stays queryable together with logs and spans. No proprietary producer field
-or batch identifier is involved. This is the encoding the fixture exercises; the
-RFD 0001 acceptance item that fixes the final encoding remains open.
+or batch identifier is involved. RFD 0001 adopts this encoding; see "Define
+application-event encoding" in `rfd/0001/acceptance-and-replay-impl.adoc`.
 
 == Expected contents
 

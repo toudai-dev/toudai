@@ -306,7 +306,9 @@ pub fn check_traces(request: &ExportTraceServiceRequest, scope: &Scope) {
         .flat_map(|r| &r.scope_spans)
         .filter(|s| unique_keys(s.scope.as_ref().map_or(&[], |s| &s.attributes)))
         .flat_map(|s| &s.spans)
-        .filter(|s| unique_keys(&s.attributes))
+        .filter(|s| {
+            unique_keys(&s.attributes) && s.events.iter().all(|e| unique_keys(&e.attributes))
+        })
         .count();
     let mapped = map_traces(request, &scope.dataset, &ids, 0);
     let stored: Vec<_> = mapped
@@ -457,6 +459,21 @@ fn check_stored(
             assert!(
                 !reserved,
                 "no producer reserved key in the payload's {namespace}"
+            );
+        }
+        if payload["kind"] != "span" {
+            continue;
+        }
+        let events = payload["span"]["events"]
+            .as_array()
+            .expect("a span payload has its events");
+        for event in events {
+            let keys = event["attributes"]
+                .as_object()
+                .expect("event attributes are objects");
+            assert!(
+                !keys.keys().any(|k| k.starts_with(RESERVED_PREFIX)),
+                "no producer reserved key in a span event"
             );
         }
     }

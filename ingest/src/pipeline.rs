@@ -79,8 +79,8 @@ pub struct Settings {
     /// Request memory held at once, from the body's arrival until the
     /// request is answered (Decision 0003 D3). A request is charged its body
     /// as received, then as decompressed, then that plus [`RECORD_BYTES`] per
-    /// record once decoded. A request that needs more than the whole budget
-    /// is refused as invalid, since no retry could pass.
+    /// record and span event once decoded. A request that needs more than the
+    /// whole budget is refused as invalid, since no retry could pass.
     pub memory_budget: usize,
     /// When concurrent requests' rows are written together.
     pub flush: FlushConfig,
@@ -103,7 +103,9 @@ impl Default for Settings {
 /// measured at 2.4 KiB per empty log record (over 1000× its 2 wire bytes),
 /// 4.9 KiB per attribute-heavy golden fixture log record (36× its wire size),
 /// and 3.1 KiB per fixture span. Charging only wire bytes would let a body of
-/// empty records hold a thousand times the budget.
+/// empty records hold a thousand times the budget. A span event is charged as
+/// a record too: mapping one into the canonical payload peaks at about 1.5 KiB
+/// per empty event (over 700× its 2 wire bytes).
 pub const RECORD_BYTES: usize = 4 * 1024;
 
 pub struct Pipeline {
@@ -255,7 +257,14 @@ impl Pipeline {
     ) -> Result<Accepted, Refusal> {
         let signal = Signal::Traces;
         let ids = admit_traces(request, scope).map_err(|r| self.reject(signal, r))?;
-        self.hold_records(signal, &mut held, ids.len())?;
+        let events: usize = request
+            .resource_spans
+            .iter()
+            .flat_map(|r| &r.scope_spans)
+            .flat_map(|s| &s.spans)
+            .map(|s| s.events.len())
+            .sum();
+        self.hold_records(signal, &mut held, ids.len().saturating_add(events))?;
         let mapped = map_traces(request, &scope.dataset, &ids, self.routing_epoch);
         self.store(signal, &self.spans, mapped, deadline, held)
             .await
@@ -281,8 +290,8 @@ impl Pipeline {
     }
 
     /// Top up `held`, which covers the decompressed body, by
-    /// [`RECORD_BYTES`] per record before mapping copies the records into
-    /// rows.
+    /// [`RECORD_BYTES`] per record (or span event) before mapping copies the
+    /// records into rows.
     fn hold_records(&self, signal: Signal, held: &mut Held, records: usize) -> Result<(), Refusal> {
         let bytes = held
             .bytes()
@@ -372,7 +381,7 @@ mod tests {
     use http::HeaderValue;
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
     use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-    use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+    use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span, span::Event};
 
     use super::testing::{self, ALL, PROD, pipeline};
     use super::*;
@@ -590,26 +599,40 @@ mod tests {
         p.hold(Signal::Logs, &mut other, RECORD_BYTES).unwrap();
         assert_eq!(export(3, Held::default()).await, Err(Refusal::OVERLOADED));
         drop(other);
-        // Spans are charged the same way.
-        let spans = |n| ExportTraceServiceRequest {
+        // Spans are charged the same way, and so is each span event, which
+        // the canonical payload keeps.
+        let spans = |n, events| ExportTraceServiceRequest {
             resource_spans: vec![ResourceSpans {
                 scope_spans: vec![ScopeSpans {
-                    spans: vec![Span::default(); n],
+                    spans: vec![
+                        Span {
+                            events: vec![Event::default(); events],
+                            ..Default::default()
+                        };
+                        n
+                    ],
                     ..Default::default()
                 }],
                 ..Default::default()
             }],
         };
-        let export_spans = |n| {
-            let request = spans(n);
+        let export_spans = |n, events| {
+            let request = spans(n, events);
             let (p, scope) = (&p, &scope);
             async move {
                 p.export_traces(scope, &request, Held::default(), p.deadline(None))
                     .await
             }
         };
-        assert_eq!(export_spans(3).await, Err(Refusal::UNAVAILABLE));
-        assert_eq!(export_spans(4).await, Err(Refusal::OVER_BUDGET));
+        let cases = [
+            (3, 0, Refusal::UNAVAILABLE),
+            (4, 0, Refusal::OVER_BUDGET),
+            (1, 2, Refusal::UNAVAILABLE),
+            (1, 3, Refusal::OVER_BUDGET),
+        ];
+        for (n, events, want) in cases {
+            assert_eq!(export_spans(n, events).await, Err(want), "{n} {events}");
+        }
     }
 
     /// A producer that hangs up leaves its rows queued or being written, so
