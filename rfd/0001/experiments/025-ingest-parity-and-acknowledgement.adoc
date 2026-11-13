@@ -1,0 +1,93 @@
+= Experiment 025: toudai-ingest parity and stored acknowledgement
+
+link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
+
+- *Status:* Running
+- *Source mutation:* None; disposable local ClickHouse, synthetic keys and fixtures, loopback only
+- *Product revisions:* toudai `toudai-ingest` at the revision recorded in `results/revisions.txt`; https://github.com/toudai-dev/collector/pull/5[collector #5] at `f780574` for the Go path
+- *Harness:* `025-ingest-parity-and-acknowledgement/` (`run.sh`, `relay.py`, `compare.py`, ClickHouse config); evidence in `025-ingest-parity-and-acknowledgement/results/`
+
+== Question
+
+link:../decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] replaces the
+Go `toudai-collector` with `toudai-ingest` and archives the collector once this
+experiment shows parity (D5). It also changes what OTLP success means: a request
+succeeds only after the canonical and serving inserts holding its accepted records
+have committed (D2). This experiment asks:
+
+. Sent the same Experiment 023 fixture, do the Go path (collector #5) and
+  `toudai-ingest` store the same rows, apart from the identity each assigns and the
+  differences `toudai-ingest` makes on purpose (`ingest/src/mapping.rs` lists them)?
+. Under stored acknowledgement, what do producers see, and what is stored, in the
+  failure cases Experiment 021 injected into the Go path: ClickHouse stopped, a
+  permanently broken destination, a split write, ambiguous inserts from both
+  directions, a stalled destination with a full admission budget, a killed process,
+  a producer resend, and a request mixing valid and invalid records?
+
+== Hypothesis
+
+Written before the first run.
+
+*Parity.* For each transport, every fixture record stored by one path is stored by
+the other, joined on dataset, signal, and `fixture.key`. Serving columns are equal
+except `event_id` and `payload_sha256`, and `kind` on the application-event rows
+(Go `log`, ingest `event`). Canonical payloads are equal once the schema name and
+`identity.event_id` are set aside and the two documented payload differences are
+applied (`span.events`, `kind`). Both paths reject the same two repeated-key records
+and drop the same two spoofed `toudai.dataset` record attributes.
+
+*Stored acknowledgement*, against `toudai-ingest` with its defaults (5 s request
+budget, 1 s flush):
+
+[cols="2,4,4"]
+|===
+|Case |Expected with `toudai-ingest` |Experiment 021 (Go path)
+
+|Acknowledgement
+|The record is readable from both tables as soon as its 200 arrives
+|200 at queue admission; row visible about 0.3 s later
+
+|Valid and invalid records in one request
+|200 with `partial_success` naming one rejected record; the valid record in both tables, the invalid one in neither
+|200 with no partial success; the invalid record dropped silently
+
+|ClickHouse stopped
+|503 within the request budget; nothing stored; `/metrics` answers during the outage; a resend after restart is stored once
+|200; the queued request landed after restart
+
+|Canonical destination permanently broken
+|A non-retryable error well inside the budget; nothing in either table
+|200; dropped after five attempts
+
+|Serving destination missing (split write)
+|503; exactly one canonical row and no serving row, however many serving attempts fit in the budget
+|Seven canonical rows and no serving row with retries on
+
+|Ambiguous canonical insert (committed, connection cut before the response)
+|200; two canonical rows with one `event_id`, one serving row
+|Two canonical rows, one serving row
+
+|Ambiguous serving insert (committed, connection cut before the response)
+|200; one canonical row, two serving rows with one `event_id`
+|Two canonical rows, two serving rows
+
+|Ambiguous insert, response withheld until the client gives up
+|503: the withheld attempt uses the whole budget, so no retry fits; the committed destination keeps its row
+|Not run with a withheld response that outlasts the producer
+
+|Stalled destination, small admission budget
+|Requests beyond the budget get 429 at once; admitted requests get 503 at the budget; nothing is stored
+|`200, 200, 503, 503, 503, 503`; admitted requests lost on stop
+
+|Process killed under load
+|Every request answered 200 has its rows in both tables (none acknowledged and lost); unanswered requests may or may not be stored
+|In-memory queue lost admitted requests; a file-backed queue recovered them
+
+|Graceful stop under load
+|Requests in flight are answered and stored before exit
+|Not measured on the hybrid write
+
+|Producer resend of an identical request
+|Two stored records with two distinct `event_id`s
+|Two records with one content-derived identity
+|===
