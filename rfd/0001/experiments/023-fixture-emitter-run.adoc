@@ -10,6 +10,10 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Evidence:* link:023-fixture-emitter-run/expected.jsonl[`023-fixture-emitter-run/expected.jsonl`]
 - *Result:* 45 expected events; expected rows computed from the OTLP a loopback receiver decoded equal the model's expected rows byte for byte over gRPC and over HTTP on two runs each, a refused export fails the run, and two runs with one seed produce byte-identical expected files
 
+NOTE: Decision 0002 later turned the two workspaces into two datasets and
+regenerated the committed expected file; the record below is unchanged. See
+<<_note_decision_0002>>.
+
 == Question
 
 Can one small producer, using only the standard OpenTelemetry Rust SDK and OTLP
@@ -218,3 +222,44 @@ against today.
 * Not exercised: a Collector or the owned exporter in the path, ClickHouse
   loading the expected serving values, and query-time unsupported-operation
   errors. They belong to the operator-workflow items that consume this fixture.
+
+[[_note_decision_0002]]
+== Note: Decision 0002 (added 2026-11-10)
+
+This record describes the run as it happened. After
+link:../decisions/0002-single-tenant-core.adoc[Decision 0002] removed tenancy
+from the core, the emitter changed and the committed evidence file was
+regenerated, so the file no longer matches the description above:
+
+* The two workspaces sharing dataset `checkout` are now two datasets of one
+  deployment, `fixture` (formerly workspace `1111...`) and `fixture-b`
+  (formerly `2222...`). The emitter no longer sends `toudai.workspace_id`, and
+  expected rows have no `tenant_id` in the identity, the serving values, or
+  the payload identity block; rows join on dataset, signal, and fixture key.
+* `log.spoofed-scope` now carries one record attribute, `toudai.dataset`
+  naming the other dataset, so its `dropped_keys` is `toudai.dataset` alone.
+  `log.collision` is identical in both datasets apart from the dataset; its
+  body reads `identical across datasets`.
+* Each send names its dataset in the `X-Toudai-Dataset` header as well as the
+  resource `toudai.dataset`, and the loopback receiver refuses a request whose
+  header is missing, repeated, or different from the resource.
+* `emit --signals logs,traces` leaves out the metric sample, which a Toudai
+  gateway refuses because it serves logs and traces only. The expected file
+  still lists the metric.
+* `expected.jsonl` is still 45 lines with 43 payloads, and every identifier,
+  timestamp, and value other than the collision body is unchanged; it is now 105219 bytes with SHA-256
+  `661536e2435410ea394cea5dfb58dd980d6ada3c027ac8227c47fbd581f3a020`. The
+  file this run recorded (119798 bytes, `8a219328...`) is the one committed in
+  `26773f9` (#24).
+
+`fixture-emitter/check-reproducible.sh` passes against the regenerated file
+with the same output as above, and the crate has 25 unit tests. A one-off run
+on 2026-11-10, not otherwise recorded, used the collector #5 gateway
+(`f780574`, `toudaiauth` and `toudaigateway` from `config/gateway.example.yaml`
+writing to a file exporter instead of ClickHouse, one key permitting both
+datasets). Without `--signals` it refused the metric (gRPC `Unimplemented`,
+HTTP 404). With `--signals logs,traces` it accepted all 28 log records and 16
+spans over gRPC and over HTTP. It stamped `toudai.dataset` `fixture` or `fixture-b` and a
+`toudai.event_id` on every record, and nothing carried `workspace_id`. A key
+limited to `fixture` was refused for `fixture-b` (403), and the emitter from
+before this change was refused outright. That run is not repeated in CI.

@@ -1,6 +1,7 @@
 //! A loopback OTLP receiver over gRPC and HTTP/protobuf that keeps every
 //! request it accepts, so a run can be checked against what actually went on
-//! the wire. It is a test sink, not a Collector: it acknowledges everything.
+//! the wire. It is a test sink, not a Collector: it acknowledges everything
+//! except a request whose dataset a Toudai gateway would refuse.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -26,11 +27,16 @@ use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::{
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
+use opentelemetry_proto::tonic::common::v1::any_value;
+use opentelemetry_proto::tonic::resource::v1::Resource;
 use prost::Message;
 use tokio::sync::oneshot;
 use tonic::transport::Server;
 use tonic::transport::server::TcpIncoming;
 use tonic::{Request, Response, Status};
+
+use crate::emit::DATASET_HEADER;
+use crate::model::DATASET_ATTR;
 
 #[derive(Default)]
 pub struct Received {
@@ -57,6 +63,42 @@ fn refuse(signal: &str) -> Status {
     Status::invalid_argument(format!("{signal} rejected by the test receiver"))
 }
 
+/// The dataset rule of a Toudai gateway (Decision 0002 D3), for a request that
+/// names its dataset in the header: exactly one header value, and every
+/// resource `toudai.dataset` present is a string equal to it.
+fn dataset_agrees<'a>(
+    headers: &[String],
+    resources: impl IntoIterator<Item = Option<&'a Resource>>,
+) -> bool {
+    let [dataset] = headers else {
+        return false;
+    };
+    resources
+        .into_iter()
+        .flatten()
+        .flat_map(|r| &r.attributes)
+        .filter(|kv| kv.key == DATASET_ATTR)
+        .all(|kv| {
+            matches!(
+                kv.value.as_ref().and_then(|v| v.value.as_ref()),
+                Some(any_value::Value::StringValue(s)) if s == dataset
+            )
+        })
+}
+
+fn grpc_datasets<T>(request: &Request<T>) -> Vec<String> {
+    request
+        .metadata()
+        .get_all(DATASET_HEADER)
+        .iter()
+        .map(|v| v.to_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+fn refuse_dataset() -> Status {
+    Status::invalid_argument("dataset header missing or not equal to resource toudai.dataset")
+}
+
 #[tonic::async_trait]
 impl LogsService for Sink {
     async fn export(
@@ -66,7 +108,13 @@ impl LogsService for Sink {
         if self.1.logs {
             return Err(refuse("logs"));
         }
-        self.0.lock().unwrap().logs.push(request.into_inner());
+        let datasets = grpc_datasets(&request);
+        let request = request.into_inner();
+        let resources = request.resource_logs.iter().map(|r| r.resource.as_ref());
+        if !dataset_agrees(&datasets, resources) {
+            return Err(refuse_dataset());
+        }
+        self.0.lock().unwrap().logs.push(request);
         Ok(Response::new(ExportLogsServiceResponse::default()))
     }
 }
@@ -80,7 +128,13 @@ impl TraceService for Sink {
         if self.1.traces {
             return Err(refuse("traces"));
         }
-        self.0.lock().unwrap().traces.push(request.into_inner());
+        let datasets = grpc_datasets(&request);
+        let request = request.into_inner();
+        let resources = request.resource_spans.iter().map(|r| r.resource.as_ref());
+        if !dataset_agrees(&datasets, resources) {
+            return Err(refuse_dataset());
+        }
+        self.0.lock().unwrap().traces.push(request);
         Ok(Response::new(ExportTraceServiceResponse::default()))
     }
 }
@@ -94,7 +148,13 @@ impl MetricsService for Sink {
         if self.1.metrics {
             return Err(refuse("metrics"));
         }
-        self.0.lock().unwrap().metrics.push(request.into_inner());
+        let datasets = grpc_datasets(&request);
+        let request = request.into_inner();
+        let resources = request.resource_metrics.iter().map(|r| r.resource.as_ref());
+        if !dataset_agrees(&datasets, resources) {
+            return Err(refuse_dataset());
+        }
+        self.0.lock().unwrap().metrics.push(request);
         Ok(Response::new(ExportMetricsServiceResponse::default()))
     }
 }
@@ -200,7 +260,7 @@ fn serve_http(stream: TcpStream, store: &Shared, rejects: Rejects) -> Result<(),
             parts.next().unwrap_or_default().to_string(),
             parts.next().unwrap_or_default().to_string(),
         );
-        let (mut length, mut chunked) = (0usize, false);
+        let (mut length, mut chunked, mut datasets) = (0usize, false, Vec::new());
         loop {
             let mut line = String::new();
             reader.read_line(&mut line).map_err(|e| e.to_string())?;
@@ -213,6 +273,7 @@ fn serve_http(stream: TcpStream, store: &Shared, rejects: Rejects) -> Result<(),
                 match name.as_str() {
                     "content-length" => length = value.parse().map_err(|_| "bad length")?,
                     "transfer-encoding" => chunked = value.eq_ignore_ascii_case("chunked"),
+                    DATASET_HEADER => datasets.push(value.to_string()),
                     _ => {}
                 }
             }
@@ -225,7 +286,7 @@ fn serve_http(stream: TcpStream, store: &Shared, rejects: Rejects) -> Result<(),
             body
         };
         let status = if method == "POST" {
-            ingest(&path, &body, store, rejects)
+            ingest(&path, &body, &datasets, store, rejects)
         } else {
             405
         };
@@ -258,7 +319,7 @@ fn read_chunked(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>, String> {
     }
 }
 
-fn ingest(path: &str, body: &[u8], store: &Shared, rejects: Rejects) -> u16 {
+fn ingest(path: &str, body: &[u8], datasets: &[String], store: &Shared, rejects: Rejects) -> u16 {
     let refused = match path {
         "/v1/logs" => rejects.logs,
         "/v1/traces" => rejects.traces,
@@ -271,18 +332,125 @@ fn ingest(path: &str, body: &[u8], store: &Shared, rejects: Rejects) -> u16 {
     let mut received = store.lock().unwrap();
     match path {
         "/v1/logs" => match ExportLogsServiceRequest::decode(body) {
-            Ok(r) => received.logs.push(r),
-            Err(_) => return 400,
+            Ok(r)
+                if dataset_agrees(
+                    datasets,
+                    r.resource_logs.iter().map(|r| r.resource.as_ref()),
+                ) =>
+            {
+                received.logs.push(r)
+            }
+            _ => return 400,
         },
         "/v1/traces" => match ExportTraceServiceRequest::decode(body) {
-            Ok(r) => received.traces.push(r),
-            Err(_) => return 400,
+            Ok(r)
+                if dataset_agrees(
+                    datasets,
+                    r.resource_spans.iter().map(|r| r.resource.as_ref()),
+                ) =>
+            {
+                received.traces.push(r)
+            }
+            _ => return 400,
         },
         "/v1/metrics" => match ExportMetricsServiceRequest::decode(body) {
-            Ok(r) => received.metrics.push(r),
-            Err(_) => return 400,
+            Ok(r)
+                if dataset_agrees(
+                    datasets,
+                    r.resource_metrics.iter().map(|r| r.resource.as_ref()),
+                ) =>
+            {
+                received.metrics.push(r)
+            }
+            _ => return 400,
         },
         _ => return 404,
     }
     200
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
+
+    fn resource(datasets: &[any_value::Value]) -> Resource {
+        let mut attributes = vec![KeyValue {
+            key: "service.name".into(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue("svc".into())),
+            }),
+            ..KeyValue::default()
+        }];
+        attributes.extend(datasets.iter().map(|v| KeyValue {
+            key: DATASET_ATTR.into(),
+            value: Some(AnyValue {
+                value: Some(v.clone()),
+            }),
+            ..KeyValue::default()
+        }));
+        Resource {
+            attributes,
+            ..Resource::default()
+        }
+    }
+
+    /// (name, dataset header values, each resource's toudai.dataset values, accepted)
+    type Case<'a> = (&'a str, &'a [&'a str], Vec<Vec<any_value::Value>>, bool);
+
+    #[test]
+    fn dataset_rule_table() {
+        let s = |v: &str| any_value::Value::StringValue(v.into());
+        let cases: &[Case] = &[
+            (
+                "header equals resource",
+                &["fixture"],
+                vec![vec![s("fixture")]],
+                true,
+            ),
+            (
+                "resource without a dataset",
+                &["fixture"],
+                vec![vec![]],
+                true,
+            ),
+            ("no header", &[], vec![vec![s("fixture")]], false),
+            (
+                "two headers",
+                &["fixture", "fixture"],
+                vec![vec![s("fixture")]],
+                false,
+            ),
+            (
+                "header differs",
+                &["fixture-b"],
+                vec![vec![s("fixture")]],
+                false,
+            ),
+            (
+                "one resource of two differs",
+                &["fixture"],
+                vec![vec![s("fixture")], vec![s("fixture-b")]],
+                false,
+            ),
+            (
+                "conflicting copies on one resource",
+                &["fixture"],
+                vec![vec![s("fixture"), s("fixture-b")]],
+                false,
+            ),
+            (
+                "non-string dataset",
+                &["fixture"],
+                vec![vec![any_value::Value::IntValue(1)]],
+                false,
+            ),
+        ];
+        for (name, headers, resources, want) in cases {
+            let headers: Vec<String> = headers.iter().map(|h| h.to_string()).collect();
+            let resources: Vec<Resource> = resources.iter().map(|d| resource(d)).collect();
+            let got = dataset_agrees(&headers, resources.iter().map(Some));
+            assert_eq!(got, *want, "{name}");
+        }
+    }
 }

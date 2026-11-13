@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! fixture-emitter expected  [--seed N] [--out FILE]
-//! fixture-emitter emit      [--seed N] [--protocol grpc|http] [--endpoint URL] [--expected-out FILE]
+//! fixture-emitter emit      [--seed N] [--protocol grpc|http] [--endpoint URL] [--signals LIST] [--expected-out FILE]
 //! fixture-emitter selfcheck [--seed N] [--protocol grpc|http] [--expected-out FILE] [--observed-out FILE]
 //! ```
 
@@ -43,7 +43,8 @@ fn parse_args() -> Result<Args, String> {
 
 fn usage() -> String {
     "usage: fixture-emitter <expected|emit|selfcheck> [--seed N] [--protocol grpc|http] \
-     [--endpoint URL] [--out FILE] [--expected-out FILE] [--observed-out FILE]"
+     [--endpoint URL] [--signals logs,traces,metrics] [--out FILE] [--expected-out FILE] \
+     [--observed-out FILE]"
         .to_string()
 }
 
@@ -57,6 +58,33 @@ impl Args {
 
     fn transport(&self) -> Result<Transport, String> {
         Transport::parse(self.flags.get("protocol").map_or("grpc", String::as_str))
+    }
+
+    /// The fixture limited to `--signals` (default: every signal). A Toudai
+    /// gateway serves logs and traces only, and refuses the metric sample.
+    fn select_signals(&self, mut fixture: model::Fixture) -> Result<model::Fixture, String> {
+        let Some(list) = self.flags.get("signals") else {
+            return Ok(fixture);
+        };
+        let names: Vec<&str> = list.split(',').map(str::trim).collect();
+        if let Some(bad) = names
+            .iter()
+            .find(|n| !["logs", "traces", "metrics"].contains(n))
+        {
+            return Err(format!(
+                "unknown signal {bad:?} in --signals; use logs, traces, metrics"
+            ));
+        }
+        if !names.contains(&"logs") {
+            fixture.logs.clear();
+        }
+        if !names.contains(&"traces") {
+            fixture.spans.clear();
+        }
+        if !names.contains(&"metrics") {
+            fixture.metrics.clear();
+        }
+        Ok(fixture)
     }
 
     fn check_flags(&self, allowed: &[&str]) -> Result<(), String> {
@@ -98,16 +126,19 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         "emit" => {
-            args.check_flags(&["seed", "protocol", "endpoint", "expected-out"])?;
+            args.check_flags(&["seed", "protocol", "endpoint", "signals", "expected-out"])?;
             let transport = args.transport()?;
             let endpoint = args
                 .flags
                 .get("endpoint")
                 .map_or(transport.default_endpoint(), String::as_str);
             let (fixture, rows) = expected_text(seed)?;
+            // The expected file always covers the whole fixture, so it is the
+            // same whichever signals a run sends.
             if let Some(path) = args.flags.get("expected-out") {
                 write(path, &expected::to_jsonl(&rows))?;
             }
+            let fixture = args.select_signals(fixture)?;
             let rt = check::runtime()?;
             let _enter = (transport == Transport::Grpc).then(|| rt.enter());
             emit::emit(&fixture, transport, endpoint)?;
@@ -154,6 +185,44 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// (--signals value, which of logs, spans, metrics remain; None is an error)
+    type Case<'a> = (Option<&'a str>, Option<(bool, bool, bool)>);
+
+    #[test]
+    fn select_signals_table() {
+        let cases: &[Case] = &[
+            (None, Some((true, true, true))),
+            (Some("logs,traces"), Some((true, true, false))),
+            (Some(" traces , metrics"), Some((false, true, true))),
+            (Some("metrics"), Some((false, false, true))),
+            (Some("logs,spans"), None),
+            (Some(""), None),
+        ];
+        for (value, want) in cases {
+            let mut flags = BTreeMap::new();
+            if let Some(v) = value {
+                flags.insert("signals".to_string(), v.to_string());
+            }
+            let args = Args {
+                command: "emit".into(),
+                flags,
+            };
+            let got = args.select_signals(model::build(1)).map(|f| {
+                (
+                    !f.logs.is_empty(),
+                    !f.spans.is_empty(),
+                    !f.metrics.is_empty(),
+                )
+            });
+            assert_eq!(got.ok(), *want, "{value:?}");
         }
     }
 }

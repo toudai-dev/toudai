@@ -1,6 +1,6 @@
 = Fixture emitter
 
-A deterministic OTLP producer for the RFD 0001 fixture. It sends two tenants'
+A deterministic OTLP producer for the RFD 0001 fixture. It sends two datasets'
 logs, spans (with span events), application events, and one native-metric
 sample through the standard OpenTelemetry Rust SDK and `opentelemetry-otlp`
 (gRPC or HTTP/protobuf), and writes an independent file of expected contents
@@ -30,7 +30,16 @@ fixture-emitter/check-reproducible.sh    # reproducibility and independence chec
 ----
 
 `--endpoint` is the base URL: the HTTP transport appends `/v1/logs`, `/v1/traces`,
-and `/v1/metrics`. `--seed` fixes every trace and span identifier and the few
+and `/v1/metrics`. Each dataset is sent with its own providers, and every request
+names its dataset in the `X-Toudai-Dataset` header (gRPC metadata
+`x-toudai-dataset`) as well as in the resource `toudai.dataset`, so a Toudai
+gateway resolves the same dataset the resource carries (Decision 0002 D3). A
+destination that needs a write key gets it from the standard
+`OTEL_EXPORTER_OTLP_HEADERS`, for example `OTEL_EXPORTER_OTLP_HEADERS=x-toudai-key=<key>`;
+the key must permit both datasets. A Toudai gateway serves logs and traces only and
+refuses the metric sample, so send to one with `--signals logs,traces`; the
+expected file still lists the metric, whose row has no serving values. `selfcheck`'s receiver refuses a request whose
+header is missing, repeated, or different from a resource `toudai.dataset`. `--seed` fixes every trace and span identifier and the few
 generated values. Log, application-event, span, and span-event timestamps are
 fixed offsets from 2026-09-01T07:00:00Z, so those never read a clock. The metric
 data point is the exception: the SDK stamps its start and end time at collection.
@@ -50,12 +59,12 @@ confirm what arrived.
 
 == Fixture
 
-Two tenants (`toudai.workspace_id` `1111...` and `2222...`) both use the dataset
-`checkout` (`toudai.dataset`), so only the workspace tells their data apart. Each
-has a resource with `service.name`, `service.version`, `deployment.environment`,
-an integer `fixture.replica`, and the two trusted scope keys. Every record carries
-a producer attribute `fixture.key` that is unique within a tenant and joins an
-event to its expected row. Per tenant:
+Two datasets of one deployment, `fixture` and `fixture-b` (`toudai.dataset`). The
+core has no tenant or workspace (Decision 0002), so the emitter sends no
+`toudai.workspace_id`. Each dataset has a resource with `service.name`,
+`service.version`, `deployment.environment`, an integer `fixture.replica`, and
+`toudai.dataset`. Every record carries a producer attribute `fixture.key` that is
+unique within a dataset and joins an event to its expected row. Per dataset:
 
 [options="header",cols="2,1,4"]
 |===
@@ -67,7 +76,7 @@ event to its expected row. Per tenant:
 
 |logs
 |boundary
-|`log.collision` (byte-identical content in both tenants), `invalid.bigint` (integers above 2^53, `Int64` extrema, a double of equal magnitude), `invalid.empty-vs-missing` (empty string, bytes, array, map; zero; `false`; keys that are never sent)
+|`log.collision` (byte-identical content in both datasets), `invalid.bigint` (integers above 2^53, `Int64` extrema, a double of equal magnitude), `invalid.empty-vs-missing` (empty string, bytes, array, map; zero; `false`; keys that are never sent)
 
 |logs
 |unsupported
@@ -75,7 +84,7 @@ event to its expected row. Per tenant:
 
 |logs
 |policy
-|`log.spoofed-scope`: record attributes naming the other tenant and another dataset under the reserved `toudai.` prefix
+|`log.spoofed-scope`: a record attribute `toudai.dataset` naming the other dataset
 
 |logs
 |rejected
@@ -93,7 +102,7 @@ event to its expected row. Per tenant:
 |unsupported
 |`span.invalid-values`: non-finite and extreme numbers, homogeneous arrays, empty string, empty array
 
-|metrics (tenant A only)
+|metrics (`fixture` only)
 |native-metric
 |counter `checkout.requests` = 7
 |===
@@ -112,7 +121,7 @@ RFD 0001 acceptance item that fixes the final encoding remains open.
 
 `expected` writes one JSON line per event, sorted by key, with:
 
-* the identity: `tenant_id`, `dataset`, `signal`, `fixture_key`;
+* the identity: `dataset`, `signal`, `fixture_key`;
 * `disposition` (`serve`, `reject`, `native-metric`), `reject_reason`, and the
   annotations `class`, `dropped_keys`, `unsupported_keys`, `absent_keys`,
   `span_event_names`;
