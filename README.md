@@ -18,7 +18,7 @@ Create the schema first with `clickhouse/apply-schema.sh` (see
 `clickhouse/README.adoc`; the database defaults to `toudai`), then:
 
 ```sh
-printf 'dev-read-key\n' > read-keys.txt
+printf 'dev-read-key-0123456789\n' > read-keys.txt
 TOUDAI_READ_KEYS_FILE=read-keys.txt \
 TOUDAI_CLICKHOUSE_URL=http://127.0.0.1:8123 \
   cargo run
@@ -36,8 +36,8 @@ serves one customer
 admits the request, optionally restricted to a list of datasets: a dataset
 outside the list is refused with 403. Every statement is scoped to the dataset
 the request names. The static key file (`<key> [<dataset>...]` per line, no
-datasets meaning all of them, read at startup) is a placeholder for the key
-store.
+datasets meaning all of them, read at startup; keys of at least 16 characters)
+is a placeholder for the key store.
 
 Configuration is environment-only: `TOUDAI_READ_KEYS_FILE` (required),
 `TOUDAI_LISTEN` (`127.0.0.1:8080`), `TOUDAI_CLICKHOUSE_URL`
