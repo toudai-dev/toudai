@@ -9,7 +9,9 @@
 pub mod admit;
 pub mod auth;
 pub mod mapping;
+pub mod metrics;
 mod rejection;
 pub mod value;
+pub mod writer;
 
 pub use rejection::{Rejection, StatusKind};

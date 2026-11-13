@@ -1130,10 +1130,12 @@ dependencies = [
  "http",
  "opentelemetry-proto",
  "prost",
+ "reqwest",
  "ryu",
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
  "toudai",
  "uuid",
 ]
