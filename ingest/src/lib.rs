@@ -8,6 +8,7 @@
 
 pub mod admit;
 pub mod auth;
+pub mod batcher;
 pub mod grpc;
 pub mod http;
 pub mod mapping;

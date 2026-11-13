@@ -17,20 +17,70 @@
 //!   name none (default none, so such a request is a 400). It must be a valid
 //!   dataset name and is still checked against the key's list.
 //! * `TOUDAI_ROUTING_EPOCH`: stamped on every row (default 1).
+//! * `TOUDAI_INGEST_MEMORY_BUDGET`: request memory held at once, in bytes or
+//!   with a `KiB`, `MiB`, or `GiB` suffix (default `256MiB`). Each request is
+//!   charged its bytes plus 4 KiB per record. A request that does not fit
+//!   beside the others is answered 429 (HTTP) or `UNAVAILABLE` (gRPC) for the
+//!   producer to retry; one that needs more than the whole budget is a 400 or
+//!   `INVALID_ARGUMENT`, so the default admits at most about 60,000 records
+//!   in one request (SDKs send 512, Collector exporters 8192). It must be at
+//!   least the 20 MiB body limit, or the largest body could never be
+//!   admitted, and below 4 GiB, the most one request's share can count.
+//! * `TOUDAI_INGEST_FLUSH_ROWS` and `TOUDAI_INGEST_FLUSH_INTERVAL`: concurrent
+//!   requests' rows are written together once a batch holds this many rows
+//!   or this long after it opens (default 1000 and `1s`; the interval in `ms`
+//!   or `s`). Each request is answered when its batch commits.
 
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::watch;
 use toudai::auth::Keys;
+use toudai_ingest::batcher::FlushConfig;
 use toudai_ingest::pipeline::{Pipeline, Settings};
 use toudai_ingest::writer::{Writer, WriterConfig};
 use toudai_ingest::{grpc, http};
 
 fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// `TOUDAI_INGEST_MEMORY_BUDGET`: a byte count from the body limit to below
+/// 4 GiB.
+fn memory_budget(text: &str) -> Option<usize> {
+    parse_bytes(text).filter(|&bytes| bytes >= http::MAX_BODY_BYTES && u32::try_from(bytes).is_ok())
+}
+
+/// A duration in milliseconds or seconds: `250ms` or `1s`.
+fn parse_duration(text: &str) -> Option<Duration> {
+    let text = text.trim();
+    if let Some(ms) = text.strip_suffix("ms") {
+        return ms.parse().ok().map(Duration::from_millis);
+    }
+    text.strip_suffix('s')?
+        .parse()
+        .ok()
+        .map(Duration::from_secs)
+}
+
+/// A byte count, optionally with a binary unit: `268435456` or `256MiB`.
+fn parse_bytes(text: &str) -> Option<usize> {
+    let text = text.trim();
+    let (digits, unit) = match text.find(|c: char| !c.is_ascii_digit()) {
+        Some(i) => text.split_at(i),
+        None => (text, ""),
+    };
+    let scale: usize = match unit.trim() {
+        "" => 1,
+        "KiB" => 1 << 10,
+        "MiB" => 1 << 20,
+        "GiB" => 1 << 30,
+        _ => return None,
+    };
+    digits.parse::<usize>().ok()?.checked_mul(scale)
 }
 
 async fn bind(variable: &str, default: &str) -> Result<TcpListener, String> {
@@ -64,9 +114,29 @@ async fn run() -> Result<(), String> {
         Arc::default(),
     )
     .map_err(|e| format!("TOUDAI_CLICKHOUSE_DATABASE: {e}"))?;
+    let memory_budget = match env("TOUDAI_INGEST_MEMORY_BUDGET") {
+        None => Settings::default().memory_budget,
+        Some(value) => memory_budget(&value).ok_or(
+            "TOUDAI_INGEST_MEMORY_BUDGET must be from 20MiB to below 4GiB, such as 256MiB",
+        )?,
+    };
+    let mut flush = FlushConfig::default();
+    if let Some(value) = env("TOUDAI_INGEST_FLUSH_ROWS") {
+        flush.rows = value
+            .parse()
+            .ok()
+            .filter(|&rows| rows > 0)
+            .ok_or("TOUDAI_INGEST_FLUSH_ROWS must be a positive integer")?;
+    }
+    if let Some(value) = env("TOUDAI_INGEST_FLUSH_INTERVAL") {
+        flush.interval = parse_duration(&value)
+            .ok_or("TOUDAI_INGEST_FLUSH_INTERVAL must be a duration such as 250ms or 1s")?;
+    }
     let settings = Settings {
         default_dataset: env("TOUDAI_DEFAULT_DATASET"),
         routing_epoch,
+        memory_budget,
+        flush,
         ..Settings::default()
     };
     let pipeline = Arc::new(
@@ -99,19 +169,14 @@ async fn run() -> Result<(), String> {
             let _ = stopped.changed().await;
         }
     };
+    let timeouts = http::Timeouts::default();
     let grpc = async {
-        grpc::serve(grpc_listener, pipeline.clone(), shutdown())
+        grpc::serve(grpc_listener, pipeline.clone(), shutdown(), timeouts.drain)
             .await
             .map_err(|e| format!("OTLP/gRPC: {e}"))
     };
     let http = async {
-        http::serve(
-            http_listener,
-            pipeline.clone(),
-            http::Timeouts::default(),
-            shutdown(),
-        )
-        .await;
+        http::serve(http_listener, pipeline.clone(), timeouts, shutdown()).await;
         Ok(())
     };
     tokio::try_join!(grpc, http).map(|_| ())
@@ -124,6 +189,54 @@ async fn main() -> ExitCode {
         Err(error) => {
             eprintln!("toudai-ingest: {error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{memory_budget, parse_duration};
+
+    #[test]
+    fn parses_durations() {
+        let cases = [
+            ("250ms", Some(Duration::from_millis(250))),
+            ("1s", Some(Duration::from_secs(1))),
+            ("0ms", Some(Duration::ZERO)),
+            ("1", None),
+            ("1.5s", None),
+            ("1m", None),
+            ("ms", None),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(parse_duration(text), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn parses_memory_budgets() {
+        let cases = [
+            ("268435456", Some(268_435_456)),
+            ("256MiB", Some(256 << 20)),
+            ("20 MiB", Some(20 << 20)),
+            ("1GiB", Some(1 << 30)),
+            ("4095MiB", Some(4095 << 20)),
+            // A share of 4 GiB would not fit a permit count.
+            ("4GiB", None),
+            ("20480KiB", Some(20 << 20)),
+            // Below the 20 MiB body limit.
+            ("20479KiB", None),
+            ("20971519", None),
+            ("256MB", None),
+            ("256mib", None),
+            ("MiB", None),
+            ("-1", None),
+            ("99999999999999999999GiB", None),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(memory_budget(text), expected, "{text:?}");
         }
     }
 }

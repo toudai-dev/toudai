@@ -33,7 +33,7 @@ use tower::util::MapResponseLayer;
 
 use crate::Refusal;
 use crate::auth::{KEY_HEADER, Scope};
-use crate::pipeline::{Pipeline, Signal};
+use crate::pipeline::{Held, Pipeline, Signal};
 
 /// The largest message accepted, after decompression: grpc-go's default,
 /// which the Collector's OTLP receiver kept (Decision 0003 D3).
@@ -59,17 +59,36 @@ fn routes(pipeline: Arc<Pipeline>) -> Routes {
     ))
 }
 
-/// Serve [`routes`] on `listener` until `shutdown` completes.
+/// Serve [`routes`] on `listener` until `shutdown` completes, then wait for
+/// requests in flight, up to `drain`. tonic itself waits on every connection
+/// with no bound, so a stream stalled mid-message would otherwise hold exit
+/// until the process is killed.
 pub async fn serve(
     listener: TcpListener,
     pipeline: Arc<Pipeline>,
     shutdown: impl Future<Output = ()>,
+    drain: Duration,
 ) -> Result<(), tonic::transport::Error> {
-    tonic::transport::Server::builder()
+    let (stopping, stopped) = tokio::sync::oneshot::channel();
+    let shutdown = async move {
+        shutdown.await;
+        let _ = stopping.send(());
+    };
+    let served = tonic::transport::Server::builder()
         .layer(MapResponseLayer::new(oversize_is_not_retryable))
         .add_routes(routes(pipeline))
-        .serve_with_incoming_shutdown(TcpIncoming::from(listener), shutdown)
-        .await
+        .serve_with_incoming_shutdown(TcpIncoming::from(listener), shutdown);
+    let drained = async {
+        match stopped.await {
+            Ok(()) => tokio::time::sleep(drain).await,
+            // The server ended on its own; its result wins.
+            Err(_) => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        served = served => served,
+        () = drained => Ok(()),
+    }
 }
 
 /// tonic refuses a message over the size limit with `OUT_OF_RANGE`, which the
@@ -113,6 +132,22 @@ fn scope<T>(request: &mut Request<T>) -> Scope {
         .expect("the interceptor authorizes every request")
 }
 
+/// The message's share of the admission budget, held until the insert holding
+/// its rows finishes.
+/// tonic has already decoded it, so this bounds how many decoded messages are
+/// held at once rather than the decoding itself, which the 4 MiB limit bounds.
+fn hold(
+    pipeline: &Pipeline,
+    signal: Signal,
+    message: &impl prost::Message,
+) -> Result<Held, Status> {
+    let mut held = Held::default();
+    pipeline
+        .hold(signal, &mut held, message.encoded_len())
+        .map_err(status)?;
+    Ok(held)
+}
+
 fn status(refusal: Refusal) -> Status {
     Status::new(Code::from_i32(refusal.kind.rpc_code()), refusal.message)
 }
@@ -149,9 +184,10 @@ impl LogsService for Logs {
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
         let deadline = self.0.deadline(grpc_timeout(request.metadata()));
         let scope = scope(&mut request);
+        let held = hold(&self.0, Signal::Logs, request.get_ref())?;
         let accepted = self
             .0
-            .export_logs(&scope, request.get_ref(), deadline)
+            .export_logs(&scope, request.get_ref(), held, deadline)
             .await
             .map_err(status)?;
         Ok(Response::new(ExportLogsServiceResponse {
@@ -173,9 +209,10 @@ impl TraceService for Traces {
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
         let deadline = self.0.deadline(grpc_timeout(request.metadata()));
         let scope = scope(&mut request);
+        let held = hold(&self.0, Signal::Traces, request.get_ref())?;
         let accepted = self
             .0
-            .export_traces(&scope, request.get_ref(), deadline)
+            .export_traces(&scope, request.get_ref(), held, deadline)
             .await
             .map_err(status)?;
         Ok(Response::new(ExportTraceServiceResponse {
@@ -208,7 +245,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let pipeline = Arc::new(pipeline(None).unwrap());
-        tokio::spawn(serve(listener, pipeline.clone(), std::future::pending()));
+        tokio::spawn(serve(
+            listener,
+            pipeline.clone(),
+            std::future::pending(),
+            Duration::from_secs(10),
+        ));
         let channel = Channel::from_shared(format!("http://{address}"))
             .unwrap()
             .connect()
@@ -446,6 +488,74 @@ mod tests {
         assert_eq!(partial.rejected_spans, 1);
     }
 
+    /// On shutdown a stream stalled mid-message holds exit only until the
+    /// drain bound. The client opens a stream with a valid key and never sends
+    /// its message, which tonic would otherwise wait on forever.
+    #[tokio::test]
+    async fn shutdown_waits_for_a_stalled_stream_only_until_the_drain_bound() {
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve(
+            listener,
+            Arc::new(pipeline(None).unwrap()),
+            async {
+                let _ = stopped.await;
+            },
+            Duration::from_secs(1),
+        ));
+        // HTTP/2 by hand: the preface, empty SETTINGS, then HEADERS without
+        // END_STREAM, each header a literal without indexing or Huffman.
+        let mut block = Vec::new();
+        for (name, value) in [
+            (":method", "POST"),
+            (":scheme", "http"),
+            (
+                ":path",
+                "/opentelemetry.proto.collector.logs.v1.LogsService/Export",
+            ),
+            (":authority", "x"),
+            ("content-type", "application/grpc"),
+            ("te", "trailers"),
+            ("x-toudai-key", PROD),
+        ] {
+            block.push(0);
+            block.push(name.len() as u8);
+            block.extend_from_slice(name.as_bytes());
+            block.push(value.len() as u8);
+            block.extend_from_slice(value.as_bytes());
+        }
+        let frame = |kind: u8, flags: u8, stream: u32, payload: &[u8]| {
+            let mut out = (payload.len() as u32).to_be_bytes()[1..].to_vec();
+            out.extend_from_slice(&[kind, flags]);
+            out.extend_from_slice(&stream.to_be_bytes());
+            out.extend_from_slice(payload);
+            out
+        };
+        let mut wire = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".to_vec();
+        wire.extend(frame(4, 0, 0, &[]));
+        wire.extend(frame(1, 0x4, 1, &block));
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        stream.write_all(&wire).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let started = std::time::Instant::now();
+        stop.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("shutdown waited on the stalled stream past the drain bound")
+            .unwrap()
+            .unwrap();
+        // Not before the bound either: the stalled stream was waited on.
+        assert!(
+            started.elapsed() >= Duration::from_millis(900),
+            "{:?}",
+            started.elapsed()
+        );
+        drop(stream);
+    }
+
     /// With the 300 ms budget an unreachable ClickHouse is tried several
     /// times; a 150 ms `grpc-timeout` leaves room for one attempt only (the
     /// shortest backoff plus the writer's 100 ms minimum attempt overruns it).
@@ -465,6 +575,39 @@ mod tests {
             &[("signal", "logs"), ("destination", "canonical")],
         );
         assert_eq!(attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn full_admission_budget_is_unavailable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let settings = crate::pipeline::Settings {
+            memory_budget: 1 << 20,
+            ..Default::default()
+        };
+        let pipeline = Arc::new(crate::pipeline::testing::with(settings).unwrap());
+        // Another request holds all but 16 bytes.
+        let mut other = Held::default();
+        pipeline
+            .hold(Signal::Logs, &mut other, (1 << 20) - 16)
+            .unwrap();
+        tokio::spawn(serve(
+            listener,
+            pipeline,
+            std::future::pending(),
+            Duration::from_secs(10),
+        ));
+        let mut client = LogsServiceClient::connect(format!("http://{address}"))
+            .await
+            .unwrap();
+        let message = logs(vec![duplicate_record(), duplicate_record()], vec![]);
+        assert!(prost::Message::encoded_len(&message) > 16);
+        let refused = client
+            .export(with_headers(message, &[("x-toudai-key", PROD)]))
+            .await
+            .unwrap_err();
+        // RESOURCE_EXHAUSTED would not be retried without RetryInfo.
+        assert_eq!(refused.code(), Code::Unavailable);
     }
 
     #[test]
