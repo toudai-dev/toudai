@@ -34,3 +34,4 @@ zstd = "0.14"
 [dev-dependencies]
 proptest = "1.12"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["io-util"] }
