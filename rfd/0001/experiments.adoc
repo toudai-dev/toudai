@@ -169,7 +169,7 @@ Relevant reference:
 
 This evidence originally motivated four architecture directions requiring
 validation rather than assumptions from single-node experiments. The
-link:acceptance-and-replay.adoc[Collector-first PoC] now treats the first two as
+link:acceptance-and-replay.adoc[OTLP-first PoC] now treats the first two as
 optional independent-archive directions, not mandatory ingestion dependencies:
 
 * accepted events should enter a durable replay path before ClickHouse serving

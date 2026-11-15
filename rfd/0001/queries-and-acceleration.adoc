@@ -75,7 +75,7 @@ query history ---------------------------------> acceleration recommendations
 
 Normal and catch-up exports target the same logical data model. The concrete
 exporter mapping and acknowledgement behavior are tests in the
-link:acceptance-and-replay.adoc[Collector-first acceptance plan].
+link:acceptance-and-replay.adoc[acceptance plan].
 
 == Primary raw path
 
@@ -150,7 +150,7 @@ aggregate. Combining raw and accelerated ranges is a later optimization.
 Coverage describes a declared set of stored source records, not a promise that
 every producer has delivered every event for an event-time interval. Maximum
 event timestamp and healthy shard responses are insufficient coverage evidence.
-The Collector-first path has no assumed global log offset: specify a verifiable
+The OTLP ingest path has no assumed global log offset: specify a verifiable
 source generation or ingestion boundary and per-destination progress before
 claiming a derived path matches the raw source. Do not invent a watermark from
 the latest timestamp or from an empty overflow queue.

@@ -33,7 +33,7 @@ retention, and cost budgets must be fixed before acceptance runs.
 
 == Event and instrumentation contract
 
-Standard OTel producers emit OTLP. The Collector path maps logs, spans, and
+Standard OTel producers emit OTLP. `toudai-ingest` maps logs, spans, and
 application events into a versioned internal envelope containing authenticated
 tenant/dataset scope, event identity, timestamps, kind, service/deployment context,
 trace correlation, typed attributes, canonical payload, and available sampling
@@ -48,8 +48,9 @@ link:queries-and-acceleration.adoc#_upstream_sampling_and_observed_event_results
 
 Ingestion validates field count, field-name growth, event and string sizes,
 declared types, reserved fields, and sensitive-data policy before database or
-overflow export. OTLP acknowledgements and partial failures follow the tested
-Collector configuration, not a custom atomic-batch protocol. Additive fields are permitted; incompatible type changes are
+overflow export. OTLP acknowledgements and partial failures follow
+link:decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] D2 (success after storage, `partial_success` for
+per-record rejections), not a custom atomic-batch protocol. Additive fields are permitted; incompatible type changes are
 recorded and rejected or isolated according to versioned tenant policy.
 
 == Implementation language
@@ -59,8 +60,8 @@ low-cost choice because the repository contained only a three-line Go
 placeholder and no Go dependencies, generated code, or tests. Rust provides
 the asynchronous I/O, explicit resource control, and Arrow/Parquet ecosystem
 needed by the ingestion and replay paths without making a custom storage engine
-part of the MVP. Reusing the OTel Collector does not require rewriting its
-components in Rust; custom extensions need a demonstrated compatibility gap.
+part of the MVP. The server-side OTLP endpoint, `toudai-ingest`, is Rust as well
+(link:decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003]); stock Collectors remain usable in front of it.
 ClickHouse remains the serving engine. Revisit the language
 only if implementation uncovers a concrete interoperability gap that is more
 expensive than maintaining a second runtime.
@@ -188,8 +189,8 @@ native metric samples unless a later interoperability feature needs it.
 == Full-resolution acceptance and retention
 
 Toudai does not silently sample accepted events. Preserve canonical events
-at full resolution within declared retention. The Collector PoC must distinguish
-OTLP receipt/queue admission from confirmed storage and establish the supported
+at full resolution within declared retention. The PoC acknowledges only after
+confirmed storage (link:decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] D2) and must establish the supported
 failure envelope. Recovery uses retained canonical data and tested backups;
 overflow is not a complete archive. Independent all-event archival remains open. Producer
 drops or upstream sampling must be reported where known; retain supplied sampling
@@ -350,7 +351,7 @@ this scalar event contract does not redefine native metrics.
 * What dashboard and exploratory concurrency must one deployment support?
 * What producer-to-query and overflow catch-up lag defines healthy ingestion?
 * Which acknowledgement, retry, and duplicate guarantees can the
-  link:acceptance-and-replay.adoc[Collector-first pipeline] support, including
+  link:acceptance-and-replay.adoc[OTLP ingest pipeline] support, including
   rebatching, ambiguous writes, and object-notification redelivery?
 * Is exact aggregation required synchronously above a bounded scan cost, or may
   it run as an asynchronous query job?
