@@ -20,7 +20,7 @@ pinned components, not checklist completion. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +
 Product tree: the owned exporter and the Collector distribution live in
-https://github.com/toudai-dev/collector[toudai-dev/collector], which owns the
+`toudai-dev/collector`, which owns the
 component pins; ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`. The product gateway
 configuration is now `config/gateway.example.yaml` in that repository, and Experiment 024
 records an OTLP logs-and-traces run of the product build through it. Still open: the owned
@@ -49,7 +49,7 @@ is now defined; see the application-event item below). See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
 Product tree and Experiment 024: Decision 0001 D5 is implemented. The `toudaigateway`
-processor in https://github.com/toudai-dev/collector[toudai-dev/collector] assigns every
+processor in `toudai-dev/collector` assigns every
 log record and span a random UUIDv7 `event_id` at trusted-scope injection, before the
 exporter's queue batching, and the exporter writes that ID to the canonical and serving
 rows without deriving anything from content (it fails the export on a missing or
@@ -141,7 +141,7 @@ link:decisions/0002-single-tenant-core.adoc[Decision 0002] (no `tenant_id`; sort
 `(dataset, timestamp, event_id)` and `(dataset, event_id)`; the database name is
 configuration), is in `clickhouse/schema` (`timestamp`, `routing_epoch`, and a payload
 table on the S3-backed `toudai_payload` storage policy); the owned exporter that writes it lives in
-https://github.com/toudai-dev/collector[toudai-dev/collector]. Scratch runs of that
+`toudai-dev/collector`. Scratch runs of that
 exporter against ClickHouse 26.8.2.7 with an S3 emulator inserted typed log and span
 rows, stamped the epoch, moved an old payload partition to the S3 disk by TTL, and
 retrieved it by `(tenant_id, dataset, event_id)`. Those runs are not recorded as an
@@ -149,7 +149,7 @@ experiment. Dataset routing is now key-derived rather than a static `resource` p
 (Experiment 024), but the scratch runs are still unrecorded, so the item stays open.
 +
 Collector since Decision 0002
-(https://github.com/toudai-dev/collector/pull/5[toudai-dev/collector#5]): the exporter
+(collector #5): the exporter
 writes the tables of this DDL without `tenant_id`, its vendored copy is refreshed from the merged schema
 (applied with `--param_database`; the exporter's `database` defaults to `toudai`), and
 the payload identity is `(dataset, event_id)`. A scratch run of that build against

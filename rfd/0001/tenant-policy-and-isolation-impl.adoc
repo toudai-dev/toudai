@@ -46,7 +46,7 @@ rejection remain out of scope. See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
 Experiment 024 closes this item for a *static* key file. The product tree
-(https://github.com/toudai-dev/collector[toudai-dev/collector]) now has a
+(`toudai-dev/collector`) now has a
 `toudaiauth` extension that validates an ingestion key header against a key file
 mapping each key to one workspace, its allowed datasets, and write permission,
 and a `toudaigateway` processor that injects `toudai.workspace_id`,
@@ -67,7 +67,7 @@ reachable only through the gateway. See
 link:experiments/024-key-derived-trusted-scope.adoc[Experiment 024].
 +
 Product tree since link:decisions/0002-single-tenant-core.adoc[Decision 0002]
-(https://github.com/toudai-dev/collector/pull/5[toudai-dev/collector#5]): keys no
+(collector #5): keys no
 longer map to a workspace. A key carries write permission and an optional dataset list
 (a key without one permits every dataset), and the gateway sets only `toudai.dataset`: the `X-Toudai-Dataset` header, else the
 key's only dataset, else a configured default, refused with 403 when outside the key's
