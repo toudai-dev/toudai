@@ -5,7 +5,7 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Status:* Completed (bounded slice); node loss, SDK retry, the 10k events/s load, and failure cases over gRPC left open
 - *Run:* 2026-11-15T01:23:25Z-01:25:42Z (`run.sh`, exit 0)
 - *Source mutation:* None; disposable local ClickHouse, synthetic keys and fixtures, loopback only
-- *Product revisions:* toudai at `c7f990d9a2df045cd7dfc3403036c13e354ba5d2`, which adds only this harness to `main` at `de9dbf47` plus the change that keeps the payload schema at `toudai.canonical.event/1` (no uncommitted changes); https://github.com/toudai-dev/collector/pull/5[collector #5] at `f7805740c2b2e34d5bde25778ef7bd7903861c66` for the Go path
+- *Product revisions:* toudai at `c7f990d9a2df045cd7dfc3403036c13e354ba5d2`, which adds only this harness to `main` at `de9dbf47` plus the change that keeps the payload schema at `toudai.canonical.event/1` (no uncommitted changes); collector #5 at `f7805740c2b2e34d5bde25778ef7bd7903861c66` for the Go path (the repository has since been deleted)
 - *Harness:* `025-ingest-parity-and-acknowledgement/` (`run.sh`, `relay.py`, `compare.py`, ClickHouse config); evidence in `025-ingest-parity-and-acknowledgement/results/`
 - *Result:* 78 checks passed, 0 failed. Both paths store the same fixture rows apart from the documented differences, and no acknowledged request was lost in this run.
 
@@ -110,8 +110,7 @@ budget, 1 s flush):
 
 [source,sh]
 ----
-git clone https://github.com/toudai-dev/collector /tmp/collector
-git -C /tmp/collector checkout f7805740c2b2e34d5bde25778ef7bd7903861c66
+# /tmp/collector: a collector checkout at f7805740c2b2e34d5bde25778ef7bd7903861c66
 COLLECTOR_REPO=/tmp/collector nix develop --command \
   bash rfd/0001/experiments/025-ingest-parity-and-acknowledgement/run.sh
 ----
@@ -221,8 +220,8 @@ hypothesis set aside, was compared too and is equal.
 rows the Go path stores, with the same rejections and drops, and differs only where
 `ingest/src/mapping.rs` says it does. That is the parity condition of
 link:../decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] D5 for the
-Experiment 023 fixture. Archiving the collector is the next plan step and waits on
-collector #5 merging.
+Experiment 023 fixture. Collector #5 was then left unmerged and the collector
+repository deleted on 2026-11-15 (Decision 0003 D5).
 
 *A 200 now means stored.* No acknowledged request was lost to SIGKILL, and none
 was unreadable at its 200. What the producer sees is now honest in each case
@@ -288,5 +287,3 @@ What the results do not cover:
   async inserts with wait (Decision 0003 D2).
 * Real SDK retry behavior against stored acknowledgement (acceptance item "Verify
   what survives automatic retries of real OTLP SDK exporters").
-* Collector deprecation and archive, with the RFD plan wording, once collector #5
-  merges.

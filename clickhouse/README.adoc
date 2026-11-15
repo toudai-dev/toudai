@@ -33,6 +33,6 @@ parameter. `apply-schema.sh` applies the files in order to `TOUDAI_CLICKHOUSE_DA
 arguments to `clickhouse-client`; by hand, run
 `clickhouse-client --param_database=<name> --multiquery < schema/NNN-name.sql` for each
 file. Every statement is `IF NOT EXISTS`. Nothing in the schema assumes the database owns
-the server. The owned exporter in
-https://github.com/toudai-dev/collector[toudai-dev/collector] names these columns in its
-`INSERT` statements, so a change to a table here needs the matching change there.
+the server. `toudai-ingest` (`ingest/src/mapping.rs`) and the query service name these
+columns, so a change to a table here needs the matching change there; the ingest test
+`row_columns_match_the_ddl` and the end-to-end tests fail when the writer does not follow.

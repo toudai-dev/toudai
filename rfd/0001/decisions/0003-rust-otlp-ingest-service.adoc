@@ -123,15 +123,11 @@ Collector's sending queue set it (Experiments 018 and 021).
 
 === D5. Collector repository
 
-Collector #5 merges as the Decision 0002 write path and stays the PoC write
-path until `toudai-ingest` reaches parity. After it merges, the collector
-repository is frozen: it takes security fixes, pin fixes, and dataset-rule
-changes kept in step with `toudai-ingest`, and no new features. Parity is
-shown by Experiment 025, which sends one fixture through both paths and
-replays the Experiment 021 failure cases against `toudai-ingest`. The
-repository is then marked deprecated and archived, not deleted, because
-Experiment 024 and the acceptance and tenant-policy `-impl` notes link its
-commits.
+Collector #5 is the reference write path until `toudai-ingest` reaches parity.
+Parity is shown by Experiment 025, which sends one fixture through both paths
+and replays the Experiment 021 failure cases against `toudai-ingest`. After it,
+#5 was left unmerged and the collector repository was deleted on 2026-11-15;
+records cite its commits by hash only.
 
 == Consequences
 

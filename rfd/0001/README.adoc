@@ -10,7 +10,7 @@ https://github.com/chaba-dev/lighthouse/pull/11[PR #11].
 
 == Architecture summary
 
-Toudai provides Scuba-style recent-data exploration over logs, spans, and structured application events through one logical event model. Native metrics remain separate. The PoC uses OpenTelemetry Collectors with direct ClickHouse ingestion and object-store overflow/catch-up. Canonical retention and backup/restore support reconstruction; independent all-event archival remains an explicit decision. Bounded accelerators improve interactive queries without making raw retained fields unqueryable.
+Toudai provides Scuba-style recent-data exploration over logs, spans, and structured application events through one logical event model. Native metrics remain separate. The PoC receives OTLP in `toudai-ingest`, an owned Rust service that writes ClickHouse directly; object-store overflow and catch-up are qualification work. Canonical retention and backup/restore support reconstruction; independent all-event archival remains an explicit decision. Bounded accelerators improve interactive queries without making raw retained fields unqueryable.
 
 == Design principles
 
@@ -49,14 +49,14 @@ link:decisions/0001-poc-physical-layout.adoc[Decision 0001] as amended by the
 single-tenant scope of link:decisions/0002-single-tenant-core.adoc[Decision 0002]:
 
 ....
-OTLP -> Collector authentication/validation -> owned exporter -> ClickHouse
+OTLP -> toudai-ingest (key auth, validation, mapping) ---------> ClickHouse
                                                                    |
    operator client <- query service (typed contract, diagnostics) <-+
                                                                    |
                                       reconstruct serving rows <- canonical payload
 ....
 
-The slice is: a deterministic fixture emitter; the owned exporter writing the
+The slice is: a deterministic fixture emitter; `toudai-ingest` writing the
 serving and canonical tables; a query service that enforces the typed-value
 contract and reports plan diagnostics; the minimum aggregate states the
 dashboard fixture needs, with raw fallback; exact-event retrieval from the
@@ -74,13 +74,13 @@ historical benchmark medians are characterization, not implicit SLOs.
 The implementation companions distinguish PoC-required milestones from later
 validation and production qualification. Completed historical experiments remain
 evidence, not evidence that the application milestone is implemented. The
-link:acceptance-and-replay.adoc[Collector-first acceptance plan] requires measured
+link:acceptance-and-replay.adoc[acceptance plan] requires measured
 OTLP acknowledgement, loss, duplicate, and recovery behavior. Neither queue
 admission nor protocol compatibility alone establishes durable acceptance.
 
 PoC completion requires the `PoC-required` sections of the product,
 acceptance, query, and tenant plans: the emitter and operator tests,
-Collector normal-path and reconstruction tests, raw and accelerated semantic
+ingest normal-path and reconstruction tests, raw and accelerated semantic
 tests, and trusted-scope authorization with bounded exploration. Each plan's
 `Qualification` section holds the work that was previously gated as
 PoC-required and now follows the slice: overflow and catch-up, acknowledgement

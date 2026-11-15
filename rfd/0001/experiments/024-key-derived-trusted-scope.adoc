@@ -5,7 +5,7 @@ link:../README.adoc[RFD 0001] · link:README.adoc[Experiment index]
 - *Status:* Completed (bounded slice); dynamic key resolution, rotation/revocation, and replay provenance left open
 - *Run:* 2026-10-17T15:55:52Z-15:55:56Z (`run.sh`, exit 0)
 - *Source mutation:* None; disposable local ClickHouse, synthetic keys and fixtures, loopback only
-- *Product revision:* https://github.com/toudai-dev/collector[toudai-dev/collector] 915a3418ae81c4530a19425f4fc2b7472664242b (PR #3, merged to `main`)
+- *Product revision:* `toudai-dev/collector` 915a3418ae81c4530a19425f4fc2b7472664242b (PR #3, merged to `main`; the repository has since been deleted)
 - *Harness:* `024-key-derived-trusted-scope/` (`run.sh`, fixture `keys.yaml`, ClickHouse config); evidence in `024-key-derived-trusted-scope/results/`
 - *Result:* 37 checks passed, 0 failed
 
@@ -72,8 +72,7 @@ multi-dataset key, resource-level `toudai.workspace_id` / `toudai.dataset` /
 
 [source,sh]
 ----
-git clone https://github.com/toudai-dev/collector && cd collector
-git checkout 915a3418ae81c4530a19425f4fc2b7472664242b
+# from a collector checkout at 915a3418ae81c4530a19425f4fc2b7472664242b
 nix develop --command bash <toudai>/rfd/0001/experiments/024-key-derived-trusted-scope/run.sh
 ----
 

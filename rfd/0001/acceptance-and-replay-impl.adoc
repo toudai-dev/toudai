@@ -19,12 +19,12 @@ mapping is not satisfied. These are characterization measurements against the
 pinned components, not checklist completion. See
 link:experiments/018-collector-compatibility.adoc[Experiment 018].
 +
-Product tree: the owned exporter and the Collector distribution live in
-https://github.com/toudai-dev/collector[toudai-dev/collector], which owns the
-component pins; ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`. The product gateway
-configuration is now `config/gateway.example.yaml` in that repository, and Experiment 024
-records an OTLP logs-and-traces run of the product build through it. Still open: the owned
-exporter does not map native metrics, so a metrics run is missing.
+Product tree: under link:decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] the endpoint is `toudai-ingest`
+(`ingest/` in this repository); ClickHouse stays pinned to 26.8.2.7-lts by `flake.nix`.
+Experiment 024 recorded an OTLP logs-and-traces run of the earlier Collector build
+(`toudai-dev/collector`, `config/gateway.example.yaml`), and Experiment 025 the Experiment 023
+fixture through both paths. Still open: `toudai-ingest` takes only logs and traces
+(Decision 0003 D1), so a metrics run is missing.
 
 * [x] Define internal identity assignment without requiring proprietary producer batch IDs; verify what survives producer resubmission and Collector rebatching.
 +
@@ -49,11 +49,12 @@ is now defined; see the application-event item below). See
 link:experiments/021-hybrid-layout-collector-integration.adoc[Experiment 021].
 +
 Product tree and Experiment 024: Decision 0001 D5 is implemented. The `toudaigateway`
-processor in https://github.com/toudai-dev/collector[toudai-dev/collector] assigns every
+processor in `toudai-dev/collector` assigns every
 log record and span a random UUIDv7 `event_id` at trusted-scope injection, before the
 exporter's queue batching, and the exporter writes that ID to the canonical and serving
 rows without deriving anything from content (it fails the export on a missing or
-non-UUIDv7 ID). Measured through the product gateway config: two byte-identical records,
+non-UUIDv7 ID). `toudai-ingest` keeps this rule: `ingest/src/admit.rs` assigns each
+record and span its UUIDv7 before mapping and batching. Measured through the product gateway config: two byte-identical records,
 and the same request resubmitted with `curl`, stored nine distinct IDs across nine rows
 (a resubmitted request is a new request and gets new IDs; the gateway cannot tell a
 retransmission from a second legitimate event, which is the D5 trade-off); a producer-supplied `toudai.event_id`
@@ -140,8 +141,8 @@ Product tree: the Decision 0001 DDL, as amended by
 link:decisions/0002-single-tenant-core.adoc[Decision 0002] (no `tenant_id`; sort keys
 `(dataset, timestamp, event_id)` and `(dataset, event_id)`; the database name is
 configuration), is in `clickhouse/schema` (`timestamp`, `routing_epoch`, and a payload
-table on the S3-backed `toudai_payload` storage policy); the owned exporter that writes it lives in
-https://github.com/toudai-dev/collector[toudai-dev/collector]. Scratch runs of that
+table on the S3-backed `toudai_payload` storage policy); `toudai-ingest` writes it, and
+before link:decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] the owned exporter in `toudai-dev/collector` did. Scratch runs of that
 exporter against ClickHouse 26.8.2.7 with an S3 emulator inserted typed log and span
 rows, stamped the epoch, moved an old payload partition to the S3 disk by TTL, and
 retrieved it by `(tenant_id, dataset, event_id)`. Those runs are not recorded as an
@@ -149,10 +150,11 @@ experiment. Dataset routing is now key-derived rather than a static `resource` p
 (Experiment 024), but the scratch runs are still unrecorded, so the item stays open.
 +
 Collector since Decision 0002
-(https://github.com/toudai-dev/collector/pull/5[toudai-dev/collector#5]): the exporter
-writes the tables of this DDL without `tenant_id`, its vendored copy is refreshed from the merged schema
-(applied with `--param_database`; the exporter's `database` defaults to `toudai`), and
-the payload identity is `(dataset, event_id)`. A scratch run of that build against
+(collector #5): the exporter
+wrote the tables of this DDL without `tenant_id` from a vendored copy of the merged schema
+(applied with `--param_database`; the exporter's `database` defaulted to `toudai`), with
+payload identity `(dataset, event_id)`. `toudai-ingest` now applies no vendored copy; its
+tests apply `clickhouse/schema` directly. A scratch run of that build against
 ClickHouse 26.8.2.7 created the tables in a non-default database and joined every serving
 row to its canonical row by `(dataset, event_id)`; it ran on a local-disk stand-in for the
 `object` volume and is not recorded as an experiment, so the item stays open.

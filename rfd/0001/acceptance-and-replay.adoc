@@ -1,12 +1,11 @@
 = Acceptance and replay
 
-== Collector-first PoC
+== OTLP-first PoC
 
 OpenTelemetry compatibility is a requirement, not a later adapter. Standard OTel
-SDKs and agents send OTLP to Collector gateways. Reuse Collector receivers,
-processors, batching, exporters, retries, and connectors before implementing
-custom ingestion components. Kafka and an archive-before-acknowledgement service
-are not baseline dependencies.
+SDKs, agents, and customer-run Collectors send OTLP to `toudai-ingest`, the owned
+OTLP endpoint of link:decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003]. Kafka and an
+archive-before-acknowledgement service are not baseline dependencies.
 
 The candidate path is direct ClickHouse ingestion with object-storage overflow
 on downstream failure or sustained backpressure, followed by separate catch-up
@@ -16,7 +15,7 @@ That report is operational evidence for a candidate, not proof of our schema,
 tenant isolation, acknowledgement semantics, or loss/duplicate guarantees.
 
 ....
-OTel SDKs / agents -> Collector gateways -> ClickHouse
+OTel SDKs / agents -> toudai-ingest -> ClickHouse
                             |
                             +-- failure -> object storage
                                                |
@@ -33,15 +32,18 @@ and bound catch-up load so it does not starve fresh ingestion or queries.
 
 == Reuse and Toudai ownership
 
-Collectors own transport and pipeline plumbing. Toudai owns authenticated
-tenant/dataset policy, unified log/span/event mapping, retained canonical content,
-and query semantics. First test whether existing Collector processors and the
-ClickHouse exporter can express the required mapping and routing. Add a custom
-processor/exporter or narrow service only for a demonstrated gap; do not assume
-the stock exporter implements Toudai's unified-event schema.
+Collector reuse is on the customer side: producers may run stock Collectors, with
+their processors, batching, and retries, in front of Toudai. The server-side
+endpoint is owned. `toudai-ingest` owns key and dataset policy, unified
+log/span/event mapping, retained canonical content, acknowledgement, retry, and
+backpressure; the query service owns query semantics. Experiments 018, 019, and
+021 found the stock ClickHouse exporter's fixed schema and INSERT column lists
+cannot write the typed serving maps or the canonical payload, and Decision 0003
+replaced the owned Collector components with one service, which
+makes OTLP receiver conformance Toudai's to test.
 
-Pin the Collector distribution, component versions, configuration, and ClickHouse
-version in the experiment. Establish support for OTLP logs, traces, and metrics;
+Pin the `toudai-ingest` revision, producer SDK or Collector versions,
+configuration, and ClickHouse version in each experiment. Establish support for OTLP logs, traces, and metrics;
 logs/spans map into unified events while native metrics retain a separate model.
 Define the application-event encoding using standard OTLP rather than requiring
 a proprietary producer protocol. Compatibility testing must include resource and
@@ -56,7 +58,10 @@ link:tenant-policy-and-isolation.adoc[tenant policy and isolation].
 == Acknowledgements and retry semantics to establish
 
 Do not equate an OTLP success response with a durable database or object-store
-write. A response may follow admission to an asynchronous Collector queue.
+write. On the Collector path of Experiments 018 and 021, success followed
+admission to an asynchronous queue. Under link:decisions/0003-rust-otlp-ingest-service.adoc[Decision 0003] D2, `toudai-ingest`
+returns success only after the canonical and serving inserts holding the
+request's accepted records have committed.
 For each pipeline stage, document when success is returned, where the data then
 resides, and what survives process restart, node loss, queue exhaustion, and
 simultaneous ClickHouse/object-store unavailability. Distinguish receiver receipt,
