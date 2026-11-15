@@ -12,12 +12,15 @@
 mod server;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use serde_json::{Map, Value, json};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Instant;
 use toudai::auth::DatasetAccess;
 use toudai_ingest::admit::{admit_logs, admit_traces};
@@ -115,6 +118,7 @@ async fn writes_both_destinations_to_a_real_clickhouse() {
     retries_only_the_destination_that_failed(&server).await;
     nothing_commits_behind_a_deadline_error(&server).await;
     recovers_from_a_column_type_change(&server).await;
+    closes_the_connection_of_an_unanswered_insert(&server).await;
 }
 
 /// Every stored row reads back as mapped, and every serving row joins its
@@ -339,6 +343,124 @@ async fn recovers_from_a_column_type_change(server: &ClickHouseServer) {
     let changed = write_fixture_logs(&writer).await;
     execute(server, &alter("LowCardinality(String)"), None).await;
     changed.unwrap();
+}
+
+/// When ClickHouse commits an insert but never answers, the attempt fails at
+/// the deadline and its connection is closed, rather than held by the
+/// crate's response task until the process exits (Experiment 025).
+async fn closes_the_connection_of_an_unanswered_insert(server: &ClickHouseServer) {
+    let proxy = WithholdingProxy::start(&server.url).await;
+    let config = WriterConfig {
+        url: proxy.url.clone(),
+        user: Some(server::USER.into()),
+        password: Some(server::PASSWORD.into()),
+        database: DATABASE.into(),
+    };
+    let writer = Writer::new(config, Arc::new(Counters::default())).unwrap();
+    // Warm the column cache, so the next attempt's only request is the insert.
+    write_fixture_logs(&writer).await.unwrap();
+    proxy.withhold.store(true, Ordering::SeqCst);
+
+    let request = logs_request();
+    let ids = admit_logs(&request, &scope("fixture")).unwrap();
+    let mapped = map_logs(&request, "fixture", &ids, EPOCH);
+    let started = Instant::now();
+    let error = writer
+        .write_logs(&mapped, started + Duration::from_secs(1))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error.source, clickhouse::error::Error::TimedOut),
+        "{error}"
+    );
+    assert!(started.elapsed() < Duration::from_millis(1500), "{error}");
+    assert!(
+        proxy.withheld.load(Ordering::SeqCst) >= 1,
+        "no response was withheld"
+    );
+    let waited = Instant::now();
+    while proxy.open_withheld.load(Ordering::SeqCst) > 0 {
+        assert!(
+            waited.elapsed() < Duration::from_secs(2),
+            "the connection of the unanswered insert is still open"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A TCP proxy in front of ClickHouse. Once `withhold` is set it still
+/// forwards requests, so inserts commit, but drops ClickHouse's responses.
+/// It counts connections that had a response withheld, and those of them the
+/// client has not closed yet.
+struct WithholdingProxy {
+    url: String,
+    withhold: Arc<AtomicBool>,
+    withheld: Arc<AtomicUsize>,
+    open_withheld: Arc<AtomicUsize>,
+}
+
+impl WithholdingProxy {
+    async fn start(upstream_url: &str) -> WithholdingProxy {
+        let upstream = upstream_url.trim_start_matches("http://").to_owned();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = WithholdingProxy {
+            url: format!("http://{}", listener.local_addr().unwrap()),
+            withhold: Arc::default(),
+            withheld: Arc::default(),
+            open_withheld: Arc::default(),
+        };
+        let counters = (
+            proxy.withhold.clone(),
+            proxy.withheld.clone(),
+            proxy.open_withheld.clone(),
+        );
+        tokio::spawn(async move {
+            while let Ok((client, _)) = listener.accept().await {
+                let server = TcpStream::connect(&upstream).await.unwrap();
+                let (withhold, withheld, open) = counters.clone();
+                tokio::spawn(relay(client, server, withhold, withheld, open));
+            }
+        });
+        proxy
+    }
+}
+
+async fn relay(
+    client: TcpStream,
+    server: TcpStream,
+    withhold: Arc<AtomicBool>,
+    withheld: Arc<AtomicUsize>,
+    open_withheld: Arc<AtomicUsize>,
+) {
+    let (mut client_read, mut client_write) = client.into_split();
+    let (mut server_read, mut server_write) = server.into_split();
+    let this_withheld = Arc::new(AtomicBool::new(false));
+    let responses = {
+        let (this_withheld, open_withheld) = (this_withheld.clone(), open_withheld.clone());
+        tokio::spawn(async move {
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = match server_read.read(&mut buf).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => n,
+                };
+                if withhold.load(Ordering::SeqCst) {
+                    if !this_withheld.swap(true, Ordering::SeqCst) {
+                        withheld.fetch_add(1, Ordering::SeqCst);
+                        open_withheld.fetch_add(1, Ordering::SeqCst);
+                    }
+                } else if client_write.write_all(&buf[..n]).await.is_err() {
+                    return;
+                }
+            }
+        })
+    };
+    // Requests flow until the client closes its side.
+    let _ = tokio::io::copy(&mut client_read, &mut server_write).await;
+    if this_withheld.load(Ordering::SeqCst) {
+        open_withheld.fetch_sub(1, Ordering::SeqCst);
+    }
+    responses.abort();
 }
 
 async fn write_fixture_logs(writer: &Writer) -> Result<(), toudai_ingest::writer::WriteError> {

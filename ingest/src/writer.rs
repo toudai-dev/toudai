@@ -30,10 +30,10 @@ use crate::metrics::Counters;
 /// capped at [`MAX_BACKOFF`].
 const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 const MAX_BACKOFF: Duration = Duration::from_secs(1);
-/// No insert starts with less time than this left before the deadline. The
-/// crate sends an insert from a spawned task that keeps running when the
-/// caller stops waiting, so an insert started at the deadline can commit after
-/// the request has already been answered with an error.
+/// No insert starts with less time than this left before the deadline. An
+/// insert whose rows have reached ClickHouse can commit even after the attempt
+/// is cut off, so one started at the deadline could commit after the request
+/// has already been answered with an error.
 pub const MIN_ATTEMPT: Duration = Duration::from_millis(100);
 
 /// A serving row type: the table it goes to and its counter label.
@@ -219,7 +219,8 @@ impl Writer {
 
     /// Insert `rows` into `table`, retrying with jittered exponential backoff
     /// until it commits, the error cannot be retried, or the next attempt
-    /// would start after `deadline`. Each attempt is cut off at the deadline.
+    /// would start after `deadline`. Each attempt ends within [`MIN_ATTEMPT`] of
+    /// the deadline.
     async fn insert_with_retry<R>(
         &self,
         signal: &'static str,
@@ -238,10 +239,7 @@ impl Writer {
             if remaining < MIN_ATTEMPT {
                 return Err(clickhouse::error::Error::TimedOut);
             }
-            let result = tokio::time::timeout(remaining, self.insert(table, rows))
-                .await
-                .unwrap_or(Err(clickhouse::error::Error::TimedOut));
-            let error = match result {
+            let error = match self.insert(table, rows, deadline).await {
                 Ok(()) => {
                     self.counters.add("records", &labels, rows.len() as u64);
                     return Ok(());
@@ -270,15 +268,41 @@ impl Writer {
         }
     }
 
-    async fn insert<R>(&self, table: &str, rows: &[R]) -> Result<(), clickhouse::error::Error>
+    /// One insert attempt, cut off at `deadline`.
+    async fn insert<R>(
+        &self,
+        table: &str,
+        rows: &[R],
+        deadline: Instant,
+    ) -> Result<(), clickhouse::error::Error>
     where
         R: Row + RowWrite + for<'a> Row<Value<'a> = R>,
     {
-        let mut insert = self.client.insert::<R>(table).await?;
-        for row in rows {
-            insert.write(row).await?;
-        }
-        insert.end().await
+        let send = async {
+            let mut insert = self.client.insert::<R>(table).await?;
+            for row in rows {
+                insert.write(row).await?;
+            }
+            Ok::<_, clickhouse::error::Error>(insert)
+        };
+        // Dropping the insert while it sends aborts its request body, so a
+        // cut-off here usually closes the connection.
+        let insert = tokio::time::timeout_at(deadline, send)
+            .await
+            .unwrap_or(Err(clickhouse::error::Error::TimedOut))?;
+        // `end` sends the last buffered rows, then waits for the response in a
+        // task the crate spawned, which dropping the insert does not stop: a
+        // ClickHouse that never answers would keep one connection per
+        // timed-out insert (Experiment 025). The crate's own timeouts abort
+        // the body or that task when they fire. The end timeout starts after
+        // the last send, so the backstop lets it fire first unless that send
+        // was slow, and keeps the attempt within MIN_ATTEMPT of the deadline;
+        // after a slow last send the response task is left running, as before.
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let end = insert.with_timeouts(Some(remaining), Some(remaining)).end();
+        tokio::time::timeout_at(deadline + MIN_ATTEMPT, end)
+            .await
+            .unwrap_or(Err(clickhouse::error::Error::TimedOut))
     }
 }
 
