@@ -17,8 +17,9 @@
 //!   exporter stores the span and ignores its events.
 //! - A log record with `event_name` set is an application event, `kind`
 //!   `event`; the Go exporter stores `log`.
-//! - The payload schema is `toudai.canonical.event/2`; the Go exporter writes
-//!   `/1`.
+//!
+//! Both paths write payload schema `toudai.canonical.event/1`: nothing is live
+//! yet, so the schema stays `/1` and these differences need no new version.
 //!
 //! A record is rejected on its own when it, its scope, its resource, or one of
 //! its span events repeats an attribute key or nested map key; the rest of the
@@ -46,10 +47,8 @@ use crate::admit::DATASET_ATTR;
 use crate::value::{Attributes, DuplicateKey, Value, canonical_nodes, decode_attributes};
 
 /// The `schema` field of every canonical payload and the `schema_version`
-/// column of `canonical_events`. `/2` because the payload differs from the Go
-/// exporter's `/1`: a span payload always has `events` (a `/1` span's events
-/// were not captured, not absent), and `kind` may be `event`.
-pub const CANONICAL_SCHEMA: &str = "toudai.canonical.event/2";
+/// column of `canonical_events`.
+pub const CANONICAL_SCHEMA: &str = "toudai.canonical.event/1";
 
 /// A `canonical_events` row. Timestamps are nanoseconds since the epoch, the
 /// RowBinary form of `DateTime64(9)`.
