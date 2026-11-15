@@ -140,4 +140,8 @@ conditions. Add a new run or record and link the relationship.
 |Completed
 |link:024-key-derived-trusted-scope.adoc[Key-derived trusted scope and gateway-assigned event IDs]
 
+|025
+|Completed (bounded slice)
+|link:025-ingest-parity-and-acknowledgement.adoc[toudai-ingest parity and stored acknowledgement]
+
 |===

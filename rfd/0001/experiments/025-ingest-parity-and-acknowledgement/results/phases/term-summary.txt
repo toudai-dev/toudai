@@ -1,0 +1,1 @@
+acked=9 unacked=11 unacked_stored=0 unacked_partial=0

@@ -1,0 +1,15 @@
+# TYPE toudai_ingest_batches_total counter
+toudai_ingest_batches_total{signal="logs"} 2
+toudai_ingest_batches_total{signal="spans"} 2
+# TYPE toudai_ingest_records_total counter
+toudai_ingest_records_total{signal="logs",destination="canonical"} 26
+toudai_ingest_records_total{signal="logs",destination="serving"} 26
+toudai_ingest_records_total{signal="spans",destination="canonical"} 16
+toudai_ingest_records_total{signal="spans",destination="serving"} 16
+# TYPE toudai_ingest_rejected_records_total counter
+toudai_ingest_rejected_records_total{signal="logs",reason="duplicate_or_invalid_record_attributes",namespace="record"} 2
+# TYPE toudai_ingest_requests_total counter
+toudai_ingest_requests_total{signal="logs",outcome="accepted"} 2
+toudai_ingest_requests_total{signal="spans",outcome="accepted"} 2
+# TYPE toudai_ingest_reserved_attributes_dropped_total counter
+toudai_ingest_reserved_attributes_dropped_total{signal="logs"} 2
