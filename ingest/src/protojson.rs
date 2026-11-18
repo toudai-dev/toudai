@@ -6,16 +6,11 @@
 //! allows a double as a decimal string, such as `"1.5"`, and `null` for any
 //! field as its default; those are accepted too.
 //!
-//! A body is decoded directly first, so the common case costs nothing more.
-//! Only a body that fails is read as a JSON tree and normalized: `null`
-//! fields are removed, decimal strings become numbers, and each special
-//! double becomes a stand-in number that occurs nowhere else in the request,
-//! put back as the special value once the message is decoded. A JSON number
-//! cannot be NaN or infinite, so the tree cannot hold them itself.
-//!
-//! The tree keeps only the last of repeated JSON keys, so a body that repeats
-//! a key and also needs this path is read with the last value, where the
-//! direct decode refuses it. No OTLP sender writes repeated keys.
+//! Preserve direct decoding's compatibility behavior. On failure, normalize
+//! borrowed JSON slices into bytes, not a full Value tree. The fallback's
+//! intermediate storage is bounded by input bytes and live object keys,
+//! rather than a second decoded object graph. The fallback refuses serde's
+//! private first-key raw-JSON escape, which could reset those depth limits.
 
 use std::collections::HashSet;
 
@@ -23,7 +18,9 @@ use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
 use serde::de::DeserializeOwned;
-use serde_json::{Number, Value};
+
+#[path = "protojson_tokens.rs"]
+mod tokens;
 
 /// An export request whose attribute and body values can be visited, so
 /// stand-ins can be put back.
@@ -37,16 +34,8 @@ pub fn decode<M: DeserializeOwned + AnyValues>(body: &[u8]) -> Option<M> {
     if let Ok(message) = serde_json::from_slice(body) {
         return Some(message);
     }
-    let mut tree: Value = serde_json::from_slice(body).ok()?;
-    let mut doubles = HashSet::new();
-    let mut specials = 0;
-    normalize(&mut tree, &mut doubles, &mut specials)?;
-    if specials == 0 {
-        return serde_json::from_value(tree).ok();
-    }
-    let stand_ins = StandIns::choose(&doubles);
-    stand_ins.replace(&mut tree);
-    let mut message: M = serde_json::from_value(tree).ok()?;
+    let (bytes, stand_ins) = tokens::normalize(body)?;
+    let mut message: M = serde_json::from_slice(&bytes).ok()?;
     message.for_each_value(&mut |value| stand_ins.restore(value));
     Some(message)
 }
@@ -56,44 +45,6 @@ const SPECIALS: [(&str, f64); 3] = [
     ("Infinity", f64::INFINITY),
     ("-Infinity", f64::NEG_INFINITY),
 ];
-
-/// Remove `null` fields and turn decimal-string doubles into numbers,
-/// collecting the bits of every numeric double and counting the special
-/// ones. `None` for a string double protojson would refuse.
-fn normalize(value: &mut Value, doubles: &mut HashSet<u64>, specials: &mut usize) -> Option<()> {
-    match value {
-        Value::Object(fields) => {
-            fields.retain(|_, v| !v.is_null());
-            if let Some(double) = fields.get_mut("doubleValue") {
-                match double {
-                    Value::Number(n) => {
-                        doubles.insert(n.as_f64()?.to_bits());
-                    }
-                    Value::String(text) if SPECIALS.iter().any(|(s, _)| s == text) => {
-                        *specials += 1;
-                    }
-                    Value::String(text) => {
-                        // Rust also parses "inf" and "nan"; protojson refuses them.
-                        let parsed = text.parse::<f64>().ok().filter(|d| d.is_finite())?;
-                        doubles.insert(parsed.to_bits());
-                        *double = Value::Number(Number::from_f64(parsed)?);
-                    }
-                    _ => {}
-                }
-            }
-            for field in fields.values_mut() {
-                normalize(field, doubles, specials)?;
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                normalize(item, doubles, specials)?;
-            }
-        }
-        _ => {}
-    }
-    Some(())
-}
 
 /// One finite stand-in per special double, none of them a double the
 /// request holds, so putting them back changes no real value.
@@ -112,22 +63,6 @@ impl StandIns {
             }
         };
         StandIns([next(), next(), next()])
-    }
-
-    fn replace(&self, value: &mut Value) {
-        match value {
-            Value::Object(fields) => {
-                if let Some(Value::String(text)) = fields.get("doubleValue")
-                    && let Some(i) = SPECIALS.iter().position(|(s, _)| s == text)
-                {
-                    let stand_in = Number::from_f64(self.0[i]).expect("stand-ins are finite");
-                    fields.insert("doubleValue".into(), Value::Number(stand_in));
-                }
-                fields.values_mut().for_each(|v| self.replace(v));
-            }
-            Value::Array(items) => items.iter_mut().for_each(|v| self.replace(v)),
-            _ => {}
-        }
     }
 
     fn restore(&self, value: &mut AnyValue) {
@@ -205,7 +140,7 @@ impl AnyValues for ExportTraceServiceRequest {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
 
@@ -322,5 +257,78 @@ mod tests {
         let record = &request.resource_logs[0].scope_logs[0].log_records[0];
         assert!(record.attributes.is_empty() && record.body.is_none());
         assert!(decode::<ExportLogsServiceRequest>(b"{not json").is_none());
+    }
+
+    #[test]
+    fn unknown_fields_and_last_duplicate_keep_their_previous_meaning() {
+        for body in [
+            r#"{"resourceLogs":[],"future":{"doubleValue":"text"}}"#,
+            r#"{"future":1e400}"#,
+            r#"{"resourceLogs":[],"future":1e400}"#,
+            r#"{"resourceLogs":[{}],"resourceLogs":[]}"#,
+            r#"{"resourceLogs":[{}],"resourceLogs":null}"#,
+        ] {
+            assert_eq!(
+                decode::<ExportLogsServiceRequest>(body.as_bytes()),
+                Some(ExportLogsServiceRequest::default()),
+                "{body}"
+            );
+        }
+        assert!(
+            decode::<ExportLogsServiceRequest>(
+                br#"{"resourceLogs":null,"future":{"doubleValue":"text"}}"#
+            )
+            .is_none()
+        );
+        for body in [
+            r#"{"stringValue":"kept","stringValue":null}"#,
+            r#"{"stringValue":"kept","doubleValue":"1.5"}"#,
+        ] {
+            let body = format!(
+                r#"{{"resourceLogs":[{{"scopeLogs":[{{"logRecords":[{{"body":{body}}}]}}]}}]}}"#
+            );
+            let request: ExportLogsServiceRequest = decode(body.as_bytes()).unwrap();
+            assert_eq!(
+                request.resource_logs[0].scope_logs[0].log_records[0]
+                    .body
+                    .as_ref()
+                    .unwrap()
+                    .value,
+                Some(any_value::Value::StringValue("kept".into()))
+            );
+        }
+        let body = br#"{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"body":{"doubleValue":"NaN","doubleValue":1.5}}]}]}]}"#;
+        let request: ExportLogsServiceRequest = decode(body).unwrap();
+        assert_eq!(
+            double(
+                request.resource_logs[0].scope_logs[0].log_records[0]
+                    .body
+                    .as_ref()
+                    .unwrap()
+            ),
+            Some(1.5)
+        );
+    }
+
+    #[test]
+    fn fallback_refuses_private_embedded_json_without_changing_direct_decode() {
+        for body in [
+            r#"{"resourceLogs":{"$serde_json::private::RawValue":"[]"}}"#,
+            r#"{"resourceLogs":null,"future":{"$serde_json::private::RawValue":"[]"}}"#,
+            r#"{"resourceLogs":null,"future":{"$serde_json::private::RawValue":0}}"#,
+        ] {
+            assert!(
+                decode::<ExportLogsServiceRequest>(body.as_bytes()).is_none(),
+                "{body}"
+            );
+        }
+        // This is an ordinary ignored extension; the direct path does not
+        // interpret embedded JSON, so there is no reason to refuse it.
+        assert_eq!(
+            decode::<ExportLogsServiceRequest>(
+                br#"{"resourceLogs":[],"future":{"$serde_json::private::RawValue":0}}"#
+            ),
+            Some(ExportLogsServiceRequest::default())
+        );
     }
 }
