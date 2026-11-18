@@ -89,6 +89,18 @@ pub enum QueryError {
         count: usize,
         max: usize,
     },
+    /// An event listing was grouped or bucketed.
+    ListingNotGrouped,
+    /// An event listing's page size is zero or above the maximum.
+    InvalidLimit {
+        limit: u32,
+        max: u32,
+    },
+    /// An event listing names more fields than one response may carry.
+    TooManyFields {
+        count: usize,
+        max: usize,
+    },
     EmptyAttributeKey,
     InvalidIdentifier {
         name: String,
@@ -142,6 +154,9 @@ impl QueryError {
             QueryError::InvalidBucket { .. } => "invalid_bucket",
             QueryError::TooManyBuckets { .. } => "too_many_buckets",
             QueryError::PercentileCount { .. } => "invalid_percentiles",
+            QueryError::ListingNotGrouped => "listing_not_grouped",
+            QueryError::InvalidLimit { .. } => "invalid_limit",
+            QueryError::TooManyFields { .. } => "too_many_fields",
             QueryError::EmptyAttributeKey => "empty_attribute_key",
             QueryError::InvalidIdentifier { .. } => "invalid_identifier",
             QueryError::OrderingNotDefined { .. } => "ordering_not_defined",
@@ -180,6 +195,18 @@ impl fmt::Display for QueryError {
                 f,
                 "a percentile aggregate needs 1 to {max} percentiles, not {count}"
             ),
+            QueryError::ListingNotGrouped => {
+                write!(f, "an event listing cannot be grouped or bucketed")
+            }
+            QueryError::InvalidLimit { limit, max } => {
+                write!(f, "an event listing returns 1 to {max} events, not {limit}")
+            }
+            QueryError::TooManyFields { count, max } => {
+                write!(
+                    f,
+                    "an event listing reports at most {max} fields, not {count}"
+                )
+            }
             QueryError::EmptyAttributeKey => write!(f, "attribute key is empty"),
             QueryError::InvalidIdentifier { name } => {
                 write!(f, "{name:?} is not a plain SQL identifier")
@@ -211,7 +238,10 @@ impl fmt::Display for QueryError {
                 write!(f, "{} has no scalar value to count", value_type.as_str())
             }
             QueryError::AggregateRequiresSpans => {
-                write!(f, "span duration aggregates need the spans signal")
+                write!(
+                    f,
+                    "span duration aggregates and orders need the spans signal"
+                )
             }
             QueryError::IncompatibleType {
                 attr,

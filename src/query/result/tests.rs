@@ -286,7 +286,7 @@ fn group_keys_keep_their_type() {
         (
             "wat",
             "",
-            Err(malformed_result("unknown group type \"wat\"")),
+            Err(malformed_result("unknown value type \"wat\"")),
         ),
     ];
     for (ty, value, expected) in cases {
@@ -368,6 +368,7 @@ fn response_count_json_is_lossless_and_typed() {
         }],
         diagnostics: plan.diagnostics,
         non_finite_excluded: Some(u64::MAX - 1),
+        events: None,
     };
     let out = result.to_json();
     assert_eq!(

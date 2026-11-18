@@ -9,10 +9,13 @@
 //! parameters (`{p0:String}`), including attribute keys, so a key or string
 //! literal cannot change the statement.
 
-use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Percentile, Predicate, Query, Signal};
+use super::model::{
+    Aggregate, AttrRef, CmpOp, EventOrder, Namespace, Percentile, Predicate, Query, Signal,
+};
 use super::schema::{
-    self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TIMESTAMP_COLUMN, TIMING_END_BEFORE_START, TYPED_SCALARS,
+    self, DATASET_COLUMN, EVENT_ID_COLUMN, ListingType, SPAN_DURATION_COLUMN,
+    SPAN_TIMING_STATUS_COLUMN, ServingTables, TIMESTAMP_COLUMN, TIMING_END_BEFORE_START,
+    TYPED_SCALARS, listing_columns,
 };
 use super::value::{Literal, ValueType};
 
@@ -34,6 +37,23 @@ pub mod columns {
 
     pub fn group_value(index: usize) -> String {
         format!("g{index}_value")
+    }
+
+    pub const MATCHED: &str = "matched";
+
+    /// A listed serving column. The prefix keeps the alias from shadowing the
+    /// column itself: `toString(duration_ns) AS duration_ns` would make
+    /// `ORDER BY duration_ns` sort text.
+    pub fn listed(name: &str) -> String {
+        format!("l_{name}")
+    }
+
+    pub fn field_type(index: usize) -> String {
+        format!("f{index}_type")
+    }
+
+    pub fn field_value(index: usize) -> String {
+        format!("f{index}_value")
     }
 }
 
@@ -108,6 +128,14 @@ impl Binder {
 
 /// Generate the statement for a request that passed `validate`.
 pub fn generate(query: &Query, tables: &ServingTables) -> SqlStatement {
+    if let Aggregate::Events {
+        limit,
+        order,
+        fields,
+    } = &query.aggregate
+    {
+        return generate_listing(query, tables, *limit, *order, fields);
+    }
     let mut binder = Binder::default();
     let mut select: Vec<String> = Vec::new();
     let mut group: Vec<String> = Vec::new();
@@ -155,6 +183,70 @@ pub fn generate(query: &Query, tables: &ServingTables) -> SqlStatement {
     sql.push_str(" FORMAT JSONEachRow");
     SqlStatement {
         sql,
+        params: binder.params,
+    }
+}
+
+/// One page of matching events. `count() OVER ()` is evaluated before the
+/// `LIMIT`, so the page and the number of events that matched come from one
+/// statement over one snapshot.
+fn generate_listing(
+    query: &Query,
+    tables: &ServingTables,
+    limit: u32,
+    order: EventOrder,
+    fields: &[AttrRef],
+) -> SqlStatement {
+    let mut binder = Binder::default();
+    let mut select = vec![
+        format!("{EVENT_ID_COLUMN} AS {}", columns::listed(EVENT_ID_COLUMN)),
+        format!(
+            "toString(toUnixTimestamp64Nano({TIMESTAMP_COLUMN})) AS {}",
+            columns::listed("timestamp_ns")
+        ),
+    ];
+    for (name, ty) in listing_columns(query.signal) {
+        select.push(match ty {
+            ListingType::Text | ListingType::TextProjection => {
+                format!("{name} AS {}", columns::listed(name))
+            }
+            ListingType::Int => format!("toString({name}) AS {}", columns::listed(name)),
+            ListingType::Nanos => format!(
+                "toString(toUnixTimestamp64Nano({name})) AS {}",
+                columns::listed(&format!("{name}_ns"))
+            ),
+        });
+    }
+    for (index, attr) in fields.iter().enumerate() {
+        let key = binder.string(&attr.key);
+        select.push(format!(
+            "{} AS {}",
+            type_expr(query.signal, attr, &key),
+            columns::field_type(index)
+        ));
+        select.push(format!(
+            "{} AS {}",
+            value_expr(query.signal, attr, &key),
+            columns::field_value(index)
+        ));
+    }
+    select.push(format!("count() OVER () AS {}", columns::MATCHED));
+    let conditions = conditions(query, &mut binder, |_| true);
+    let order_by = match order {
+        EventOrder::Newest => format!("{TIMESTAMP_COLUMN} DESC, {EVENT_ID_COLUMN} DESC"),
+        EventOrder::Oldest => format!("{TIMESTAMP_COLUMN} ASC, {EVENT_ID_COLUMN} ASC"),
+        EventOrder::Longest => format!(
+            "{SPAN_DURATION_COLUMN} DESC NULLS LAST, {TIMESTAMP_COLUMN} DESC, {EVENT_ID_COLUMN} DESC"
+        ),
+    };
+    let limit = binder.bind("UInt32", limit.to_string());
+    SqlStatement {
+        sql: format!(
+            "SELECT {} FROM {} WHERE {} ORDER BY {order_by} LIMIT {limit} FORMAT JSONEachRow",
+            select.join(", "),
+            tables.table(query.signal),
+            conditions.join(" AND ")
+        ),
         params: binder.params,
     }
 }
@@ -517,6 +609,7 @@ fn aggregate_columns(query: &Query, binder: &mut Binder) -> Vec<String> {
             }
             out
         }
+        Aggregate::Events { .. } => unreachable!("a listing has its own statement"),
         Aggregate::SpanDurationPercentiles { percentiles } => {
             let observable = format!("isNotNull({SPAN_DURATION_COLUMN})");
             vec![

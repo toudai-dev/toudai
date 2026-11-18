@@ -10,12 +10,16 @@ pub mod value;
 
 pub use error::{Operation, QueryError, UnsupportedValue};
 pub use model::{
-    Aggregate, AttrRef, CmpOp, Namespace, Percentile, Predicate, Query, Scope, Signal, TimeRange,
+    Aggregate, AttrRef, CmpOp, EventOrder, Namespace, Percentile, Predicate, Query, Scope, Signal,
+    TimeRange,
 };
 pub use plan::{
     ApproximationMode, Guard, Plan, PlanDiagnostics, StoragePath, diagnostics, plan, validate,
 };
-pub use result::{GroupValue, QueryResult, ResultRow, Sum, ValueStats, interpret};
+pub use result::{
+    EnvelopeValue, EventPage, EventRow, FieldValue, GroupValue, QueryResult, ResultRow, Sum,
+    ValueStats, interpret,
+};
 pub use schema::ServingTables;
 pub use sql::{Param, SqlStatement};
 pub use value::{Literal, TypedValue, ValueType};

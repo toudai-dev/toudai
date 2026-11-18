@@ -102,3 +102,53 @@ pub const TYPED_SCALARS: [ValueType; 4] = [
     ValueType::String,
     ValueType::Bool,
 ];
+
+/// How an event listing reads and reports a serving column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListingType {
+    Text,
+    /// A lossy text projection, reported under `<column>_text` so it is not
+    /// read as the typed value: the serving `body` is the body as text, so an
+    /// explicit-empty body and an empty string both read `""`. The canonical
+    /// payload (`GET /v1/events`) holds the typed value.
+    TextProjection,
+    /// An integer column, possibly Nullable; reported as a typed int or null.
+    Int,
+    /// A `DateTime64(9)` column, reported as Unix nanoseconds under
+    /// `<column>_ns`.
+    Nanos,
+}
+
+/// The envelope columns an event listing reports for each event, besides
+/// `event_id` and `timestamp`: what an operator needs to recognise an event
+/// and follow it to its trace, not its attributes (those are `fields`).
+pub fn listing_columns(signal: Signal) -> &'static [(&'static str, ListingType)] {
+    use ListingType::*;
+    match signal {
+        Signal::Logs => &[
+            ("kind", Text),
+            ("service_name", Text),
+            ("severity_text", Text),
+            ("severity_number", Int),
+            ("event_name", Text),
+            ("body", TextProjection),
+            ("trace_id", Text),
+            ("span_id", Text),
+        ],
+        Signal::Spans => &[
+            ("kind", Text),
+            ("service_name", Text),
+            ("span_name", Text),
+            ("span_kind", Text),
+            ("status_code", Int),
+            (SPAN_DURATION_COLUMN, Int),
+            (SPAN_TIMING_STATUS_COLUMN, Text),
+            ("end_ts", Nanos),
+            ("trace_id", Text),
+            ("span_id", Text),
+            ("parent_span_id", Text),
+        ],
+    }
+}
+
+pub const EVENT_ID_COLUMN: &str = "event_id";

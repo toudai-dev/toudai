@@ -11,9 +11,9 @@ use std::sync::Once;
 use common::*;
 use serde_json::{Value, json};
 use toudai::query::{
-    Aggregate, AttrRef, GroupValue, Operation, Percentile, Predicate, Query, QueryError,
-    QueryResult, Scope, Signal, TimeRange, TypedValue, UnsupportedValue, ValueType, interpret,
-    plan,
+    Aggregate, AttrRef, EnvelopeValue, EventOrder, FieldValue, GroupValue, Operation, Percentile,
+    Predicate, Query, QueryError, QueryResult, Scope, Signal, TimeRange, TypedValue,
+    UnsupportedValue, ValueType, interpret, plan,
 };
 
 /// Bucket origin: deliberately not a multiple of the 10 ns width, so buckets
@@ -103,6 +103,16 @@ fn ch() -> Option<&'static ClickHouse> {
             })
             .collect();
         ch.insert("serving_spans", &rows.join("\n"));
+
+        // Two events at one instant, one holding bytes.
+        let ties = [
+            json!({"dataset": "ties", "event_id": "a", "routing_epoch": 1, "timestamp": ts(START),
+                   "record_other": {"blob": "bytes"}}),
+            json!({"dataset": "ties", "event_id": "b", "routing_epoch": 1, "timestamp": ts(START),
+                   "record_bool": {"blob": false}}),
+        ];
+        let rows: Vec<String> = ties.iter().map(Value::to_string).collect();
+        ch.insert("serving_logs", &rows.join("\n"));
     });
     Some(ch)
 }
@@ -404,4 +414,202 @@ fn span_duration_percentiles_skip_unobservable_durations() {
         out["rows"][0]["percentiles"][1],
         json!({"percentile": "50", "value": {"type": "int", "value": "200"}})
     );
+}
+
+fn listing(order: EventOrder, limit: u32, fields: Vec<AttrRef>) -> Aggregate {
+    Aggregate::Events {
+        limit,
+        order,
+        fields,
+    }
+}
+
+/// `(event_id, timestamp offset from START)` of each listed event, and the
+/// number that matched.
+fn listed(result: &QueryResult) -> (Vec<(String, i64)>, u64) {
+    let page = result.events.as_ref().unwrap();
+    assert!(result.rows.is_empty());
+    let rows = page
+        .rows
+        .iter()
+        .map(|row| (row.event_id.clone(), row.timestamp_ns - START))
+        .collect();
+    (rows, page.matched)
+}
+
+fn ids(pairs: &[(&str, i64)]) -> Vec<(String, i64)> {
+    pairs.iter().map(|(id, o)| (id.to_string(), *o)).collect()
+}
+
+#[test]
+fn listings_page_in_order_and_count_every_match() {
+    let Some(ch) = ch() else { return };
+    type Case = (
+        &'static str,
+        &'static str,
+        EventOrder,
+        u32,
+        Vec<(&'static str, i64)>,
+        u64,
+    );
+    let cases: Vec<Case> = vec![
+        (
+            "newest first, a page of the five in range",
+            "buckets",
+            EventOrder::Newest,
+            3,
+            vec![("l5", 29), ("l4", 25), ("l3", 10)],
+            5,
+        ),
+        (
+            "oldest first",
+            "buckets",
+            EventOrder::Oldest,
+            2,
+            vec![("l1", 0), ("l2", 9)],
+            5,
+        ),
+        (
+            "a page larger than the matches is all of them",
+            "buckets",
+            EventOrder::Newest,
+            100,
+            vec![("l5", 29), ("l4", 25), ("l3", 10), ("l2", 9), ("l1", 0)],
+            5,
+        ),
+        (
+            "ties break on event_id with the order",
+            "ties",
+            EventOrder::Newest,
+            2,
+            vec![("b", 0), ("a", 0)],
+            2,
+        ),
+        (
+            "ties break on event_id with the order (oldest)",
+            "ties",
+            EventOrder::Oldest,
+            2,
+            vec![("a", 0), ("b", 0)],
+            2,
+        ),
+        ("nothing matched", "none", EventOrder::Newest, 10, vec![], 0),
+    ];
+    for (name, dataset, order, limit, expected, matched) in cases {
+        let mut q = query(dataset, Signal::Logs, START, START + 30);
+        q.aggregate = listing(order, limit, vec![]);
+        let result = execute(ch, q).unwrap();
+        assert_eq!(listed(&result), (ids(&expected), matched), "{name}");
+    }
+
+    // Longest: numeric order (300 > 200 > 100, not text order), then the
+    // spans without an observable duration, newest first.
+    let mut q = query("spans", Signal::Spans, START, START + 100);
+    q.aggregate = listing(EventOrder::Longest, 5, vec![]);
+    let result = execute(ch, q).unwrap();
+    assert_eq!(
+        listed(&result),
+        (
+            ids(&[("s0", 0), ("s4", 4), ("s2", 2), ("s3", 3), ("s1", 1)]),
+            5
+        )
+    );
+    let durations: Vec<(EnvelopeValue, EnvelopeValue)> = result
+        .events
+        .as_ref()
+        .unwrap()
+        .rows
+        .iter()
+        .map(|row| {
+            let get = |name: &str| {
+                row.envelope
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, v)| v.clone())
+                    .unwrap()
+            };
+            (get("duration_ns"), get("span_timing_status"))
+        })
+        .collect();
+    let text = |s: &str| EnvelopeValue::Text(s.into());
+    assert_eq!(
+        durations,
+        vec![
+            (EnvelopeValue::Int(Some(300)), text("ok")),
+            (EnvelopeValue::Int(Some(200)), text("ok")),
+            (EnvelopeValue::Int(Some(100)), text("ok")),
+            (EnvelopeValue::Int(None), text("end_before_start")),
+            (EnvelopeValue::Int(None), text("missing")),
+        ]
+    );
+}
+
+#[test]
+fn listed_fields_report_every_received_value_with_its_type() {
+    let Some(ch) = ch() else { return };
+    let fields = |dataset: &str, keys: &[&str]| {
+        let mut q = query(dataset, Signal::Logs, START, START + 100);
+        q.aggregate = listing(
+            EventOrder::Oldest,
+            100,
+            keys.iter().map(|k| AttrRef::record(k)).collect(),
+        );
+        execute(ch, q)
+            .unwrap()
+            .events
+            .unwrap()
+            .rows
+            .into_iter()
+            .map(|row| (row.event_id, row.fields))
+            .collect::<Vec<_>>()
+    };
+    // Bytes would fail a grouping; a listing reports the type.
+    assert_eq!(
+        fields("ties", &["blob", "never.sent"]),
+        vec![
+            (
+                "a".into(),
+                vec![
+                    FieldValue::CanonicalOnly(ValueType::Bytes),
+                    FieldValue::Missing
+                ]
+            ),
+            (
+                "b".into(),
+                vec![
+                    FieldValue::Value(TypedValue::Bool(false)),
+                    FieldValue::Missing
+                ]
+            ),
+        ]
+    );
+    let rows = fields("nonfinite", &["ratio"]);
+    assert!(matches!(&rows[0].1[0], FieldValue::NonFinite(v) if *v == f64::INFINITY));
+    // The string under an int key is reported as a string.
+    let rows = fields("latency", &["latency.ms"]);
+    assert_eq!(rows.len(), 11);
+    assert_eq!(rows[0].1, vec![FieldValue::Value(TypedValue::Int(7))]);
+    assert_eq!(
+        rows[10].1,
+        vec![FieldValue::Value(TypedValue::String("slow".into()))]
+    );
+
+    // The response is typed and lossless.
+    let mut q = query("ties", Signal::Logs, START, START + 100);
+    q.aggregate = listing(EventOrder::Newest, 1, vec![AttrRef::record("blob")]);
+    let out = execute(ch, q).unwrap().to_json();
+    assert_eq!(out["matched"], json!({"type": "uint64", "value": "2"}));
+    let row = &out["rows"][0];
+    assert_eq!(row["event_id"], "b");
+    assert_eq!(
+        row["timestamp_ns"],
+        json!({"type": "int", "value": START.to_string()})
+    );
+    assert_eq!(row["severity_number"], json!({"type": "int", "value": "0"}));
+    // The serving body is a text projection, named so.
+    assert_eq!(row["body_text"], json!(""));
+    assert_eq!(row.get("body"), None);
+    assert_eq!(row["fields"], json!([{"type": "bool", "value": false}]));
+    let nonfinite = FieldValue::NonFinite(f64::NEG_INFINITY).to_json();
+    assert_eq!(nonfinite, json!({"type": "double", "value": "-Infinity"}));
 }

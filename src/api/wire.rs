@@ -15,8 +15,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::query::{
-    Aggregate, AttrRef, CmpOp, Literal, Namespace, Percentile, Predicate, Query, Scope, Signal,
-    TimeRange, ValueType,
+    Aggregate, AttrRef, CmpOp, EventOrder, Literal, Namespace, Percentile, Predicate, Query, Scope,
+    Signal, TimeRange, ValueType,
 };
 
 #[derive(Debug, Deserialize)]
@@ -217,6 +217,22 @@ enum AggregateWire {
     SpanDurationPercentiles {
         percentiles: Vec<PercentileWire>,
     },
+    Events {
+        limit: u32,
+        #[serde(default)]
+        order: EventOrderWire,
+        #[serde(default)]
+        fields: Vec<AttrWire>,
+    },
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum EventOrderWire {
+    #[default]
+    Newest,
+    Oldest,
+    Longest,
 }
 
 impl From<AggregateWire> for Aggregate {
@@ -246,6 +262,19 @@ impl From<AggregateWire> for Aggregate {
                     percentiles: percentiles.into_iter().map(|p| p.0).collect(),
                 }
             }
+            AggregateWire::Events {
+                limit,
+                order,
+                fields,
+            } => Aggregate::Events {
+                limit,
+                order: match order {
+                    EventOrderWire::Newest => EventOrder::Newest,
+                    EventOrderWire::Oldest => EventOrder::Oldest,
+                    EventOrderWire::Longest => EventOrder::Longest,
+                },
+                fields: fields.into_iter().map(AttrRef::from).collect(),
+            },
         }
     }
 }
@@ -640,6 +669,39 @@ mod tests {
                 percentiles: vec![Percentile::parse("50").unwrap()],
             }
         );
+    }
+
+    #[test]
+    fn event_listings() {
+        let listing = |aggregate: Value| parse(with("aggregate", aggregate)).map(|q| q.aggregate);
+        assert_eq!(
+            listing(json!({"kind": "events", "limit": 20})),
+            Ok(Aggregate::Events {
+                limit: 20,
+                order: EventOrder::Newest,
+                fields: vec![],
+            })
+        );
+        assert_eq!(
+            listing(json!({"kind": "events", "limit": 5, "order": "longest",
+                           "fields": [{"namespace": "resource", "key": "service.version"}]})),
+            Ok(Aggregate::Events {
+                limit: 5,
+                order: EventOrder::Longest,
+                fields: vec![AttrRef::resource("service.version")],
+            })
+        );
+        for (bad, detail) in [
+            (json!({"kind": "events"}), "missing field `limit`"),
+            (json!({"kind": "events", "limit": -1}), "invalid value"),
+            (
+                json!({"kind": "events", "limit": 1, "order": "random"}),
+                "unknown variant",
+            ),
+        ] {
+            let err = listing(bad.clone()).unwrap_err();
+            assert!(err.contains(detail), "{bad}: {err}");
+        }
     }
 
     #[test]

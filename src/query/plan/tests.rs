@@ -1,5 +1,5 @@
 use super::*;
-use crate::query::model::{Percentile, Scope, TimeRange};
+use crate::query::model::{EventOrder, Percentile, Scope, TimeRange};
 use crate::query::value::Literal;
 
 // Fixture identity from Experiment 021 (`fixture021.py`): dataset `fixture`,
@@ -31,6 +31,14 @@ fn logs_with(f: impl FnOnce(&mut Query)) -> Query {
 
 fn compare(attr: AttrRef, op: CmpOp, value: Literal) -> Predicate {
     Predicate::Compare { attr, op, value }
+}
+
+fn events(order: EventOrder, limit: u32) -> Aggregate {
+    Aggregate::Events {
+        limit,
+        order,
+        fields: vec![],
+    }
 }
 
 fn metric() -> AttrRef {
@@ -304,6 +312,73 @@ fn validation_table() {
             Err(AggregateRequiresSpans),
         ),
         (
+            "a listing cannot be grouped",
+            logs_with(|q| {
+                q.group_by = vec![metric()];
+                q.aggregate = events(EventOrder::Newest, 10);
+            }),
+            Err(ListingNotGrouped),
+        ),
+        (
+            "a listing cannot be bucketed",
+            logs_with(|q| {
+                q.bucket_ns = Some(1);
+                q.aggregate = events(EventOrder::Newest, 10);
+            }),
+            Err(ListingNotGrouped),
+        ),
+        (
+            "a listing returns at least one event",
+            logs_with(|q| q.aggregate = events(EventOrder::Newest, 0)),
+            Err(InvalidLimit {
+                limit: 0,
+                max: MAX_EVENTS,
+            }),
+        ),
+        (
+            "the largest listing",
+            logs_with(|q| q.aggregate = events(EventOrder::Oldest, MAX_EVENTS)),
+            Ok(()),
+        ),
+        (
+            "a listing above the largest",
+            logs_with(|q| q.aggregate = events(EventOrder::Oldest, MAX_EVENTS + 1)),
+            Err(InvalidLimit {
+                limit: MAX_EVENTS + 1,
+                max: MAX_EVENTS,
+            }),
+        ),
+        (
+            "longest first needs spans",
+            logs_with(|q| q.aggregate = events(EventOrder::Longest, 10)),
+            Err(AggregateRequiresSpans),
+        ),
+        (
+            "listed fields are bounded",
+            logs_with(|q| {
+                q.aggregate = Aggregate::Events {
+                    limit: 1,
+                    order: EventOrder::Newest,
+                    fields: vec![metric(); MAX_FIELDS + 1],
+                }
+            }),
+            Err(TooManyFields {
+                count: MAX_FIELDS + 1,
+                max: MAX_FIELDS,
+            }),
+        ),
+        (
+            "listed fields need a key",
+            logs_with(|q| {
+                q.aggregate = Aggregate::Events {
+                    limit: 1,
+                    order: EventOrder::Newest,
+                    fields: vec![AttrRef::record("")],
+                }
+            }),
+            Err(EmptyAttributeKey),
+        ),
+        (
             "span duration on spans",
             {
                 let mut q = query(Signal::Spans);
@@ -450,6 +525,37 @@ fn diagnostics_table() {
                 NonFiniteFloatCheck,
                 NearestRankPercentiles,
             ],
+        ),
+        (
+            "a span listing reads the envelope and the listed fields",
+            {
+                let mut q = query(Signal::Spans);
+                q.aggregate = Aggregate::Events {
+                    limit: 10,
+                    order: EventOrder::Longest,
+                    fields: vec![AttrRef::resource("service.version")],
+                };
+                q
+            },
+            vec![
+                "dataset",
+                "duration_ns",
+                "end_ts",
+                "event_id",
+                "kind",
+                "parent_span_id",
+                "resource",
+                "resource_types",
+                "service_name",
+                "span_id",
+                "span_kind",
+                "span_name",
+                "span_timing_status",
+                "status_code",
+                "timestamp",
+                "trace_id",
+            ],
+            vec![MatchedCount, TypedFieldValues, KeyMembershipPresence],
         ),
         (
             "span duration percentiles",

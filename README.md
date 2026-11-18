@@ -44,7 +44,11 @@ series: buckets are half-open, start at `time.start_ns`, and each row reports
 its `bucket_start_ns` (at most 1,000 buckets; a bucket without events has no
 row). The `percentiles` and `span_duration_percentiles` aggregates return
 exact nearest-rank percentiles, each a value that was received, under the same
-typed rules as `sum`.
+typed rules as `sum`. The `events` aggregate lists the matching events
+themselves (newest, oldest, or longest first, up to 1,000) with their
+`event_id` and `matched`, the number that matched before the page limit. A
+log's `body_text` is the serving row's text projection of its body (an
+explicit-empty body reads as `""`); its typed body is in the canonical payload.
 
 The data endpoints need `Authorization: Bearer <read key>`. One deployment
 serves one customer

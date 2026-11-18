@@ -5,10 +5,12 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::error::{Operation, QueryError, UnsupportedValue};
-use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Percentile, Predicate, Query, Signal};
+use super::model::{
+    Aggregate, AttrRef, CmpOp, EventOrder, Namespace, Percentile, Predicate, Query, Signal,
+};
 use super::schema::{
-    self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TIMESTAMP_COLUMN, TYPED_SCALARS,
+    self, DATASET_COLUMN, EVENT_ID_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN,
+    ServingTables, TIMESTAMP_COLUMN, TYPED_SCALARS, listing_columns,
 };
 use super::sql::{self, SqlStatement};
 use super::value::{Literal, ValueType};
@@ -49,6 +51,12 @@ pub enum Guard {
     /// Percentiles are exact nearest-rank values: always a received value,
     /// never interpolated or estimated.
     NearestRankPercentiles,
+    /// A listing reports how many events matched, counted by the statement
+    /// that returns the page, so a truncated page is never read as all of them.
+    MatchedCount,
+    /// Listed fields report each value with its received type; values the
+    /// query surface cannot operate on are reported by type, not dropped.
+    TypedFieldValues,
 }
 
 impl Guard {
@@ -63,6 +71,8 @@ impl Guard {
             Guard::IncompatibleTypeCheck => "incompatible_type_check",
             Guard::NonFiniteFloatCheck => "non_finite_float_check",
             Guard::NearestRankPercentiles => "nearest_rank_percentiles",
+            Guard::MatchedCount => "matched_count",
+            Guard::TypedFieldValues => "typed_field_values",
         }
     }
 }
@@ -105,6 +115,10 @@ pub(crate) fn has_type_filter(filters: &[Predicate], attr: &AttrRef, ty: ValueTy
 pub const MAX_BUCKETS: u32 = 1_000;
 /// The most percentiles one aggregate computes.
 pub const MAX_PERCENTILES: usize = 16;
+/// The most events one listing returns.
+pub const MAX_EVENTS: u32 = 1_000;
+/// The most attribute fields one listing reports per event.
+pub const MAX_FIELDS: usize = 16;
 
 /// Check a request against the PoC typed-value contract.
 pub fn validate(query: &Query) -> Result<(), QueryError> {
@@ -213,6 +227,31 @@ fn validate_aggregate(query: &Query) -> Result<(), QueryError> {
             }
             validate_percentiles(percentiles)
         }
+        Aggregate::Events {
+            limit,
+            order,
+            fields,
+        } => {
+            if !query.group_by.is_empty() || query.bucket_ns.is_some() {
+                return Err(QueryError::ListingNotGrouped);
+            }
+            if *limit == 0 || *limit > MAX_EVENTS {
+                return Err(QueryError::InvalidLimit {
+                    limit: *limit,
+                    max: MAX_EVENTS,
+                });
+            }
+            if *order == EventOrder::Longest && query.signal != Signal::Spans {
+                return Err(QueryError::AggregateRequiresSpans);
+            }
+            if fields.len() > MAX_FIELDS {
+                return Err(QueryError::TooManyFields {
+                    count: fields.len(),
+                    max: MAX_FIELDS,
+                });
+            }
+            fields.iter().try_for_each(validate_key)
+        }
     }
 }
 
@@ -305,7 +344,11 @@ pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
             }
         }
     }
-    for attr in &query.group_by {
+    let listed: &[AttrRef] = match &query.aggregate {
+        Aggregate::Events { fields, .. } => fields,
+        _ => &[],
+    };
+    for attr in query.group_by.iter().chain(listed) {
         if attr.namespace == Namespace::Record {
             all_record_maps(&mut columns);
         } else {
@@ -329,13 +372,18 @@ pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
         Aggregate::SpanDuration | Aggregate::SpanDurationPercentiles { .. } => {
             columns.extend([SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN]);
         }
+        Aggregate::Events { .. } => {
+            columns.insert(EVENT_ID_COLUMN);
+            columns.extend(listing_columns(signal).iter().map(|(name, _)| *name));
+        }
     }
     columns.into_iter().collect()
 }
 
 pub(crate) fn guards(query: &Query) -> Vec<Guard> {
     let mut guards: BTreeSet<Guard> = BTreeSet::new();
-    let mut references_attr = !query.group_by.is_empty();
+    let fields = matches!(&query.aggregate, Aggregate::Events { fields, .. } if !fields.is_empty());
+    let mut references_attr = !query.group_by.is_empty() || fields;
     for predicate in &query.filters {
         references_attr = true;
         if let Predicate::Compare { value, .. } = predicate {
@@ -389,6 +437,12 @@ pub(crate) fn guards(query: &Query) -> Vec<Guard> {
         Aggregate::SpanDurationPercentiles { .. } => {
             guards.insert(Guard::ContributingCounts);
             guards.insert(Guard::NearestRankPercentiles);
+        }
+        Aggregate::Events { .. } => {
+            guards.insert(Guard::MatchedCount);
+            if fields {
+                guards.insert(Guard::TypedFieldValues);
+            }
         }
     }
     guards.into_iter().collect()

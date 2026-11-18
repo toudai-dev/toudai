@@ -136,6 +136,26 @@ pub enum Aggregate {
     /// Span duration counts as [`Aggregate::SpanDuration`] plus exact
     /// nearest-rank percentiles of the observable durations.
     SpanDurationPercentiles { percentiles: Vec<Percentile> },
+    /// The matching events themselves rather than an aggregate: up to `limit`
+    /// summary rows in `order`, plus how many events matched, so a client can
+    /// tell a whole listing from a page of it and look each event up by its
+    /// `event_id`. A listing is neither grouped nor bucketed.
+    Events {
+        limit: u32,
+        order: EventOrder,
+        /// Attributes whose received type and value each row reports.
+        fields: Vec<AttrRef>,
+    },
+}
+
+/// The order of an event listing. Ties break on `event_id` in the same
+/// direction, so a listing is deterministic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventOrder {
+    Newest,
+    Oldest,
+    /// Longest observable span duration first; spans without one come last.
+    Longest,
 }
 
 /// A percentile in thousandths of a percent (`99.9` is `99_900`), so a
