@@ -7,7 +7,10 @@ sample through the standard OpenTelemetry Rust SDK and `opentelemetry-otlp`
 computed from its own model. It is a standalone crate: it is not a member of the
 root Cargo workspace.
 
-Recorded run: link:../rfd/0001/experiments/023-fixture-emitter-run.adoc[Experiment 023].
+Recorded run: link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/experiments/023-fixture-emitter-run.adoc[historical Experiment 023].
+Current designs live in the link:https://github.com/toudai-dev/rfds[canonical RFD repository (members)].
+The product test copy of its expected contents is `fixture-emitter/expected.jsonl`;
+update that copy when the fixture changes, not the recorded experiment.
 
 == Commands
 
@@ -115,7 +118,8 @@ are typed record attributes. A log record with an empty `event_name` is a log.
 The serving row's `kind` is `event` for the first and `log` for the second; the
 event stays queryable together with logs and spans. No proprietary producer field
 or batch identifier is involved. RFD 0001 adopts this encoding; see "Define
-application-event encoding" in `rfd/0001/acceptance-and-replay-impl.adoc`.
+application-event encoding" in the
+link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/acceptance-and-replay-impl.adoc[historical acceptance checklist].
 
 == Expected contents
 

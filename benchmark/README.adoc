@@ -6,7 +6,9 @@ runtime state below `TOUDAI_BENCH_ROOT`.
 
 NOTE: The product was renamed from Lighthouse to Toudai, and the script
 environment variables moved from the `LIGHTHOUSE_` to the `TOUDAI_` prefix.
-Experiment records under `rfd/0001/experiments/` are historical and still show
+Experiment records in the
+link:https://github.com/toudai-dev/toudai/tree/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/experiments[public historical RFD snapshot]
+are historical and still show
 the `LIGHTHOUSE_` names they were run with; use the same variable names with the
 `TOUDAI_` prefix. Names of existing storage and infrastructure (the ZFS
 datasets and mounts below, the `lighthouse` OS user and `/opt/lighthouse` Flox

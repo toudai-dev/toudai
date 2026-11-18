@@ -1,4 +1,6 @@
-//! `toudai-ingest`: the server-side OTLP endpoint (RFD 0001 Decision 0003).
+//! `toudai-ingest`: the server-side OTLP endpoint ([RFD 0001 Decision 0003]).
+//!
+//! [RFD 0001 Decision 0003]: https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/decisions/0003-rust-otlp-ingest-service.adoc
 //!
 //! It replaces the Go `toudai-collector`. A request is authenticated by its
 //! write key ([`auth`]), its dataset is resolved and its resources and records

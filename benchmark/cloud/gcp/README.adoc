@@ -91,5 +91,5 @@ not a substitute for supervising the build.
 . Repeat the accepted workload on on-demand capacity.
 
 See
-link:../../../rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[Experiment 015]
+link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[historical Experiment 015]
 for approval, privacy, cost, and decision gates.

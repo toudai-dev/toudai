@@ -1,1 +1,0 @@
-acked=22 unacked=38 unacked_stored=0 unacked_partial=0 unacked_error_status=0

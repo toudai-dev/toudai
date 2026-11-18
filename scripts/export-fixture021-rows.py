@@ -21,7 +21,10 @@ and `004-serving-spans.sql` (`timestamp`, `routing_epoch`), not the
 experiment's `ts`. Event identities are the fixture's own
 (`typed-1`, `sum-a`, ...); the owned exporter stores content-derived identities
 instead, which this layer never reads. The experiment harness needs its pinned Python dependencies; see
-`rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/setup.sh`.
+`rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/setup.sh`
+in https://github.com/toudai-dev/rfds. Set TOUDAI_RFDS_DIR to that checkout
+(defaults to a sibling `rfds` directory); ordinary tests use the committed rows
+and need no RFD checkout.
 
 Usage: export-fixture021-rows.py [--check] [OUT_DIR]   (default tests/fixtures/021)
 """
@@ -30,12 +33,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-HARNESS = ROOT / "rfd/0001/experiments/021-hybrid-layout-collector-integration/harness"
+RFDS = Path(os.environ.get("TOUDAI_RFDS_DIR", ROOT.parent / "rfds"))
+HARNESS = RFDS / "rfd/0001/experiments/021-hybrid-layout-collector-integration/harness"
+if not HARNESS.is_dir():
+    sys.exit("Set TOUDAI_RFDS_DIR to a toudai-dev/rfds checkout containing Experiment 021")
 sys.path.insert(0, str(HARNESS))
 
 import fixture021  # noqa: E402

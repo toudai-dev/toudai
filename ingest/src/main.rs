@@ -1,4 +1,6 @@
-//! The Toudai OTLP ingest service (RFD 0001 Decision 0003).
+//! The Toudai OTLP ingest service ([RFD 0001 Decision 0003]).
+//!
+//! [RFD 0001 Decision 0003]: https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/decisions/0003-rust-otlp-ingest-service.adoc
 //!
 //! Configuration is read from the environment, as for the query service:
 //!

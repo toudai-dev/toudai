@@ -5,7 +5,7 @@ could not be provisioned because every project and region in the GCP account was
 capped at 24 `CPUS_PER_VM_FAMILY` for the local-SSD machine families the leaf
 shape requires. The merged GCP one-shard results are unaffected and stay the
 accepted baseline; see
-link:../../../rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[Experiment 015].
+link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[historical Experiment 015].
 
 The committed Flox lock provides the benchmark tools and the exact ClickHouse
 26.8.2.7 LTS version, so both clouds run the same ClickHouse closure.
@@ -90,5 +90,5 @@ temporary SSH rule.
 . Destroy each topology immediately, then destroy the guardrails and network.
 
 See
-link:../../../rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[Experiment 015]
+link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/experiments/015-cloud-production-capacity-and-cost.adoc[historical Experiment 015]
 for approval, privacy, cost, and decision gates.

@@ -3,6 +3,12 @@
 Toudai is a Rust-based, ClickHouse-backed telemetry service under active
 design and benchmarking.
 
+Architecture, decisions, implementation plans, and recorded experiments live in
+the separate [canonical RFD repository (members)](https://github.com/toudai-dev/rfds).
+Public readers can use the [historical RFD snapshot](https://github.com/toudai-dev/toudai/tree/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd),
+which preserves the designs, original task lists and evidence before migration,
+but does not track later changes in the canonical repository.
+
 ```sh
 make build
 make test
@@ -32,7 +38,7 @@ TOUDAI_CLICKHOUSE_URL=http://127.0.0.1:8123 \
 
 Both data endpoints need `Authorization: Bearer <read key>`. One deployment
 serves one customer
-([Decision 0002](rfd/0001/decisions/0002-single-tenant-core.adoc)), so a key
+([historical Decision 0002](https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/decisions/0002-single-tenant-core.adoc)), so a key
 admits the request, optionally restricted to a list of datasets: a dataset
 outside the list is refused with 403. Every statement is scoped to the dataset
 the request names. The static key file (`<key> [<dataset>...]` per line, no
