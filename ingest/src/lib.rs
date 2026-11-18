@@ -17,6 +17,7 @@ pub mod fuzzing;
 pub mod grpc;
 pub mod http;
 pub mod mapping;
+mod memory;
 pub mod metrics;
 pub mod pipeline;
 pub mod protojson;

@@ -78,9 +78,10 @@ pub struct Settings {
     pub budget: Duration,
     /// Request memory held at once, from the body's arrival until the
     /// request is answered (Decision 0003 D3). A request is charged its body
-    /// as received, then as decompressed, then that plus [`RECORD_BYTES`] per
-    /// record and span event once decoded. A request that needs more than the
-    /// whole budget is refused as invalid, since no retry could pass.
+    /// as received, then as decompressed, then for mapping records, span events,
+    /// and their attribute trees (including resource/scope fan-out). A request
+    /// that needs more than the whole budget is refused as invalid, since no
+    /// retry could pass.
     pub memory_budget: usize,
     /// When concurrent requests' rows are written together.
     pub flush: FlushConfig,
@@ -243,7 +244,7 @@ impl Pipeline {
     ) -> Result<Accepted, Refusal> {
         let signal = Signal::Logs;
         let ids = admit_logs(request, scope).map_err(|r| self.reject(signal, r))?;
-        self.hold_records(signal, &mut held, ids.len())?;
+        self.hold_mapping(signal, &mut held, crate::memory::logs(request))?;
         let mapped = map_logs(request, &scope.dataset, &ids, self.routing_epoch);
         self.store(signal, &self.logs, mapped, deadline, held).await
     }
@@ -257,14 +258,7 @@ impl Pipeline {
     ) -> Result<Accepted, Refusal> {
         let signal = Signal::Traces;
         let ids = admit_traces(request, scope).map_err(|r| self.reject(signal, r))?;
-        let events: usize = request
-            .resource_spans
-            .iter()
-            .flat_map(|r| &r.scope_spans)
-            .flat_map(|s| &s.spans)
-            .map(|s| s.events.len())
-            .sum();
-        self.hold_records(signal, &mut held, ids.len().saturating_add(events))?;
+        self.hold_mapping(signal, &mut held, crate::memory::traces(request))?;
         let mapped = map_traces(request, &scope.dataset, &ids, self.routing_epoch);
         self.store(signal, &self.spans, mapped, deadline, held)
             .await
@@ -289,13 +283,14 @@ impl Pipeline {
         self.finish(signal, outcome, rejected)
     }
 
-    /// Top up `held`, which covers the decompressed body, by
-    /// [`RECORD_BYTES`] per record (or span event) before mapping copies the
-    /// records into rows.
-    fn hold_records(&self, signal: Signal, held: &mut Held, records: usize) -> Result<(), Refusal> {
-        let bytes = held
-            .bytes()
-            .saturating_add(records.saturating_mul(RECORD_BYTES));
+    /// Charge before mapping allocates the attribute and row copies.
+    fn hold_mapping(
+        &self,
+        signal: Signal,
+        held: &mut Held,
+        mapped_bytes: usize,
+    ) -> Result<(), Refusal> {
+        let bytes = held.bytes().saturating_add(mapped_bytes);
         self.hold(signal, held, bytes)
     }
 

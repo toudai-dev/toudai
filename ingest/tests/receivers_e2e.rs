@@ -153,7 +153,142 @@ async fn ingests_over_http_and_grpc_into_a_real_clickhouse() {
     }
     default_dataset_resolves_unnamed_requests(&server).await;
     concurrent_requests_share_one_insert(&server).await;
+    expanded_attributes_are_budgeted(&server).await;
     no_key_reaches_storage(&server).await;
+}
+
+/// Tiny wire requests can expand past the budget through nodes, text, or
+/// resource/scope fan-out. Refused requests must never reach either table.
+async fn expanded_attributes_are_budgeted(server: &ClickHouseServer) {
+    let service = support::spawn(
+        server,
+        KEYS,
+        DATABASE,
+        &[
+            ("TOUDAI_INGEST_MEMORY_BUDGET", "20MiB"),
+            ("TOUDAI_INGEST_FLUSH_INTERVAL", "10ms"),
+        ],
+    );
+    let many: Vec<_> = (0..11000).map(|i| s(&format!("a{i}"), "")).collect();
+    let shared: Vec<_> = (0..1000).map(|i| s(&format!("a{i}"), "")).collect();
+    let cases = [
+        ("record", log_body("budget-record", &[], &many)),
+        ("resource", log_body("budget-resource", &many, &[])),
+        (
+            "scope fanout",
+            json!({"resourceLogs": [{"scopeLogs": [{
+                "scope": {"attributes": shared},
+                "logRecords": vec![json!({}); 16]
+            }]}]}),
+        ),
+        (
+            "resource fanout",
+            json!({"resourceLogs": [{
+                "resource": {"attributes": shared},
+                "scopeLogs": [{"logRecords": vec![json!({}); 16]}]
+            }]}),
+        ),
+        (
+            "nested body",
+            json!({"resourceLogs": [{"scopeLogs": [{"logRecords": [{
+                "body": {"arrayValue": {"values": vec![json!({}); 22000]}}
+            }]}]}]}),
+        ),
+        (
+            "text fanout",
+            json!({"resourceLogs": [{
+                "resource": {"attributes": [s("large", &"x".repeat(100_000))]},
+                "scopeLogs": [{"logRecords": vec![json!({}); 16]}]
+            }]}),
+        ),
+    ];
+    let before = canonical_count(server, "").await;
+    let mut grpc = LogsServiceClient::connect(service.grpc.clone())
+        .await
+        .unwrap();
+    for (name, body) in cases {
+        let (status, text) = post(
+            &service.http,
+            "/v1/logs",
+            &body,
+            &[("X-Toudai-Key", KEY_PROD)],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name}: {text}");
+        let decoded: ExportLogsServiceRequest =
+            toudai_ingest::protojson::decode(body.to_string().as_bytes()).unwrap();
+        let mut request = tonic::Request::new(decoded);
+        request
+            .metadata_mut()
+            .insert("x-toudai-key", KEY_PROD.parse().unwrap());
+        assert_eq!(
+            grpc.export(request).await.unwrap_err().code(),
+            Code::InvalidArgument,
+            "{name}"
+        );
+    }
+    // Span event attributes take the same path as record attributes.
+    let spans = json!({"resourceSpans": [{"scopeSpans": [{"spans": [{
+        "events": [{"attributes": many}]
+    }]}]}]});
+    let (status, text) = post(
+        &service.http,
+        "/v1/traces",
+        &spans,
+        &[("X-Toudai-Key", KEY_PROD)],
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "span events: {text}");
+    assert_eq!(canonical_count(server, "").await, before);
+    let control = log_body("budget-control", &[], &[s("small", "fits")]);
+    assert_eq!(
+        post(
+            &service.http,
+            "/v1/logs",
+            &control,
+            &[("X-Toudai-Key", KEY_PROD)]
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(canonical_count(server, "").await, before + 1);
+    // Reserved scope/record attributes are dropped, not copied per row.
+    let ignored = s("toudai.ignored", &"x".repeat(64 * 1024));
+    let dropped = json!({"resourceLogs": [{"scopeLogs": [{
+        "scope": {"attributes": [ignored]},
+        "logRecords": vec![json!({"attributes": [ignored]}); 16]
+    }]}]});
+    assert_eq!(
+        post(
+            &service.http,
+            "/v1/logs",
+            &dropped,
+            &[("X-Toudai-Key", KEY_PROD)]
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(canonical_count(server, "").await, before + 17);
+    assert_eq!(canonical_count(server, "toudai.ignored").await, 0);
+    // Neither link attributes nor the status message is stored by mapping.
+    let unmapped = json!({"resourceSpans": [{"scopeSpans": [{"spans": [{
+        "status": {"message": "x".repeat(1024 * 1024)},
+        "links": [{"attributes": [s("large", &"x".repeat(1024 * 1024))]}]
+    }]}]}]});
+    assert_eq!(
+        post(
+            &service.http,
+            "/v1/traces",
+            &unmapped,
+            &[("X-Toudai-Key", KEY_PROD)]
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(canonical_count(server, "").await, before + 18);
 }
 
 /// (name, headers, extra resource attributes, record attributes, status,
