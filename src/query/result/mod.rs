@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 
 use super::error::{Operation, QueryError, UnsupportedValue};
-use super::model::{Aggregate, AttrRef};
+use super::model::{Aggregate, AttrRef, Percentile};
 use super::plan::{Plan, PlanDiagnostics, has_type_filter};
 use super::sql::{MISSING_TYPE, columns};
 use super::value::{TypedValue, ValueType};
@@ -46,6 +46,9 @@ pub struct ValueStats {
     pub timing_errors: Option<u64>,
     /// `None` when nothing contributed.
     pub sum: Option<Sum>,
+    /// Percentile aggregates only: each requested percentile with its value,
+    /// `None` when nothing contributed. A percentile result has no sum.
+    pub percentiles: Option<Vec<(Percentile, Option<TypedValue>)>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,11 +91,23 @@ impl QueryResult {
                     if let Some(errors) = stats.timing_errors {
                         out["timing_errors"] = count_json(errors);
                     }
-                    out["sum"] = match stats.sum {
-                        None => Value::Null,
-                        Some(Sum::Int(v)) => TypedValue::Int(v).to_json(),
-                        Some(Sum::Double(v)) => TypedValue::Double(v).to_json(),
-                    };
+                    if let Some(percentiles) = &stats.percentiles {
+                        out["percentiles"] = percentiles
+                            .iter()
+                            .map(|(p, v)| {
+                                json!({
+                                    "percentile": p.to_string(),
+                                    "value": v.as_ref().map_or(Value::Null, TypedValue::to_json),
+                                })
+                            })
+                            .collect();
+                    } else {
+                        out["sum"] = match stats.sum {
+                            None => Value::Null,
+                            Some(Sum::Int(v)) => TypedValue::Int(v).to_json(),
+                            Some(Sum::Double(v)) => TypedValue::Double(v).to_json(),
+                        };
+                    }
                 }
                 out
             })
@@ -237,6 +252,7 @@ fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryErro
             contributing: count(row, columns::CONTRIBUTING)?,
             timing_errors: None,
             sum: None,
+            percentiles: None,
         })),
         Aggregate::SpanDuration => {
             let contributing = count(row, columns::CONTRIBUTING)?;
@@ -244,6 +260,7 @@ fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryErro
                 contributing,
                 timing_errors: Some(count(row, columns::TIMING_ERRORS)?),
                 sum: int_sum(row, contributing)?,
+                percentiles: None,
             }))
         }
         Aggregate::Sum { attr, value_type } => {
@@ -258,9 +275,91 @@ fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryErro
                 contributing,
                 timing_errors: None,
                 sum,
+                percentiles: None,
+            }))
+        }
+        Aggregate::Percentiles {
+            attr,
+            value_type,
+            percentiles,
+        } => {
+            check_incompatible(plan, row, attr, *value_type)?;
+            if *value_type == ValueType::Double && count(row, columns::NON_FINITE)? > 0 {
+                return Err(QueryError::UnsupportedOperation {
+                    operation: Operation::Aggregate,
+                    value: UnsupportedValue::NonFiniteFloat,
+                });
+            }
+            let contributing = count(row, columns::CONTRIBUTING)?;
+            Ok(Some(ValueStats {
+                contributing,
+                timing_errors: None,
+                sum: None,
+                percentiles: Some(percentile_values(
+                    row,
+                    percentiles,
+                    *value_type,
+                    contributing,
+                )?),
+            }))
+        }
+        Aggregate::SpanDurationPercentiles { percentiles } => {
+            let contributing = count(row, columns::CONTRIBUTING)?;
+            Ok(Some(ValueStats {
+                contributing,
+                timing_errors: Some(count(row, columns::TIMING_ERRORS)?),
+                sum: None,
+                percentiles: Some(percentile_values(
+                    row,
+                    percentiles,
+                    ValueType::Int,
+                    contributing,
+                )?),
             }))
         }
     }
+}
+
+/// Pair each requested percentile with its value read as `ty`.
+fn percentile_values(
+    row: &Value,
+    percentiles: &[Percentile],
+    ty: ValueType,
+    contributing: u64,
+) -> Result<Vec<(Percentile, Option<TypedValue>)>, QueryError> {
+    let values = field(row, columns::PERCENTILES)?
+        .as_array()
+        .filter(|values| values.len() == percentiles.len())
+        .ok_or_else(|| malformed("percentile_values does not match the request"))?;
+    percentiles
+        .iter()
+        .zip(values)
+        .map(|(p, value)| {
+            if contributing == 0 {
+                return Ok((*p, None));
+            }
+            let text = value
+                .as_str()
+                .ok_or_else(|| malformed("a percentile value is not text"))?;
+            let bad = || {
+                malformed(format!(
+                    "percentile value {text:?} is not a valid {}",
+                    ty.as_str()
+                ))
+            };
+            let value = match ty {
+                ValueType::Int => TypedValue::Int(text.parse().map_err(|_| bad())?),
+                _ => {
+                    let v: f64 = text.parse().map_err(|_| bad())?;
+                    if !v.is_finite() {
+                        return Err(bad());
+                    }
+                    TypedValue::Double(v)
+                }
+            };
+            Ok((*p, Some(value)))
+        })
+        .collect()
 }
 
 /// Fail on non-empty values of another type. Bytes, arrays, and maps are

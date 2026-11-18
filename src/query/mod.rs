@@ -9,7 +9,9 @@ pub mod sql;
 pub mod value;
 
 pub use error::{Operation, QueryError, UnsupportedValue};
-pub use model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Scope, Signal, TimeRange};
+pub use model::{
+    Aggregate, AttrRef, CmpOp, Namespace, Percentile, Predicate, Query, Scope, Signal, TimeRange,
+};
 pub use plan::{
     ApproximationMode, Guard, Plan, PlanDiagnostics, StoragePath, diagnostics, plan, validate,
 };

@@ -42,7 +42,9 @@ in Unix nanoseconds, filters, group keys, and one aggregate (`count`,
 `count_values`, `sum`, or `span_duration`). With `time.bucket_ns` it is a time
 series: buckets are half-open, start at `time.start_ns`, and each row reports
 its `bucket_start_ns` (at most 1,000 buckets; a bucket without events has no
-row).
+row). The `percentiles` and `span_duration_percentiles` aggregates return
+exact nearest-rank percentiles, each a value that was received, under the same
+typed rules as `sum`.
 
 The data endpoints need `Authorization: Bearer <read key>`. One deployment
 serves one customer

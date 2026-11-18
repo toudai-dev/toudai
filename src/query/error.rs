@@ -83,6 +83,12 @@ pub enum QueryError {
         buckets: u128,
         max: u32,
     },
+    /// A percentile aggregate names no percentiles, or more than one
+    /// response may carry.
+    PercentileCount {
+        count: usize,
+        max: usize,
+    },
     EmptyAttributeKey,
     InvalidIdentifier {
         name: String,
@@ -135,6 +141,7 @@ impl QueryError {
             QueryError::InvalidTimeRange { .. } => "invalid_time_range",
             QueryError::InvalidBucket { .. } => "invalid_bucket",
             QueryError::TooManyBuckets { .. } => "too_many_buckets",
+            QueryError::PercentileCount { .. } => "invalid_percentiles",
             QueryError::EmptyAttributeKey => "empty_attribute_key",
             QueryError::InvalidIdentifier { .. } => "invalid_identifier",
             QueryError::OrderingNotDefined { .. } => "ordering_not_defined",
@@ -168,6 +175,10 @@ impl fmt::Display for QueryError {
             QueryError::TooManyBuckets { buckets, max } => write!(
                 f,
                 "the time range holds {buckets} buckets; at most {max} are allowed"
+            ),
+            QueryError::PercentileCount { count, max } => write!(
+                f,
+                "a percentile aggregate needs 1 to {max} percentiles, not {count}"
             ),
             QueryError::EmptyAttributeKey => write!(f, "attribute key is empty"),
             QueryError::InvalidIdentifier { name } => {

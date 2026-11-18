@@ -9,7 +9,7 @@
 //! parameters (`{p0:String}`), including attribute keys, so a key or string
 //! literal cannot change the statement.
 
-use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
+use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Percentile, Predicate, Query, Signal};
 use super::schema::{
     self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
     TIMESTAMP_COLUMN, TIMING_END_BEFORE_START, TYPED_SCALARS,
@@ -22,6 +22,7 @@ pub mod columns {
     pub const BUCKET: &str = "bucket";
     pub const CONTRIBUTING: &str = "contributing";
     pub const SUM: &str = "sum_value";
+    pub const PERCENTILES: &str = "percentile_values";
     pub const NON_FINITE: &str = "non_finite";
     pub const INCOMPATIBLE_TYPES: &str = "incompatible_types";
     pub const TIMING_ERRORS: &str = "timing_errors";
@@ -483,7 +484,84 @@ fn aggregate_columns(query: &Query, binder: &mut Binder) -> Vec<String> {
                 ),
             ]
         }
+        Aggregate::Percentiles {
+            attr,
+            value_type,
+            percentiles,
+        } => {
+            let key = binder.string(&attr.key);
+            let map = typed_map(signal, *value_type);
+            let has = record_has(signal, *value_type, &key);
+            let mut out = vec![format!("countIf({has}) AS {}", columns::CONTRIBUTING)];
+            let mut values = has.clone();
+            if *value_type == ValueType::Double {
+                out.push(format!(
+                    "countIf({has} AND NOT isFinite({map}[{key}])) AS {}",
+                    columns::NON_FINITE
+                ));
+                values = format!("{has} AND isFinite({map}[{key}])");
+            }
+            out.push(percentile_column(
+                &format!("{map}[{key}]"),
+                &values,
+                percentiles,
+                binder,
+            ));
+            if !super::plan::has_type_filter(&query.filters, attr, *value_type) {
+                out.push(format!(
+                    "arraySort(groupUniqArrayIf({}, {})) AS {}",
+                    type_expr(signal, attr, &key),
+                    record_incompatible(signal, *value_type, &key),
+                    columns::INCOMPATIBLE_TYPES
+                ));
+            }
+            out
+        }
+        Aggregate::SpanDurationPercentiles { percentiles } => {
+            let observable = format!("isNotNull({SPAN_DURATION_COLUMN})");
+            vec![
+                format!("countIf({observable}) AS {}", columns::CONTRIBUTING),
+                format!(
+                    "countIf({SPAN_TIMING_STATUS_COLUMN} = '{TIMING_END_BEFORE_START}') AS {}",
+                    columns::TIMING_ERRORS
+                ),
+                percentile_column(
+                    &format!("assumeNotNull({SPAN_DURATION_COLUMN})"),
+                    &observable,
+                    percentiles,
+                    binder,
+                ),
+            ]
+        }
     }
+}
+
+/// Exact nearest-rank percentiles of `value` over the rows where `condition`
+/// holds, as text in the order requested. Percentile `p` (thousandths of a
+/// percent) of `n` sorted values is the value at 1-based rank
+/// `max(1, ceil(p * n / 100000))`; the rank is integer arithmetic, so 99.9 of
+/// 1000 values is exactly the 999th. The values are collected and sorted,
+/// which costs memory in the number of contributing values: exact, not
+/// sketched, is the PoC choice. With no contributing value the text is a
+/// placeholder the result layer never reads.
+fn percentile_column(
+    value: &str,
+    condition: &str,
+    percentiles: &[Percentile],
+    binder: &mut Binder,
+) -> String {
+    let list: Vec<String> = percentiles
+        .iter()
+        .map(|p| p.thousandths().to_string())
+        .collect();
+    let bound = binder.bind("Array(UInt32)", format!("[{}]", list.join(",")));
+    let sorted = format!("arraySort(groupArrayIf({value}, {condition}))");
+    let scale = Percentile::SCALE;
+    format!(
+        "arrayMap(k -> toString({sorted}[toUInt64(greatest(1, intDiv(toUInt128(k) * length({sorted}) + {}, {scale})))]), {bound}) AS {}",
+        scale - 1,
+        columns::PERCENTILES
+    )
 }
 
 #[cfg(test)]

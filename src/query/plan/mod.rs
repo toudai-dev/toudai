@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::error::{Operation, QueryError, UnsupportedValue};
-use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
+use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Percentile, Predicate, Query, Signal};
 use super::schema::{
     self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
     TIMESTAMP_COLUMN, TYPED_SCALARS,
@@ -46,6 +46,9 @@ pub enum Guard {
     IncompatibleTypeCheck,
     /// Non-finite floats fail float aggregation and grouping.
     NonFiniteFloatCheck,
+    /// Percentiles are exact nearest-rank values: always a received value,
+    /// never interpolated or estimated.
+    NearestRankPercentiles,
 }
 
 impl Guard {
@@ -59,6 +62,7 @@ impl Guard {
             Guard::ContributingCounts => "contributing_counts",
             Guard::IncompatibleTypeCheck => "incompatible_type_check",
             Guard::NonFiniteFloatCheck => "non_finite_float_check",
+            Guard::NearestRankPercentiles => "nearest_rank_percentiles",
         }
     }
 }
@@ -99,6 +103,8 @@ pub(crate) fn has_type_filter(filters: &[Predicate], attr: &AttrRef, ty: ValueTy
 
 /// The most time-series buckets one response carries.
 pub const MAX_BUCKETS: u32 = 1_000;
+/// The most percentiles one aggregate computes.
+pub const MAX_PERCENTILES: usize = 16;
 
 /// Check a request against the PoC typed-value contract.
 pub fn validate(query: &Query) -> Result<(), QueryError> {
@@ -192,17 +198,41 @@ fn validate_aggregate(query: &Query) -> Result<(), QueryError> {
             }
             Ok(())
         }
-        Aggregate::Sum { attr, value_type } => {
-            validate_key(attr)?;
-            validate_record_aggregate(attr, *value_type)?;
-            if !matches!(value_type, ValueType::Int | ValueType::Double) {
-                return Err(QueryError::NotNumeric {
-                    value_type: *value_type,
-                });
+        Aggregate::Sum { attr, value_type } => validate_numeric(attr, *value_type),
+        Aggregate::Percentiles {
+            attr,
+            value_type,
+            percentiles,
+        } => {
+            validate_numeric(attr, *value_type)?;
+            validate_percentiles(percentiles)
+        }
+        Aggregate::SpanDurationPercentiles { percentiles } => {
+            if query.signal != Signal::Spans {
+                return Err(QueryError::AggregateRequiresSpans);
             }
-            Ok(())
+            validate_percentiles(percentiles)
         }
     }
+}
+
+fn validate_numeric(attr: &AttrRef, ty: ValueType) -> Result<(), QueryError> {
+    validate_key(attr)?;
+    validate_record_aggregate(attr, ty)?;
+    if !matches!(ty, ValueType::Int | ValueType::Double) {
+        return Err(QueryError::NotNumeric { value_type: ty });
+    }
+    Ok(())
+}
+
+fn validate_percentiles(percentiles: &[Percentile]) -> Result<(), QueryError> {
+    if percentiles.is_empty() || percentiles.len() > MAX_PERCENTILES {
+        return Err(QueryError::PercentileCount {
+            count: percentiles.len(),
+            max: MAX_PERCENTILES,
+        });
+    }
+    Ok(())
 }
 
 fn validate_record_aggregate(attr: &AttrRef, ty: ValueType) -> Result<(), QueryError> {
@@ -287,13 +317,16 @@ pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
         Aggregate::CountValues { value_type, .. } => {
             columns.extend(schema::typed_map(signal, *value_type));
         }
-        Aggregate::Sum { attr, value_type } => {
+        Aggregate::Sum { attr, value_type }
+        | Aggregate::Percentiles {
+            attr, value_type, ..
+        } => {
             columns.extend(schema::typed_map(signal, *value_type));
             if !has_type_filter(&query.filters, attr, *value_type) {
                 all_record_maps(&mut columns);
             }
         }
-        Aggregate::SpanDuration => {
+        Aggregate::SpanDuration | Aggregate::SpanDurationPercentiles { .. } => {
             columns.extend([SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN]);
         }
     }
@@ -339,6 +372,23 @@ pub(crate) fn guards(query: &Query) -> Vec<Guard> {
         Aggregate::SpanDuration => {
             guards.insert(Guard::ContributingCounts);
             guards.insert(Guard::Int128Sum);
+        }
+        Aggregate::Percentiles {
+            attr, value_type, ..
+        } => {
+            guards.insert(Guard::ContributingCounts);
+            guards.insert(Guard::KeyMembershipPresence);
+            guards.insert(Guard::NearestRankPercentiles);
+            if *value_type == ValueType::Double {
+                guards.insert(Guard::NonFiniteFloatCheck);
+            }
+            if !has_type_filter(&query.filters, attr, *value_type) {
+                guards.insert(Guard::IncompatibleTypeCheck);
+            }
+        }
+        Aggregate::SpanDurationPercentiles { .. } => {
+            guards.insert(Guard::ContributingCounts);
+            guards.insert(Guard::NearestRankPercentiles);
         }
     }
     guards.into_iter().collect()

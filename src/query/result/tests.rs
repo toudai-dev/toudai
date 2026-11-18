@@ -363,6 +363,7 @@ fn response_count_json_is_lossless_and_typed() {
                 contributing: u64::MAX,
                 timing_errors: Some(9_007_199_254_740_994),
                 sum: None,
+                percentiles: None,
             }),
         }],
         diagnostics: plan.diagnostics,

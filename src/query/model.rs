@@ -125,6 +125,59 @@ pub enum Aggregate {
     },
     /// Span duration (nanoseconds): contributing, timing-error, and sum.
     SpanDuration,
+    /// Event count, contributing-value count, and exact nearest-rank
+    /// percentiles of an attribute of the declared numeric type, with the same
+    /// incompatible-value and non-finite rules as [`Aggregate::Sum`].
+    Percentiles {
+        attr: AttrRef,
+        value_type: ValueType,
+        percentiles: Vec<Percentile>,
+    },
+    /// Span duration counts as [`Aggregate::SpanDuration`] plus exact
+    /// nearest-rank percentiles of the observable durations.
+    SpanDurationPercentiles { percentiles: Vec<Percentile> },
+}
+
+/// A percentile in thousandths of a percent (`99.9` is `99_900`), so a
+/// requested percentile is an exact decimal and its rank is integer
+/// arithmetic: percentile `p` of `n` values is the value at 1-based rank
+/// `max(1, ceil(p * n / 100))` in ascending order (nearest rank), always a
+/// value that was received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Percentile(u32);
+
+impl Percentile {
+    /// Thousandths of a percent in 100%.
+    pub const SCALE: u32 = 100_000;
+
+    /// Parse `0` to `100` with at most three decimal places.
+    pub fn parse(text: &str) -> Option<Percentile> {
+        let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > 3 {
+            return None;
+        }
+        let whole: u32 = whole.parse().ok().filter(|w| *w <= 100)?;
+        let fraction: u32 = format!("{fraction:0<3}").parse().ok()?;
+        let thousandths = whole * 1000 + fraction;
+        (thousandths <= Percentile::SCALE).then_some(Percentile(thousandths))
+    }
+
+    pub fn thousandths(self) -> u32 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for Percentile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (whole, fraction) = (self.0 / 1000, self.0 % 1000);
+        if fraction == 0 {
+            write!(f, "{whole}")
+        } else {
+            let fraction = format!("{fraction:03}");
+            write!(f, "{whole}.{}", fraction.trim_end_matches('0'))
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

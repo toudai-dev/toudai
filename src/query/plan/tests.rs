@@ -1,5 +1,5 @@
 use super::*;
-use crate::query::model::{Scope, TimeRange};
+use crate::query::model::{Percentile, Scope, TimeRange};
 use crate::query::value::Literal;
 
 // Fixture identity from Experiment 021 (`fixture021.py`): dataset `fixture`,
@@ -254,6 +254,56 @@ fn validation_table() {
             Err(AggregateRequiresSpans),
         ),
         (
+            "percentiles need at least one percentile",
+            logs_with(|q| {
+                q.aggregate = Aggregate::Percentiles {
+                    attr: metric(),
+                    value_type: ValueType::Int,
+                    percentiles: vec![],
+                }
+            }),
+            Err(PercentileCount {
+                count: 0,
+                max: MAX_PERCENTILES,
+            }),
+        ),
+        (
+            "percentiles are bounded",
+            {
+                let mut q = query(Signal::Spans);
+                q.aggregate = Aggregate::SpanDurationPercentiles {
+                    percentiles: vec![Percentile::parse("50").unwrap(); MAX_PERCENTILES + 1],
+                };
+                q
+            },
+            Err(PercentileCount {
+                count: MAX_PERCENTILES + 1,
+                max: MAX_PERCENTILES,
+            }),
+        ),
+        (
+            "percentiles of a string",
+            logs_with(|q| {
+                q.aggregate = Aggregate::Percentiles {
+                    attr: metric(),
+                    value_type: ValueType::String,
+                    percentiles: vec![Percentile::parse("50").unwrap()],
+                }
+            }),
+            Err(NotNumeric {
+                value_type: ValueType::String,
+            }),
+        ),
+        (
+            "span duration percentiles on logs",
+            logs_with(|q| {
+                q.aggregate = Aggregate::SpanDurationPercentiles {
+                    percentiles: vec![Percentile::parse("50").unwrap()],
+                }
+            }),
+            Err(AggregateRequiresSpans),
+        ),
+        (
             "span duration on spans",
             {
                 let mut q = query(Signal::Spans);
@@ -382,6 +432,36 @@ fn diagnostics_table() {
             },
             vec!["dataset", "duration_ns", "span_timing_status", "timestamp"],
             vec![Int128Sum, ContributingCounts],
+        ),
+        (
+            "typed double percentiles check non-finite values only",
+            logs_with(|q| {
+                q.filters = vec![Predicate::HasType(metric(), ValueType::Double)];
+                q.aggregate = Aggregate::Percentiles {
+                    attr: metric(),
+                    value_type: ValueType::Double,
+                    percentiles: vec![Percentile::parse("99").unwrap()],
+                };
+            }),
+            vec!["dataset", "record_double", "timestamp"],
+            vec![
+                KeyMembershipPresence,
+                ContributingCounts,
+                NonFiniteFloatCheck,
+                NearestRankPercentiles,
+            ],
+        ),
+        (
+            "span duration percentiles",
+            {
+                let mut q = query(Signal::Spans);
+                q.aggregate = Aggregate::SpanDurationPercentiles {
+                    percentiles: vec![Percentile::parse("99").unwrap()],
+                };
+                q
+            },
+            vec!["dataset", "duration_ns", "span_timing_status", "timestamp"],
+            vec![ContributingCounts, NearestRankPercentiles],
         ),
     ];
     for (name, q, columns, guards) in cases {
