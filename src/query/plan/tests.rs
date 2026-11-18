@@ -16,6 +16,7 @@ fn query(signal: Signal) -> Query {
             start_ns: TS - 1,
             end_ns: TS + 1,
         },
+        bucket_ns: None,
         filters: vec![],
         group_by: vec![],
         aggregate: Aggregate::Count,
@@ -60,6 +61,46 @@ fn validation_table() {
                 start_ns: TS - 1,
                 end_ns: TS - 1,
             }),
+        ),
+        (
+            "zero bucket width",
+            logs_with(|q| q.bucket_ns = Some(0)),
+            Err(InvalidBucket { bucket_ns: 0 }),
+        ),
+        (
+            "negative bucket width",
+            logs_with(|q| q.bucket_ns = Some(-5)),
+            Err(InvalidBucket { bucket_ns: -5 }),
+        ),
+        (
+            "exactly the most buckets",
+            logs_with(|q| {
+                q.time.end_ns = q.time.start_ns + 1_000 * 7;
+                q.bucket_ns = Some(7);
+            }),
+            Ok(()),
+        ),
+        (
+            "a partial last bucket counts",
+            logs_with(|q| {
+                q.time.end_ns = q.time.start_ns + 1_000 * 7 + 1;
+                q.bucket_ns = Some(7);
+            }),
+            Err(TooManyBuckets {
+                buckets: 1_001,
+                max: MAX_BUCKETS,
+            }),
+        ),
+        (
+            "the full Int64 range in one bucket",
+            logs_with(|q| {
+                q.time = TimeRange {
+                    start_ns: i64::MIN,
+                    end_ns: i64::MAX,
+                };
+                q.bucket_ns = Some(i64::MAX);
+            }),
+            Ok(()),
         ),
         (
             "empty attribute key",

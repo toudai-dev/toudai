@@ -74,6 +74,15 @@ pub enum QueryError {
         start_ns: i64,
         end_ns: i64,
     },
+    /// The time-series bucket width is not a positive number of nanoseconds.
+    InvalidBucket {
+        bucket_ns: i64,
+    },
+    /// The time range holds more buckets than one response may carry.
+    TooManyBuckets {
+        buckets: u128,
+        max: u32,
+    },
     EmptyAttributeKey,
     InvalidIdentifier {
         name: String,
@@ -124,6 +133,8 @@ impl QueryError {
             QueryError::UnsupportedOperation { .. } => "unsupported_operation",
             QueryError::MissingScope { .. } => "missing_scope",
             QueryError::InvalidTimeRange { .. } => "invalid_time_range",
+            QueryError::InvalidBucket { .. } => "invalid_bucket",
+            QueryError::TooManyBuckets { .. } => "too_many_buckets",
             QueryError::EmptyAttributeKey => "empty_attribute_key",
             QueryError::InvalidIdentifier { .. } => "invalid_identifier",
             QueryError::OrderingNotDefined { .. } => "ordering_not_defined",
@@ -151,6 +162,13 @@ impl fmt::Display for QueryError {
             QueryError::InvalidTimeRange { start_ns, end_ns } => {
                 write!(f, "time range [{start_ns}, {end_ns}) is empty")
             }
+            QueryError::InvalidBucket { bucket_ns } => {
+                write!(f, "bucket width {bucket_ns} ns is not positive")
+            }
+            QueryError::TooManyBuckets { buckets, max } => write!(
+                f,
+                "the time range holds {buckets} buckets; at most {max} are allowed"
+            ),
             QueryError::EmptyAttributeKey => write!(f, "attribute key is empty"),
             QueryError::InvalidIdentifier { name } => {
                 write!(f, "{name:?} is not a plain SQL identifier")

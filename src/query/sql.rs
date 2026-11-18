@@ -19,6 +19,7 @@ use super::value::{Literal, ValueType};
 /// Result column names shared with `result`.
 pub mod columns {
     pub const EVENTS: &str = "events";
+    pub const BUCKET: &str = "bucket";
     pub const CONTRIBUTING: &str = "contributing";
     pub const SUM: &str = "sum_value";
     pub const NON_FINITE: &str = "non_finite";
@@ -110,6 +111,17 @@ pub fn generate(query: &Query, tables: &ServingTables) -> SqlStatement {
     let mut select: Vec<String> = Vec::new();
     let mut group: Vec<String> = Vec::new();
 
+    if let Some(bucket_ns) = query.bucket_ns {
+        // Int128 so `timestamp - start` cannot wrap for any Int64 start; the
+        // index is below `MAX_BUCKETS` because the timestamp is in range.
+        select.push(format!(
+            "toUInt64(intDiv(toInt128(toUnixTimestamp64Nano({TIMESTAMP_COLUMN})) - toInt128({}), {})) AS {}",
+            binder.bind("Int64", query.time.start_ns.to_string()),
+            binder.bind("Int64", bucket_ns.to_string()),
+            columns::BUCKET
+        ));
+        group.push(columns::BUCKET.to_owned());
+    }
     for (index, attr) in query.group_by.iter().enumerate() {
         let key = binder.string(&attr.key);
         let (type_col, value_col) = (columns::group_type(index), columns::group_value(index));
@@ -491,6 +503,7 @@ mod tests {
                 start_ns: 1,
                 end_ns: 2,
             },
+            bucket_ns: None,
             filters: vec![
                 Predicate::Exists(AttrRef::record(hostile)),
                 Predicate::Compare {

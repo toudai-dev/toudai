@@ -50,6 +50,9 @@ pub struct ValueStats {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResultRow {
+    /// Start of the row's time-series bucket; `None` unless the request set a
+    /// bucket width.
+    pub bucket_start_ns: Option<i64>,
     pub groups: Vec<GroupValue>,
     pub events: u64,
     pub values: Option<ValueStats>,
@@ -77,6 +80,9 @@ impl QueryResult {
                     "groups": row.groups.iter().map(GroupValue::to_json).collect::<Vec<_>>(),
                     "events": count_json(row.events),
                 });
+                if let Some(start) = row.bucket_start_ns {
+                    out["bucket_start_ns"] = TypedValue::Int(start).to_json();
+                }
                 if let Some(stats) = &row.values {
                     out["contributing"] = count_json(stats.contributing);
                     if let Some(errors) = stats.timing_errors {
@@ -164,10 +170,28 @@ fn interpret_row(plan: &Plan, row: &Value) -> Result<ResultRow, QueryError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ResultRow {
+        bucket_start_ns: bucket_start(plan, row)?,
         groups,
         events: count(row, columns::EVENTS)?,
         values: value_stats(plan, row)?,
     })
+}
+
+/// The bucket's start from its index: `start + index * width`, which must lie
+/// inside the requested range.
+fn bucket_start(plan: &Plan, row: &Value) -> Result<Option<i64>, QueryError> {
+    let Some(width) = plan.query.bucket_ns else {
+        return Ok(None);
+    };
+    let index = count(row, columns::BUCKET)?;
+    let time = plan.query.time;
+    let start = i128::from(time.start_ns) + i128::from(index) * i128::from(width);
+    if start >= i128::from(time.end_ns) {
+        return Err(malformed(format!(
+            "bucket {index} is outside the time range"
+        )));
+    }
+    Ok(Some(start as i64))
 }
 
 fn group_value(type_name: &str, value: &str) -> Result<GroupValue, QueryError> {

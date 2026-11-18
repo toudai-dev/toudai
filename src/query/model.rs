@@ -132,6 +132,10 @@ pub struct Query {
     pub scope: Scope,
     pub signal: Signal,
     pub time: TimeRange,
+    /// Time-series bucket width in nanoseconds. Buckets are half-open and
+    /// start at `time.start_ns`, so bucket `i` is `[start + i * w, start +
+    /// (i + 1) * w)` clipped to the range; no clock or time zone is involved.
+    pub bucket_ns: Option<i64>,
     pub filters: Vec<Predicate>,
     /// Group keys include the value type, so string `"1"`, integer `1`, and
     /// float `1.0` are distinct groups, as are missing and explicit empty.

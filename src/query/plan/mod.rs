@@ -97,6 +97,9 @@ pub(crate) fn has_type_filter(filters: &[Predicate], attr: &AttrRef, ty: ValueTy
     })
 }
 
+/// The most time-series buckets one response carries.
+pub const MAX_BUCKETS: u32 = 1_000;
+
 /// Check a request against the PoC typed-value contract.
 pub fn validate(query: &Query) -> Result<(), QueryError> {
     if query.scope.dataset.is_empty() {
@@ -107,6 +110,19 @@ pub fn validate(query: &Query) -> Result<(), QueryError> {
             start_ns: query.time.start_ns,
             end_ns: query.time.end_ns,
         });
+    }
+    if let Some(bucket_ns) = query.bucket_ns {
+        if bucket_ns <= 0 {
+            return Err(QueryError::InvalidBucket { bucket_ns });
+        }
+        let span = i128::from(query.time.end_ns) - i128::from(query.time.start_ns);
+        let buckets = (span + i128::from(bucket_ns) - 1) / i128::from(bucket_ns);
+        if buckets > i128::from(MAX_BUCKETS) {
+            return Err(QueryError::TooManyBuckets {
+                buckets: buckets as u128,
+                max: MAX_BUCKETS,
+            });
+        }
     }
     for predicate in &query.filters {
         match predicate {

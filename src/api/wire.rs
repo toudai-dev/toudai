@@ -46,6 +46,7 @@ impl QueryRequest {
                 start_ns: self.time.start_ns.0,
                 end_ns: self.time.end_ns.0,
             },
+            bucket_ns: self.time.bucket_ns.map(|n| n.0),
             filters: self.filters.into_iter().map(Predicate::from).collect(),
             group_by: self.group_by.into_iter().map(AttrRef::from).collect(),
             aggregate: self.aggregate.into(),
@@ -65,6 +66,9 @@ enum SignalWire {
 struct TimeWire {
     start_ns: Nanos,
     end_ns: Nanos,
+    /// Time-series bucket width; absent for a single result over the range.
+    #[serde(default)]
+    bucket_ns: Option<Nanos>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -346,7 +350,7 @@ mod tests {
         let request = json!({
             "dataset": "fixture",
             "signal": "spans",
-            "time": {"start_ns": 5, "end_ns": "9007199254740993"},
+            "time": {"start_ns": 5, "end_ns": "9007199254740993", "bucket_ns": "1000"},
             "filters": [
                 {"kind": "exists", "attr": {"namespace": "record", "key": "a.b"}},
                 {"kind": "absent", "attr": {"namespace": "resource", "key": "r"}},
@@ -369,6 +373,7 @@ mod tests {
                     start_ns: 5,
                     end_ns: 9_007_199_254_740_993
                 },
+                bucket_ns: Some(1_000),
                 filters: vec![
                     Predicate::Exists(AttrRef::record("a.b")),
                     Predicate::Absent(AttrRef::resource("r")),
