@@ -64,6 +64,9 @@ Configuration is environment-only: `TOUDAI_READ_KEYS_FILE` (required),
 (`http://127.0.0.1:8123`, plain HTTP only), `TOUDAI_CLICKHOUSE_USER`,
 `TOUDAI_CLICKHOUSE_PASSWORD`, and `TOUDAI_CLICKHOUSE_DATABASE` (`toudai`).
 
+`toudai-cli` (`cli/`, `cargo run -p toudai-cli -- help`) is the operator
+client over these endpoints; see `cli/README.adoc`.
+
 `cargo test` runs the end-to-end test in `tests/e2e/` against a real ClickHouse
 server with the product DDL and the Experiment 021 fixture: a
 `clickhouse/clickhouse-server` container when a Docker daemon is available,
