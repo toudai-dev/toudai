@@ -4,7 +4,8 @@
 //! and read back through the query service's exact-event lookup.
 //!
 //! The expected contents are the emitter's own model, recorded in Experiment
-//! 023's `expected.jsonl`, so nothing here is derived from ingest's mapping.
+//! 023 and kept in `fixture-emitter/expected.jsonl`, so nothing here is derived
+//! from ingest's mapping.
 //! Each transport writes its own database, which is not the default
 //! (Decision 0002 D1).
 
@@ -28,8 +29,7 @@ use uuid::Uuid;
 
 use server::{ClickHouseServer, apply_ddl, execute, product_ddl};
 
-const EXPECTED: &str =
-    include_str!("../../rfd/0001/experiments/023-fixture-emitter-run/expected.jsonl");
+const EXPECTED: &str = include_str!("../../fixture-emitter/expected.jsonl");
 
 /// The emitter's datasets: one write key for both, as its README requires.
 const WRITE_KEY: &str = "tk_fixture_writer_0123456789abcdef";

@@ -1,4 +1,0 @@
-ambiguous-canonical-reset 200 1.176151
-ambiguous-serving-reset 200 1.238502
-ambiguous-canonical-withhold 503 5.002452
-ambiguous-serving-withhold 503 5.003473

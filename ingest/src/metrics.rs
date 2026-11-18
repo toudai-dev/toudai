@@ -1,6 +1,8 @@
 //! Process counters, kept in the service so they stay readable while
-//! ClickHouse is down (RFD 0001 PoC gate: independent health counters), and
+//! ClickHouse is down ([RFD 0001 PoC gate]: independent health counters), and
 //! served as Prometheus text on `/metrics`.
+//!
+//! [RFD 0001 PoC gate]: https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/README.adoc#_poc_completion_gate
 //!
 //! A series is a metric name plus label pairs. Label values are fixed strings
 //! chosen by the service (signals, destinations, rejection reasons), never

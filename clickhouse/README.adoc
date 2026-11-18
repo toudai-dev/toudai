@@ -1,10 +1,11 @@
 = ClickHouse schema
 
 The DDL the PoC vertical slice is built on, as fixed by
-link:../rfd/0001/decisions/0001-poc-physical-layout.adoc[Decision 0001] and amended by
-link:../rfd/0001/decisions/0002-single-tenant-core.adoc[Decision 0002]. It is derived from
-`rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/serving-tables.sql`,
-which stays in place as evidence.
+link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/decisions/0001-poc-physical-layout.adoc[historical Decision 0001] and amended by
+link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/decisions/0002-single-tenant-core.adoc[historical Decision 0002]. It is derived from
+link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/experiments/021-hybrid-layout-collector-integration/harness/serving-tables.sql[Experiment 021's historical serving tables].
+Current designs and evidence are owned by the
+link:https://github.com/toudai-dev/rfds[canonical RFD repository (members)].
 
 [cols="2,3,5"]
 |===
@@ -26,7 +27,7 @@ data exists, a schema change is applied by dropping and reloading the tables.
 payload table names. Its S3 endpoint and cache size are placeholders for the deployment.
 
 The database name is configuration, not schema
-(link:../rfd/0001/decisions/0002-single-tenant-core.adoc[Decision 0002] D1): one database
+(link:https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/decisions/0002-single-tenant-core.adoc[historical Decision 0002] D1): one database
 holds one deployment's data, and every file names it as the `{database:Identifier}` query
 parameter. `apply-schema.sh` applies the files in order to `TOUDAI_CLICKHOUSE_DATABASE`
 (default `toudai`, the same variable and default as the query service) and passes its

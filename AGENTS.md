@@ -69,17 +69,16 @@ This is a ClickHouse-backed telemetry service designed to be compatible with the
 
 ### Working From RFDs
 
-When implementing an RFD in `rfd/NNNN/`:
+Canonical RFDs live in https://github.com/toudai-dev/rfds (members-only), not in this repository.
+When implementing an RFD, follow that repository's `AGENTS.md` and process:
 
-- Keep `README.adoc` as the umbrella and stable design context in flat
-  `<section>.adoc` files; keep checkboxes out of design documents.
-- Treat each `<section>-impl.adoc` as the source of truth for that section's
-  progress. Each checklist item has one owner. Legacy unsplit RFDs may use
-  `IMPLEMENTATION.org` or `IMPLEMENTATION.md` instead.
+- Keep design and experiment records there; `rfd/NNNN/IMPLEMENTATION.adoc`
+  owns progress, with one owner per task.
 - Before code changes, identify the phase/checklist items being worked.
 - Update checklist items incrementally as work completes.
 - Do not mark an item complete unless the named code/test/docs work is actually done.
 - If implementation differs from the checklist wording, update the wording instead of marking an inaccurate item complete.
-- Store experiments that inform an RFD under that RFD's `experiments/`
-  directory and reference their measured results from the proposal.
+- Store experiment records and RFD-owned harnesses under that RFD's
+  `experiments/` directory in `rfds`; reusable product and benchmark tooling
+  stays here. Recorded results remain unchanged.
 - In the final response, summarize which checklist items changed and which remain open.
