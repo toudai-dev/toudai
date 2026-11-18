@@ -53,7 +53,7 @@ Use standard conventional commit formatting such as `fix(promapi): handle empty 
 
 ## Project Architecture
 
-This is a ClickHouse-backed telemetry service designed to be compatible with the Prometheus API, PromQL, LogQL, and TraceQL. The project is still in proof-of-concept shape, so some endpoints are present before full backend behavior exists.
+This is a ClickHouse-backed observability event store for Scuba-style exploration of logs, spans, and structured application events through one logical event model. Native metrics remain separate; Prometheus API, PromQL, LogQL, and TraceQL compatibility do not define the event-query contract. The project is still a proof of concept; canonical scope lives in [RFD 1](https://github.com/toudai-dev/rfds/blob/main/rfd/0001/product-contract.adoc).
 
 ## Working Style
 
