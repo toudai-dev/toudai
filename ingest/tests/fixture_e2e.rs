@@ -74,6 +74,7 @@ async fn fixture_emitter_through_ingest_to_the_query_service() {
         serving_rows_join_their_canonical_rows(&server, database, &stored).await;
         reserved_and_rejected_records_are_counted(&service).await;
         events_are_found_by_exact_lookup(&server, database, &stored).await;
+        traces_are_rendered(&server, database, &expected, &stored).await;
 
         // Ingest logs only its start and failures today, so this guards
         // logging added later rather than proving much now.
@@ -453,6 +454,263 @@ async fn events_are_found_by_exact_lookup(
                 StatusCode::FORBIDDEN,
                 "{event_id} with a fixture-b key"
             );
+        }
+    }
+}
+
+/// The order trace's waterfall as the fixture builds it (`add_order_trace` in
+/// `fixture-emitter/src/model.rs`): roots by start time, each followed
+/// depth-first by its children by start time. `(fixture.key, depth, parent)`.
+const ORDER_WATERFALL: [(&str, u64, &str); 7] = [
+    ("span.order.root", 0, "none"),
+    ("span.order.validate", 1, "found"),
+    ("span.order.db", 1, "found"),
+    ("span.order.payment", 1, "found"),
+    ("span.order.charge", 2, "found"),
+    ("span.order.unfinished", 1, "found"),
+    // Its parent is never sent.
+    ("span.order.orphan", 0, "missing"),
+];
+
+/// Query inventory items 10 and 11 through the query service. Every trace the
+/// fixture sends comes back with exactly its own dataset's spans, each with
+/// the span events and timing of the fixture's payload, and exactly the logs
+/// and application events carrying its context, in time order. The order
+/// trace, which both datasets send under one trace ID, also comes back in the
+/// waterfall order the fixture defines. Expectations are the fixture's
+/// expected rows; only `event_id`s come from what ingest stored.
+async fn traces_are_rendered(
+    server: &ClickHouseServer,
+    database: &str,
+    expected: &[Value],
+    stored: &Stored,
+) {
+    let base = query_service(server, database).await;
+    let client = reqwest::Client::new();
+    let get = |key: &str, dataset: &str, trace_id: &str, query: &str| {
+        let mut url: reqwest::Url = format!("{base}/v1/traces").parse().unwrap();
+        url.path_segments_mut().unwrap().extend([dataset, trace_id]);
+        url.set_query(Some(query));
+        client.get(url).bearer_auth(key).send()
+    };
+    let payload = |want: &Value| -> Value {
+        serde_json::from_str(want["payload"].as_str().unwrap()).unwrap()
+    };
+    let key_of = |want: &Value| want["fixture_key"].as_str().unwrap().to_owned();
+    let event_id = |want: &Value| {
+        let (dataset, key) = (want["dataset"].as_str().unwrap().to_owned(), key_of(want));
+        let rows = match want["signal"].as_str().unwrap() {
+            "spans" => &stored.spans,
+            _ => &stored.logs,
+        };
+        rows[&(dataset, key)]["event_id"].clone()
+    };
+
+    // The served spans and logs of each (dataset, trace_id).
+    type Records<'a> = (Vec<&'a Value>, Vec<&'a Value>);
+    let mut traces: BTreeMap<(String, String), Records> = BTreeMap::new();
+    for want in expected.iter().filter(|w| w["disposition"] == "serve") {
+        let trace_id = want["serving"]["trace_id"].as_str().unwrap();
+        if trace_id.is_empty() {
+            continue;
+        }
+        let entry = traces
+            .entry((want["dataset"].as_str().unwrap().into(), trace_id.into()))
+            .or_default();
+        match want["signal"].as_str().unwrap() {
+            "spans" => entry.0.push(want),
+            _ => entry.1.push(want),
+        }
+    }
+    // Wide enough for the spans whose unset start is stored at the epoch.
+    let everything = "start_ns=0&end_ns=1788332400000000000";
+    for ((dataset, trace_id), (spans, logs)) in &traces {
+        let response = get(READ_KEY, dataset, trace_id, everything).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{dataset} {trace_id}");
+        let got: Value = response.json().await.unwrap();
+        let what = format!("{database} {dataset} {trace_id}");
+        assert_eq!(got["dataset"], dataset.as_str());
+        assert_eq!(got["trace_id"], trace_id.as_str());
+
+        let got_spans: BTreeMap<String, &Value> = got["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| (s["event_id"].as_str().unwrap().to_owned(), s))
+            .collect();
+        assert_eq!(got_spans.len(), spans.len(), "{what}: span count");
+        for want in spans {
+            let p = payload(want);
+            let id = event_id(want);
+            let span = got_spans
+                .get(id.as_str().unwrap())
+                .unwrap_or_else(|| panic!("{what}: {} missing", key_of(want)));
+            let fields = [
+                ("span_id", p["trace"]["span_id"].clone()),
+                ("parent_span_id", p["span"]["parent_span_id"].clone()),
+                ("name", p["span"]["name"].clone()),
+                ("span_kind", p["span"]["kind"].clone()),
+                ("service_name", want["serving"]["service_name"].clone()),
+                ("status_code", want["serving"]["status_code"].clone()),
+                ("start_ns", p["span"]["start_ns"].clone()),
+                ("end_ns", p["span"]["end_ns"].clone()),
+                // Absent from the payload when unavailable: null, never zero.
+                ("duration_ns", p["span"]["duration_ns"].clone()),
+                (
+                    "timing_status",
+                    want["serving"]["span_timing_status"].clone(),
+                ),
+                ("events", p["span"]["events"].clone()),
+            ];
+            for (field, value) in fields {
+                assert_eq!(span[field], value, "{what}: {} {field}", key_of(want));
+            }
+        }
+        assert_eq!(got["diagnostics"]["span_events_unavailable"], "0", "{what}");
+        assert_eq!(got["diagnostics"]["duplicate_span_ids"], "0", "{what}");
+
+        let mut logs = logs.clone();
+        let time = |w: &&Value| {
+            payload(w)["time"]["timestamp_ns"]
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+        };
+        logs.sort_by_key(time);
+        let got_logs = got["logs"]
+            .as_array()
+            .expect("logs are returned by default");
+        assert_eq!(got_logs.len(), logs.len(), "{what}: log count");
+        for (got, want) in got_logs.iter().zip(&logs) {
+            let p = payload(want);
+            let fields = [
+                ("event_id", event_id(want)),
+                ("kind", p["kind"].clone()),
+                ("timestamp_ns", p["time"]["timestamp_ns"].clone()),
+                ("span_id", p["trace"]["span_id"].clone()),
+                ("span_found", true.into()),
+                ("body", want["serving"]["body"].clone()),
+                ("event_name", p["log"]["event_name"].clone()),
+                ("severity_text", p["log"]["severity_text"].clone()),
+                ("severity_number", p["log"]["severity_number"].clone()),
+            ];
+            for (field, value) in fields {
+                assert_eq!(got[field], value, "{what}: {} {field}", key_of(want));
+            }
+        }
+    }
+
+    // The order trace: one trace ID in both datasets, its own spans in each.
+    let order: Vec<_> = traces
+        .iter()
+        .filter(|(_, (spans, _))| spans.iter().any(|w| key_of(w) == "span.order.root"))
+        .map(|((dataset, trace_id), (spans, _))| (dataset.as_str(), trace_id.as_str(), spans))
+        .collect();
+    assert_eq!(order.len(), 2, "the order trace is sent by both datasets");
+    assert_eq!(order[0].1, order[1].1, "under one trace ID");
+    for (dataset, trace_id, spans) in order {
+        let what = format!("{database} {dataset} order trace");
+        let got: Value = get(READ_KEY, dataset, trace_id, everything)
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let key_by_event: BTreeMap<String, String> = spans
+            .iter()
+            .map(|w| (event_id(w).as_str().unwrap().to_owned(), key_of(w)))
+            .collect();
+        let shape: Vec<(String, u64, String)> = got["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| {
+                (
+                    key_by_event[s["event_id"].as_str().unwrap()].clone(),
+                    s["depth"].as_u64().unwrap(),
+                    s["parent"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect();
+        let want: Vec<_> = ORDER_WATERFALL
+            .iter()
+            .map(|(k, d, p)| (k.to_string(), *d, p.to_string()))
+            .collect();
+        assert_eq!(shape, want, "{what}: waterfall");
+        let kinds: Vec<_> = got["logs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, ["log", "log", "event"], "{what}: logs and app event");
+
+        // Item 10 alone: the waterfall without logs.
+        let response = get(
+            READ_KEY,
+            dataset,
+            trace_id,
+            &format!("{everything}&logs=false"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let spans_only: Value = response.json().await.unwrap();
+        assert!(spans_only.get("logs").is_none(), "{what}: logs=false");
+        assert_eq!(spans_only["spans"], got["spans"], "{what}: logs=false");
+
+        // The window bounds spans and logs alike: ending before the
+        // unfinished span and the application event, it drops both.
+        let root_start: i64 = got["spans"][0]["start_ns"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let window = format!("start_ns={root_start}&end_ns={}", root_start + 3_500_000);
+        let cut: Value = get(READ_KEY, dataset, trace_id, &window)
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let names: Vec<_> = cut["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| key_by_event[s["event_id"].as_str().unwrap()].as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "span.order.root",
+                "span.order.validate",
+                "span.order.db",
+                "span.order.payment",
+                "span.order.charge",
+                "span.order.orphan"
+            ],
+            "{what}: window"
+        );
+        let found: Vec<_> = cut["logs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["span_found"].as_bool().unwrap())
+            .collect();
+        assert_eq!(found, [true, true], "{what}: window logs");
+
+        let before = format!(
+            "start_ns={}&end_ns={root_start}",
+            root_start - 1_000_000_000
+        );
+        let response = get(READ_KEY, dataset, trace_id, &before).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{what}: before");
+        if dataset == "fixture" {
+            let response = get(READ_KEY_B, dataset, trace_id, everything)
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{what}: key b");
         }
     }
 }
