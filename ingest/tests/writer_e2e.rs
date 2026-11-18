@@ -119,6 +119,310 @@ async fn writes_both_destinations_to_a_real_clickhouse() {
     nothing_commits_behind_a_deadline_error(&server).await;
     recovers_from_a_column_type_change(&server).await;
     closes_the_connection_of_an_unanswered_insert(&server).await;
+    closes_after_a_slow_final_chunk(&server).await;
+    accepts_a_response_in_the_second_half(&server).await;
+    cancels_a_connect_after_schema_lookup(&server).await;
+}
+
+static LAST_SERIALIZED: AtomicBool = AtomicBool::new(false);
+static FINAL_PAUSED: AtomicBool = AtomicBool::new(false);
+static PERMANENT_PAUSE: AtomicBool = AtomicBool::new(false);
+static STALLED_PORT: AtomicUsize = AtomicUsize::new(0);
+static RESPONSE_DELAY_MS: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(clickhouse::Row, serde::Serialize)]
+struct ObservedRow {
+    #[serde(serialize_with = "observe_last")]
+    payload: String,
+}
+
+fn observe_last<S: serde::Serializer>(text: &String, serializer: S) -> Result<S::Ok, S::Error> {
+    if text == "final" {
+        LAST_SERIALIZED.store(true, Ordering::SeqCst);
+    }
+    serializer.serialize_str(text)
+}
+
+impl toudai_ingest::writer::ServingRow for ObservedRow {
+    const LABEL: &'static str = "logs";
+    const SIGNAL: toudai::query::Signal = toudai::query::Signal::Logs;
+}
+
+/// Two incompressible chunks larger than a TCP send buffer leave the final
+/// short row waiting in end(), not write(). Stop reading at that exact phase,
+/// then resume within the old send timeout but too late for its response
+/// timeout to beat the outer backstop. This used to detach the response task.
+async fn closes_after_a_slow_final_chunk(server: &ClickHouseServer) {
+    let database = "toudai_ingest_slow_final";
+    for (_, sql) in product_ddl() {
+        apply_ddl(server, &sql, database).await;
+    }
+    execute(server, &format!("DROP TABLE {database}.serving_logs"), None).await;
+    execute(
+        server,
+        &format!("CREATE TABLE {database}.serving_logs (payload String) ENGINE = Memory"),
+        None,
+    )
+    .await;
+    let proxy = WithholdingProxy::start(&server.url, true).await;
+    let writer = Writer::new(
+        WriterConfig {
+            url: proxy.url.clone(),
+            user: Some(server::USER.into()),
+            password: Some(server::PASSWORD.into()),
+            database: database.into(),
+        },
+        Arc::default(),
+    )
+    .unwrap();
+    let batch = |serving| toudai_ingest::mapping::Mapped {
+        serving,
+        canonical: vec![],
+        rejections: vec![],
+        dropped_reserved: 0,
+    };
+    writer
+        .write(
+            &batch(vec![ObservedRow {
+                payload: "warm".into(),
+            }]),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    let mut seed = 0x456789abcdef1234u64;
+    let mut random = || {
+        (0..8 * 1024 * 1024)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                (32 + seed % 95) as u8 as char
+            })
+            .collect::<String>()
+    };
+    let mapped = batch(vec![
+        ObservedRow { payload: random() },
+        ObservedRow { payload: random() },
+        ObservedRow {
+            payload: "final".into(),
+        },
+    ]);
+    // On Linux verify that the client releases its descriptor while the proxy
+    // NEVER resumes reading. EOF alone would require draining its data. Other
+    // platforms fall back to checking EOF after the proxy resumes reading.
+    {
+        let permanent = cfg!(target_os = "linux");
+        PERMANENT_PAUSE.store(permanent, Ordering::SeqCst);
+        STALLED_PORT.store(0, Ordering::SeqCst);
+        LAST_SERIALIZED.store(false, Ordering::SeqCst);
+        FINAL_PAUSED.store(false, Ordering::SeqCst);
+        proxy.withhold.store(true, Ordering::SeqCst);
+        let started = Instant::now();
+        let error = writer
+            .write(&mapped, started + Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        assert!(error.retryable(), "{error}");
+        assert!(started.elapsed() < Duration::from_millis(2500));
+        assert!(
+            FINAL_PAUSED.load(Ordering::SeqCst),
+            "the final chunk never stalled"
+        );
+        let waited = Instant::now();
+        if permanent {
+            let port = STALLED_PORT.load(Ordering::SeqCst);
+            assert_ne!(port, 0);
+            while owns_tcp_socket(port) {
+                assert!(
+                    waited.elapsed() < Duration::from_secs(2),
+                    "permanently stalled INSERT still owns its socket"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        } else {
+            while proxy.open_withheld.load(Ordering::SeqCst) > 0 {
+                assert!(
+                    waited.elapsed() < Duration::from_secs(3),
+                    "slow final chunk left its connection open"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    }
+    PERMANENT_PAUSE.store(false, Ordering::SeqCst);
+}
+
+fn owns_tcp_socket(port: usize) -> bool {
+    let tcp = std::fs::read_to_string("/proc/self/net/tcp").unwrap();
+    let port = format!("{port:04X}");
+    let inodes: Vec<_> = tcp
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let columns: Vec<_> = line.split_whitespace().collect();
+            (columns[1].rsplit(':').next() == Some(&port) && columns[9] != "0")
+                .then(|| format!("socket:[{}]", columns[9]))
+        })
+        .collect();
+    std::fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .flatten()
+        .any(|fd| {
+            std::fs::read_link(fd.path()).ok().is_some_and(|path| {
+                inodes
+                    .iter()
+                    .any(|inode| path.as_os_str() == inode.as_str())
+            })
+        })
+}
+
+async fn accepts_a_response_in_the_second_half(server: &ClickHouseServer) {
+    let proxy = WithholdingProxy::start(&server.url, false).await;
+    let writer = Writer::new(
+        WriterConfig {
+            url: proxy.url.clone(),
+            user: Some(server::USER.into()),
+            password: Some(server::PASSWORD.into()),
+            database: DATABASE.into(),
+        },
+        Arc::default(),
+    )
+    .unwrap();
+    let request = logs_request();
+    let ids = admit_logs(&request, &scope("fixture")).unwrap();
+    let mapped = map_logs(&request, "late-response", &ids, EPOCH);
+    RESPONSE_DELAY_MS.store(1500, Ordering::SeqCst);
+    writer
+        .write_logs(&mapped, Instant::now() + Duration::from_secs(2))
+        .await
+        .unwrap();
+    for table in ["canonical_events", "serving_logs"] {
+        assert_eq!(
+            count(
+                server,
+                &format!("{DATABASE}.{table} WHERE dataset = 'late-response'")
+            )
+            .await,
+            mapped.serving.len() as u64,
+            "{table}: late response must not cause a retry"
+        );
+    }
+}
+
+/// Fill a listener's accept queue after forwarding the real DESCRIBE. The
+/// subsequent INSERT then owns a SYN_SENT socket, but no dispatcher task yet.
+/// This exercises the gap BEFORE Hyper calls the connection executor.
+#[cfg(target_os = "linux")]
+async fn cancels_a_connect_after_schema_lookup(server: &ClickHouseServer) {
+    for cancel_early in [false, true] {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let listener = socket.listen(1).unwrap();
+        let address = listener.local_addr().unwrap();
+        let upstream = server.url.trim_start_matches("http://").to_owned();
+        let proxy = tokio::spawn(async move {
+            let (mut client, _) = listener.accept().await.unwrap();
+            // Linux admits backlog + 1 established sockets. Leave them in the
+            // queue so the writer's next TCP handshake cannot complete.
+            let fillers = [
+                TcpStream::connect(address).await.unwrap(),
+                TcpStream::connect(address).await.unwrap(),
+            ];
+            let mut server = TcpStream::connect(upstream).await.unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") {
+                header.push(client.read_u8().await.unwrap());
+            }
+            assert!(
+                !String::from_utf8_lossy(&header).contains("query=INSERT"),
+                "first request must validate the schema"
+            );
+            // Force the old pooled client to reconnect too: the same test must
+            // expose its leak, not bypass the stall through its schema socket.
+            header.splice(
+                header.len() - 2..header.len() - 2,
+                b"Connection: close\r\n".iter().copied(),
+            );
+            server.write_all(&header).await.unwrap();
+            let mut relays = tokio::task::JoinSet::new();
+            relays.spawn(async move {
+                let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+            });
+            std::future::pending::<()>().await;
+            drop((listener, fillers, relays));
+        });
+        // Abort the listener and all relay/filler sockets even if an assertion
+        // fails. The same guard is used by the other real ClickHouse proxies.
+        struct Proxy(tokio::task::JoinHandle<()>);
+        impl Drop for Proxy {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let _proxy = Proxy(proxy);
+        let writer = Writer::new(
+            WriterConfig {
+                url: format!("http://{address}"),
+                user: Some(server::USER.into()),
+                password: Some(server::PASSWORD.into()),
+                database: DATABASE.into(),
+            },
+            Arc::default(),
+        )
+        .unwrap();
+        let request = logs_request();
+        let ids = admit_logs(&request, &scope("fixture")).unwrap();
+        let mapped = map_logs(&request, "pending-connect", &ids, EPOCH);
+        let started = Instant::now();
+        let write = tokio::spawn(async move {
+            writer
+                .write_logs(&mapped, started + Duration::from_secs(2))
+                .await
+        });
+        while pending_connections(address.port()).is_empty() {
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "no pending INSERT connect after schema lookup"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        if cancel_early {
+            write.abort();
+            assert!(write.await.unwrap_err().is_cancelled());
+        } else {
+            assert!(write.await.unwrap().unwrap_err().retryable());
+            assert!(started.elapsed() < Duration::from_millis(2500));
+        }
+        let stopped = Instant::now();
+        while !pending_connections(address.port()).is_empty() {
+            assert!(
+                stopped.elapsed() < Duration::from_millis(500),
+                "pending INSERT connect retained its socket after cancellation (early={cancel_early})"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn cancels_a_connect_after_schema_lookup(_: &ClickHouseServer) {}
+
+#[cfg(target_os = "linux")]
+fn pending_connections(port: u16) -> Vec<usize> {
+    let tcp = std::fs::read_to_string("/proc/self/net/tcp").unwrap();
+    let port = format!("{port:04X}");
+    tcp.lines()
+        .skip(1)
+        .filter_map(|line| {
+            let columns: Vec<_> = line.split_whitespace().collect();
+            let local = usize::from_str_radix(columns[1].rsplit(':').next().unwrap(), 16).unwrap();
+            (columns[3] == "02"
+                && columns[2].rsplit(':').next() == Some(&port)
+                && owns_tcp_socket(local))
+            .then_some(local)
+        })
+        .collect()
 }
 
 /// Every stored row reads back as mapped, and every serving row joins its
@@ -349,7 +653,7 @@ async fn recovers_from_a_column_type_change(server: &ClickHouseServer) {
 /// the deadline and its connection is closed, rather than held by the
 /// crate's response task until the process exits (Experiment 025).
 async fn closes_the_connection_of_an_unanswered_insert(server: &ClickHouseServer) {
-    let proxy = WithholdingProxy::start(&server.url).await;
+    let proxy = WithholdingProxy::start(&server.url, false).await;
     let config = WriterConfig {
         url: proxy.url.clone(),
         user: Some(server::USER.into()),
@@ -397,54 +701,90 @@ struct WithholdingProxy {
     withhold: Arc<AtomicBool>,
     withheld: Arc<AtomicUsize>,
     open_withheld: Arc<AtomicUsize>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for WithholdingProxy {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 impl WithholdingProxy {
-    async fn start(upstream_url: &str) -> WithholdingProxy {
+    async fn start(upstream_url: &str, slow_final: bool) -> WithholdingProxy {
         let upstream = upstream_url.trim_start_matches("http://").to_owned();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let proxy = WithholdingProxy {
-            url: format!("http://{}", listener.local_addr().unwrap()),
-            withhold: Arc::default(),
-            withheld: Arc::default(),
-            open_withheld: Arc::default(),
-        };
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let withhold = Arc::default();
+        let withheld = Arc::default();
+        let open_withheld = Arc::default();
         let counters = (
-            proxy.withhold.clone(),
-            proxy.withheld.clone(),
-            proxy.open_withheld.clone(),
+            Arc::clone(&withhold),
+            Arc::clone(&withheld),
+            Arc::clone(&open_withheld),
         );
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
+            let mut relays = tokio::task::JoinSet::new();
             while let Ok((client, _)) = listener.accept().await {
                 let server = TcpStream::connect(&upstream).await.unwrap();
                 let (withhold, withheld, open) = counters.clone();
-                tokio::spawn(relay(client, server, withhold, withheld, open));
+                relays.spawn(relay(client, server, withhold, withheld, open, slow_final));
             }
         });
-        proxy
+        WithholdingProxy {
+            url,
+            withhold,
+            withheld,
+            open_withheld,
+            task,
+        }
     }
 }
 
 async fn relay(
-    client: TcpStream,
-    server: TcpStream,
+    mut client: TcpStream,
+    mut server: TcpStream,
     withhold: Arc<AtomicBool>,
     withheld: Arc<AtomicUsize>,
     open_withheld: Arc<AtomicUsize>,
+    slow_final: bool,
 ) {
+    // The isolated client revalidates its schema. Never fault DESCRIBE:
+    // the response under test must belong to an actual INSERT.
+    let mut line = Vec::new();
+    while !line.ends_with(b"\r\n") {
+        let Ok(byte) = client.read_u8().await else {
+            return;
+        };
+        line.push(byte);
+    }
+    let is_insert = String::from_utf8_lossy(&line).contains("query=INSERT");
+    let is_insert = Arc::new(AtomicBool::new(is_insert));
+    let client_port = client.peer_addr().unwrap().port();
+    if server.write_all(&line).await.is_err() {
+        return;
+    }
     let (mut client_read, mut client_write) = client.into_split();
     let (mut server_read, mut server_write) = server.into_split();
     let this_withheld = Arc::new(AtomicBool::new(false));
-    let responses = {
+    let mut tasks = tokio::task::JoinSet::new();
+    {
         let (this_withheld, open_withheld) = (this_withheld.clone(), open_withheld.clone());
-        tokio::spawn(async move {
+        let is_insert = is_insert.clone();
+        tasks.spawn(async move {
             let mut buf = [0u8; 8192];
             loop {
                 let n = match server_read.read(&mut buf).await {
                     Ok(0) | Err(_) => return,
                     Ok(n) => n,
                 };
-                if withhold.load(Ordering::SeqCst) {
+                if is_insert.load(Ordering::SeqCst) {
+                    let delay = RESPONSE_DELAY_MS.swap(0, Ordering::SeqCst);
+                    if delay > 0 {
+                        tokio::time::sleep(Duration::from_millis(delay as u64)).await;
+                    }
+                }
+                if is_insert.load(Ordering::SeqCst) && withhold.load(Ordering::SeqCst) {
                     if !this_withheld.swap(true, Ordering::SeqCst) {
                         withheld.fetch_add(1, Ordering::SeqCst);
                         open_withheld.fetch_add(1, Ordering::SeqCst);
@@ -456,11 +796,45 @@ async fn relay(
         })
     };
     // Requests flow until the client closes its side.
-    let _ = tokio::io::copy(&mut client_read, &mut server_write).await;
+    let mut buf = [0; 8192];
+    let mut paused = false;
+    loop {
+        if is_insert.load(Ordering::SeqCst)
+            && slow_final
+            && !paused
+            && LAST_SERIALIZED.load(Ordering::SeqCst)
+        {
+            paused = true;
+            FINAL_PAUSED.store(true, Ordering::SeqCst);
+            STALLED_PORT.store(client_port as usize, Ordering::SeqCst);
+            if !this_withheld.swap(true, Ordering::SeqCst) {
+                open_withheld.fetch_add(1, Ordering::SeqCst);
+            }
+            let delay = if PERMANENT_PAUSE.load(Ordering::SeqCst) {
+                60_000
+            } else {
+                1500
+            };
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        let n = match client_read.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        if buf[..n]
+            .windows(b"query=INSERT".len())
+            .any(|w| w == b"query=INSERT")
+        {
+            is_insert.store(true, Ordering::SeqCst);
+        }
+        if server_write.write_all(&buf[..n]).await.is_err() {
+            break;
+        }
+    }
     if this_withheld.load(Ordering::SeqCst) {
         open_withheld.fetch_sub(1, Ordering::SeqCst);
     }
-    responses.abort();
+    tasks.abort_all();
 }
 
 async fn write_fixture_logs(writer: &Writer) -> Result<(), toudai_ingest::writer::WriteError> {

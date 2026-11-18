@@ -15,7 +15,7 @@ clickhouse = "0.15"
 flate2 = "1"
 http = "1"
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["http1", "server-graceful", "service", "tokio"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "server-graceful", "service", "tokio"] }
 lz4_flex = "0.14"
 opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic", "logs", "trace", "with-serde"] }
 prost = "0.14"
