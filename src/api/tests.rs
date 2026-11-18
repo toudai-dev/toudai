@@ -20,6 +20,8 @@ async fn serve() -> String {
     url
 }
 
+const TRACE: &str = "/v1/traces/d/0123456789abcdef0123456789abcdef?start_ns=1&end_ns=2";
+
 fn valid_query() -> Value {
     json!({
         "dataset": "d", "signal": "logs",
@@ -66,6 +68,9 @@ async fn requests_are_authenticated_before_anything_else() {
             "/v1/events/d/e1",
             Some("Bearer key-a-01234567890"),
         ),
+        (get.clone(), TRACE, None),
+        // An invalid lookup must not be reported ahead of the credential.
+        (get.clone(), "/v1/traces/d/nope", Some("Bearer wrong")),
     ];
     for (method, path, authorization) in cases {
         // An unparseable body must not be reported ahead of the credential.
@@ -106,6 +111,51 @@ async fn query_requests_are_rejected_before_any_statement_runs() {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         assert_eq!(response["error"]["code"], code, "{body}");
+    }
+}
+
+#[tokio::test]
+async fn trace_lookups_are_rejected_before_any_statement_runs() {
+    let base = serve().await;
+    let id = "0123456789abcdef0123456789abcdef";
+    let cases = [
+        (format!("/v1/traces/d/{id}"), "invalid_request"),
+        (format!("/v1/traces/d/{id}?start_ns=1"), "invalid_request"),
+        (
+            format!("/v1/traces/d/{id}?start_ns=x&end_ns=2"),
+            "invalid_request",
+        ),
+        (
+            format!("/v1/traces/d/{id}?start_ns=1&end_ns=2&tenant_id=t"),
+            "invalid_request",
+        ),
+        (
+            format!("/v1/traces/d/{id}?start_ns=1&end_ns=2&logs=yes"),
+            "invalid_request",
+        ),
+        (
+            format!("/v1/traces/d/{id}?start_ns=2&end_ns=2"),
+            "invalid_time_range",
+        ),
+        (
+            "/v1/traces/d/0123?start_ns=1&end_ns=2".into(),
+            "invalid_trace_id",
+        ),
+        (
+            format!("/v1/traces/d/{}?start_ns=1&end_ns=2", "0".repeat(32)),
+            "invalid_trace_id",
+        ),
+    ];
+    for (path, code) in cases {
+        let (status, _, response) = call(
+            reqwest::Method::GET,
+            format!("{base}{path}"),
+            Some("Bearer key-a-0123456789"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+        assert_eq!(response["error"]["code"], code, "{path}");
     }
 }
 
@@ -167,6 +217,28 @@ async fn datasets_outside_the_keys_list_are_refused() {
         (
             "key-a-0123456789",
             "/v1/events/other/e1",
+            None,
+            StatusCode::BAD_GATEWAY,
+            "clickhouse_unavailable",
+        ),
+        (
+            "key-d-0123456789",
+            "/v1/traces/other/0123456789abcdef0123456789abcdef?start_ns=1&end_ns=2",
+            None,
+            StatusCode::FORBIDDEN,
+            "dataset_not_allowed",
+        ),
+        // An invalid lookup is a 400 before the dataset list is consulted.
+        (
+            "key-d-0123456789",
+            "/v1/traces/other/0123?start_ns=1&end_ns=2",
+            None,
+            StatusCode::BAD_REQUEST,
+            "invalid_trace_id",
+        ),
+        (
+            "key-d-0123456789",
+            TRACE,
             None,
             StatusCode::BAD_GATEWAY,
             "clickhouse_unavailable",

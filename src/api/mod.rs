@@ -3,9 +3,13 @@
 //! * `POST /v1/query`: the request model of [`crate::query`] as JSON (see
 //!   [`wire`]); the response is the rows plus [`crate::query::PlanDiagnostics`].
 //! * `GET /v1/events/{dataset}/{event_id}`: the canonical payload of one event.
+//! * `GET /v1/traces/{dataset}/{trace_id}?start_ns=&end_ns=[&logs=false]`: the
+//!   trace's spans in waterfall order with their span events, and unless
+//!   `logs=false`, the logs and application events carrying its context (see
+//!   [`crate::traces`]). The window is mandatory and half-open on event time.
 //! * `GET /healthz`: whether the service can reach ClickHouse.
 //!
-//! The query and event endpoints require `Authorization: Bearer <read key>`.
+//! The query, event, and trace endpoints require `Authorization: Bearer <read key>`.
 //! One deployment serves one customer (Decision 0002), so a valid key admits
 //! the request and nothing scopes it to a customer. The dataset is named
 //! explicitly, by the request body or the event path; a key restricted to a
@@ -17,8 +21,8 @@ pub mod wire;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::rejection::JsonRejection;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::rejection::{JsonRejection, QueryRejection};
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode};
@@ -30,7 +34,8 @@ use serde_json::{Value, json};
 use crate::auth::{DatasetAccess, Keys, bearer_token};
 use crate::clickhouse::{ClickHouse, ClickHouseError};
 use crate::events::{self, EventError};
-use crate::query::{QueryError, ServingTables, interpret, plan};
+use crate::query::{QueryError, ServingTables, TimeRange, interpret, plan};
+use crate::traces::{self, TraceError, TraceLookup};
 
 use self::wire::QueryRequest;
 
@@ -44,6 +49,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/v1/query", post(query))
         .route("/v1/events/{dataset}/{event_id}", get(event))
+        .route("/v1/traces/{dataset}/{trace_id}", get(trace))
         .route("/healthz", get(healthz))
         .with_state(state)
 }
@@ -86,6 +92,33 @@ impl ApiError {
     /// An error of the request itself, found before any statement ran.
     fn rejected(error: QueryError) -> ApiError {
         ApiError::new(StatusCode::BAD_REQUEST, error.code(), error.to_string())
+    }
+
+    /// A trace lookup that cannot be answered whole.
+    fn trace(error: TraceError) -> ApiError {
+        match error {
+            TraceError::TooLarge { .. } => ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                error.code(),
+                error.to_string(),
+            ),
+            TraceError::Conflict { .. } => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error.code(),
+                error.to_string(),
+            ),
+            TraceError::InvalidTraceId | TraceError::InvalidTimeRange { .. } => {
+                ApiError::new(StatusCode::BAD_REQUEST, error.code(), error.to_string())
+            }
+            TraceError::Malformed(_) => {
+                eprintln!("{error}");
+                ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "malformed_result",
+                    "the storage backend returned an unexpected result",
+                )
+            }
+        }
     }
 
     /// An error found in the data the statement returned: the request is valid
@@ -233,6 +266,79 @@ async fn event(
                 "the storage backend returned an unexpected result",
             ))
         }
+    }
+}
+
+/// Query parameters of a trace lookup. Unknown parameters are refused, as
+/// unknown request fields are.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TraceParams {
+    start_ns: i64,
+    end_ns: i64,
+    #[serde(default = "default_logs")]
+    logs: bool,
+}
+
+fn default_logs() -> bool {
+    true
+}
+
+async fn trace(
+    State(state): State<Arc<AppState>>,
+    key: ReadKey,
+    Path((dataset, trace_id)): Path<(String, String)>,
+    params: Result<Query<TraceParams>, QueryRejection>,
+) -> Result<Json<traces::Trace>, ApiError> {
+    let Query(params) = params.map_err(|rejection| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            rejection.body_text(),
+        )
+    })?;
+    let time = TimeRange {
+        start_ns: params.start_ns,
+        end_ns: params.end_ns,
+    };
+    let lookup =
+        TraceLookup::new(dataset, &trace_id, time, params.logs).map_err(ApiError::trace)?;
+    key.check(&lookup.dataset)?;
+    let clickhouse = &state.clickhouse;
+    let run = |statement| async move {
+        clickhouse
+            .query_rows(&statement)
+            .await
+            .map_err(ApiError::clickhouse)
+    };
+    // Payloads are read after the spans, for the spans selected; the logs
+    // read runs alongside, so the two signals are not one snapshot.
+    let spans_and_payloads = async {
+        let spans = run(traces::spans_statement(&lookup, &state.tables)).await?;
+        let ids = traces::selected_span_ids(&spans).map_err(ApiError::trace)?;
+        let mut payloads = Vec::new();
+        for statement in traces::span_payloads_statements(&lookup, &state.tables, &ids) {
+            payloads.extend(run(statement).await?);
+        }
+        Ok::<_, ApiError>((spans, payloads))
+    };
+    let logs = async {
+        match lookup.logs {
+            true => run(traces::logs_statement(&lookup, &state.tables))
+                .await
+                .map(Some),
+            false => Ok(None),
+        }
+    };
+    let ((spans, payloads), logs) = tokio::try_join!(spans_and_payloads, logs)?;
+    match traces::assemble(&lookup, &spans, &payloads, logs.as_deref()) {
+        Ok(Some(trace)) => Ok(Json(trace)),
+        Ok(None) => Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "trace_not_found",
+            "no matching records of this trace in this dataset and window",
+        )),
+        Err(error) => Err(ApiError::trace(error)),
     }
 }
 

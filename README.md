@@ -34,9 +34,10 @@ TOUDAI_CLICKHOUSE_URL=http://127.0.0.1:8123 \
 | --- | --- |
 | `POST /v1/query` | A query request (see `src/api/wire.rs`); returns rows plus `PlanDiagnostics`. |
 | `GET /v1/events/{dataset}/{event_id}` | The canonical payload of one event from `canonical_events`. |
+| `GET /v1/traces/{dataset}/{trace_id}?start_ns=&end_ns=` | One trace in an event-time window: its spans in waterfall order with their span events, and the logs and application events carrying its context (`&logs=false` leaves them out). See `src/traces.rs`. |
 | `GET /healthz` | 200 while ClickHouse answers, 503 otherwise. No credential needed. |
 
-Both data endpoints need `Authorization: Bearer <read key>`. One deployment
+The data endpoints need `Authorization: Bearer <read key>`. One deployment
 serves one customer
 ([historical Decision 0002](https://github.com/toudai-dev/toudai/blob/ba8f98da50642b6f1212ca941845cf7100728bb9/rfd/0001/decisions/0002-single-tenant-core.adoc)), so a key
 admits the request, optionally restricted to a list of datasets: a dataset
