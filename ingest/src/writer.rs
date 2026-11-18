@@ -11,17 +11,24 @@
 //!
 //! The service never runs DDL: the tables come from `clickhouse/schema`, and
 //! the `clickhouse` crate checks each row struct against the live table schema
-//! before the first insert into it.
+//! before each insert attempt.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, Weak};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use clickhouse::{Client, Row, RowWrite};
+use hyper_util::client::legacy::Client as HttpClient;
+use hyper_util::client::legacy::connect::HttpConnector;
+use tokio::sync::watch;
+use tokio::task::AbortHandle;
 use tokio::time::Instant;
 use toudai::query::schema::{CANONICAL_EVENTS_TABLE, table_name};
 use toudai::query::{ServingTables, Signal};
+use tower::Service;
 
 use crate::mapping::{CanonicalRow, LogRow, Mapped, SpanRow};
 use crate::metrics::Counters;
@@ -62,6 +69,84 @@ pub struct WriterConfig {
     pub password: Option<String>,
     /// The deployment database the schema was applied to (Decision 0002 D1).
     pub database: String,
+}
+
+/// Own the HTTP connection tasks, which close their sockets on cancellation.
+/// clickhouse 0.15.3 detaches its response task on drop; aborting only its
+/// request body can itself stall behind an unsent chunk. A transport per
+/// attempt isolates cancellation from concurrent inserts. Connections and
+/// metadata cannot be shared across these clients with the crate's public
+/// API, so each attempt also fetches its schema again rather than weakening
+/// row validation. Remove this workaround when insert drop aborts its task.
+struct Connections {
+    tasks: Mutex<Vec<AbortHandle>>,
+    // Dropping the last sender cancels DNS/TCP work that has not reached the
+    // executor yet. A connection-task abort handle alone cannot cover that.
+    _cancelled: watch::Sender<()>,
+}
+
+impl Drop for Connections {
+    fn drop(&mut self) {
+        for task in self
+            .tasks
+            .get_mut()
+            .expect("connection tasks lock")
+            .drain(..)
+        {
+            task.abort();
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AttemptExecutor(Weak<Connections>);
+
+impl<F> hyper::rt::Executor<F> for AttemptExecutor
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    fn execute(&self, future: F) {
+        if let Some(connections) = self.0.upgrade() {
+            connections
+                .tasks
+                .lock()
+                .expect("connection tasks lock")
+                .push(tokio::spawn(future).abort_handle());
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AttemptConnector {
+    inner: HttpConnector,
+    deadline: Instant,
+    cancelled: watch::Receiver<()>,
+}
+
+impl Service<http::Uri> for AttemptConnector {
+    type Response = <HttpConnector as Service<http::Uri>>::Response;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map(|r| r.map_err(Into::into))
+    }
+
+    fn call(&mut self, uri: http::Uri) -> Self::Future {
+        let connect = self.inner.call(uri);
+        let deadline = self.deadline;
+        let mut cancelled = self.cancelled.clone();
+        Box::pin(async move {
+            tokio::select! {
+                _ = cancelled.changed() => Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "insert cancelled").into()),
+                result = tokio::time::timeout_at(deadline, connect) => match result {
+                    Ok(result) => result.map_err(Into::into),
+                    Err(error) => Err(error.into()),
+                },
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +198,7 @@ impl std::fmt::Display for WriteError {
 impl std::error::Error for WriteError {}
 
 pub struct Writer {
-    client: Client,
+    config: WriterConfig,
     counters: Arc<Counters>,
 }
 
@@ -122,16 +207,7 @@ impl Writer {
         // The same identifier rule as the query service, which names the
         // database in SQL.
         ServingTables::new(&config.database).map_err(|e| e.to_string())?;
-        let mut client = Client::default()
-            .with_url(config.url)
-            .with_database(config.database);
-        if let Some(user) = config.user {
-            client = client.with_user(user);
-        }
-        if let Some(password) = config.password {
-            client = client.with_password(password);
-        }
-        Ok(Writer { client, counters })
+        Ok(Writer { config, counters })
     }
 
     pub fn counters(&self) -> &Counters {
@@ -219,8 +295,8 @@ impl Writer {
 
     /// Insert `rows` into `table`, retrying with jittered exponential backoff
     /// until it commits, the error cannot be retried, or the next attempt
-    /// would start after `deadline`. Each attempt ends within [`MIN_ATTEMPT`] of
-    /// the deadline.
+    /// would start after `deadline`. Each attempt ends at the same absolute
+    /// deadline, including a stalled final send.
     async fn insert_with_retry<R>(
         &self,
         signal: &'static str,
@@ -247,18 +323,6 @@ impl Writer {
                 Err(error) => error,
             };
             self.counters.add("insert_failures", &labels, 1);
-            // The client caches each table's columns and sends them as the
-            // insert's header, so after a column changes type ClickHouse
-            // refuses every insert, and a schema check can fail against stale
-            // columns. Fetching them again costs one query per failure and
-            // spares a restart.
-            if matches!(
-                error,
-                clickhouse::error::Error::BadResponse(_)
-                    | clickhouse::error::Error::SchemaMismatch(_)
-            ) {
-                self.client.clear_cached_metadata().await;
-            }
             let wait = jitter(backoff);
             if !retryable(&error) || Instant::now() + wait + MIN_ATTEMPT > deadline {
                 return Err(error);
@@ -278,29 +342,45 @@ impl Writer {
     where
         R: Row + RowWrite + for<'a> Row<Value<'a> = R>,
     {
+        let (cancelled, receiver) = watch::channel(());
+        let connections = Arc::new(Connections {
+            tasks: Mutex::default(),
+            _cancelled: cancelled,
+        });
+        let http = HttpClient::builder(AttemptExecutor(Arc::downgrade(&connections)))
+            .pool_max_idle_per_host(0)
+            .build(AttemptConnector {
+                inner: HttpConnector::new(),
+                deadline,
+                cancelled: receiver,
+            });
+        let mut client = Client::with_http_client(http)
+            .with_url(&self.config.url)
+            .with_database(&self.config.database);
+        if let Some(user) = &self.config.user {
+            client = client.with_user(user);
+        }
+        if let Some(password) = &self.config.password {
+            client = client.with_password(password);
+        }
         let send = async {
-            let mut insert = self.client.insert::<R>(table).await?;
+            let mut insert = client.insert::<R>(table).await?;
             for row in rows {
                 insert.write(row).await?;
             }
             Ok::<_, clickhouse::error::Error>(insert)
         };
-        // Dropping the insert while it sends aborts its request body, so a
-        // cut-off here usually closes the connection.
+        // `connections` is dropped on every exit, including cancellation of
+        // this future, closing even a socket blocked in its final send.
         let insert = tokio::time::timeout_at(deadline, send)
             .await
             .unwrap_or(Err(clickhouse::error::Error::TimedOut))?;
-        // `end` sends the last buffered rows, then waits for the response in a
-        // task the crate spawned, which dropping the insert does not stop: a
-        // ClickHouse that never answers would keep one connection per
-        // timed-out insert (Experiment 025). The crate's own timeouts abort
-        // the body or that task when they fire. The end timeout starts after
-        // the last send, so the backstop lets it fire first unless that send
-        // was slow, and keeps the attempt within MIN_ATTEMPT of the deadline;
-        // after a slow last send the response task is left running, as before.
+        // The full remaining budget is available to send AND acknowledgement;
+        // neither phase gets an arbitrary half-budget that could force a retry
+        // after ClickHouse committed. The guard closes the transport on timeout.
         let remaining = deadline.saturating_duration_since(Instant::now());
         let end = insert.with_timeouts(Some(remaining), Some(remaining)).end();
-        tokio::time::timeout_at(deadline + MIN_ATTEMPT, end)
+        tokio::time::timeout_at(deadline, end)
             .await
             .unwrap_or(Err(clickhouse::error::Error::TimedOut))
     }
