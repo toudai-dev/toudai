@@ -585,7 +585,15 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let router = router(Arc::new(pipeline(None).unwrap()), Timeouts::default());
+        // These cases test the 20 MiB transport limit independently of the
+        // mapping admission charge for a nearly 20 MiB string body.
+        let pipeline = crate::pipeline::testing::with(crate::pipeline::Settings {
+            memory_budget: 1024 * 1024 * 1024,
+            budget: Duration::from_millis(300),
+            ..crate::pipeline::Settings::default()
+        })
+        .unwrap();
+        let router = router(Arc::new(pipeline), Timeouts::default());
         let response = router
             .oneshot(request.body(Body::from(body)).unwrap())
             .await
