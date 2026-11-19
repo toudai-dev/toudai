@@ -125,6 +125,79 @@ pub enum Aggregate {
     },
     /// Span duration (nanoseconds): contributing, timing-error, and sum.
     SpanDuration,
+    /// Event count, contributing-value count, and exact nearest-rank
+    /// percentiles of an attribute of the declared numeric type, with the same
+    /// incompatible-value and non-finite rules as [`Aggregate::Sum`].
+    Percentiles {
+        attr: AttrRef,
+        value_type: ValueType,
+        percentiles: Vec<Percentile>,
+    },
+    /// Span duration counts as [`Aggregate::SpanDuration`] plus exact
+    /// nearest-rank percentiles of the observable durations.
+    SpanDurationPercentiles { percentiles: Vec<Percentile> },
+    /// The matching events themselves rather than an aggregate: up to `limit`
+    /// summary rows in `order`, plus how many events matched, so a client can
+    /// tell a whole listing from a page of it and look each event up by its
+    /// `event_id`. A listing is neither grouped nor bucketed.
+    Events {
+        limit: u32,
+        order: EventOrder,
+        /// Attributes whose received type and value each row reports.
+        fields: Vec<AttrRef>,
+    },
+}
+
+/// The order of an event listing. Ties break on `event_id` in the same
+/// direction, so a listing is deterministic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventOrder {
+    Newest,
+    Oldest,
+    /// Longest observable span duration first; spans without one come last.
+    Longest,
+}
+
+/// A percentile in thousandths of a percent (`99.9` is `99_900`), so a
+/// requested percentile is an exact decimal and its rank is integer
+/// arithmetic: percentile `p` of `n` values is the value at 1-based rank
+/// `max(1, ceil(p * n / 100))` in ascending order (nearest rank), always a
+/// value that was received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Percentile(u32);
+
+impl Percentile {
+    /// Thousandths of a percent in 100%.
+    pub const SCALE: u32 = 100_000;
+
+    /// Parse `0` to `100` with at most three decimal places.
+    pub fn parse(text: &str) -> Option<Percentile> {
+        let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > 3 {
+            return None;
+        }
+        let whole: u32 = whole.parse().ok().filter(|w| *w <= 100)?;
+        let fraction: u32 = format!("{fraction:0<3}").parse().ok()?;
+        let thousandths = whole * 1000 + fraction;
+        (thousandths <= Percentile::SCALE).then_some(Percentile(thousandths))
+    }
+
+    pub fn thousandths(self) -> u32 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for Percentile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (whole, fraction) = (self.0 / 1000, self.0 % 1000);
+        if fraction == 0 {
+            write!(f, "{whole}")
+        } else {
+            let fraction = format!("{fraction:03}");
+            write!(f, "{whole}.{}", fraction.trim_end_matches('0'))
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +205,10 @@ pub struct Query {
     pub scope: Scope,
     pub signal: Signal,
     pub time: TimeRange,
+    /// Time-series bucket width in nanoseconds. Buckets are half-open and
+    /// start at `time.start_ns`, so bucket `i` is `[start + i * w, start +
+    /// (i + 1) * w)` clipped to the range; no clock or time zone is involved.
+    pub bucket_ns: Option<i64>,
     pub filters: Vec<Predicate>,
     /// Group keys include the value type, so string `"1"`, integer `1`, and
     /// float `1.0` are distinct groups, as are missing and explicit empty.

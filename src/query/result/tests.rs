@@ -15,6 +15,7 @@ fn query(aggregate: Aggregate, group_by: Vec<AttrRef>) -> Plan {
             start_ns: 0,
             end_ns: 1,
         },
+        bucket_ns: None,
         filters: vec![],
         group_by,
         aggregate,
@@ -285,7 +286,7 @@ fn group_keys_keep_their_type() {
         (
             "wat",
             "",
-            Err(malformed_result("unknown group type \"wat\"")),
+            Err(malformed_result("unknown value type \"wat\"")),
         ),
     ];
     for (ty, value, expected) in cases {
@@ -355,16 +356,19 @@ fn response_count_json_is_lossless_and_typed() {
     let plan = query(Aggregate::Count, vec![]);
     let result = QueryResult {
         rows: vec![ResultRow {
+            bucket_start_ns: None,
             groups: vec![],
             events: 9_007_199_254_740_993,
             values: Some(ValueStats {
                 contributing: u64::MAX,
                 timing_errors: Some(9_007_199_254_740_994),
                 sum: None,
+                percentiles: None,
             }),
         }],
         diagnostics: plan.diagnostics,
         non_finite_excluded: Some(u64::MAX - 1),
+        events: None,
     };
     let out = result.to_json();
     assert_eq!(

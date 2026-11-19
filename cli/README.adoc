@@ -1,0 +1,94 @@
+= toudai-cli
+
+The operator client of the Toudai query service: a thin command line over
+`POST /v1/query` and `GET /v1/events/{dataset}/{event_id}`. It builds requests
+and renders answers; the query service owns every query rule. A richer explore
+UI is not part of the public core.
+
+[source,sh]
+----
+export TOUDAI_URL=http://127.0.0.1:8080   # the query service (default)
+export TOUDAI_READ_KEY=...                # a read key; never an argument
+cargo run -p toudai-cli -- help
+----
+
+== Commands
+
+[options="header",cols="1,3"]
+|===
+|Command |Answers
+
+|`count`
+|How many events match, optionally grouped (`--by FIELD`, repeatable).
+
+|`series`
+|Counts per `--every` bucket. Buckets start at `--from`, are half-open, and
+every bucket is shown, so a gap reads as zero.
+
+|`percentiles`
+|Exact nearest-rank percentiles (`--p 50,90,99`) of a typed attribute
+(`--field KEY --type int\|double`) or of span durations (`--span-duration`),
+optionally grouped or bucketed.
+
+|`events`
+|The matching events with their `event_id`, newest, oldest, or longest first
+(`--order`), up to `--limit`, with attributes to show (`--show FIELD`).
+
+|`event <dataset> <event_id>`
+|One event's canonical payload, with `payload_sha256` verified against the
+payload text as served.
+|===
+
+Every query command takes `--dataset`, `--signal logs|spans`, a half-open
+`--from`/`--to` range (RFC 3339 UTC or Unix nanoseconds), and `--where`
+filters, all of which must hold. `--json` prints the service's response
+unchanged.
+
+== Typed values
+
+A field is `record:KEY` (or just `KEY`), `resource:KEY`, or `scope:KEY`; a dot
+is part of the key. A literal names its type, so the client never infers one
+from how a value looks:
+
+[source,sh]
+----
+--where 'cart.items = int:3'          # matches the integer 3 only
+--where 'cart.items = string:3'       # matches the string "3" only
+--where 'retry.count >= int:1'
+--where 'error.type exists'           # also: absent, is TYPE
+----
+
+No two types print alike: strings are quoted, integers bare, doubles always
+carry a decimal point or exponent, and `(missing)`, `(empty)`, `(bytes)`,
+`(array)`, and `(map)` are markers, never quoted. A listed attribute the query
+surface cannot operate on is shown by its type rather than dropped.
+
+== Exact, complete, and partial
+
+Each answer ends with a status line and the plan:
+
+* `exact` or `APPROXIMATE (...)`: the plan's approximation mode. Every PoC
+  answer is exact; percentiles are nearest-rank values that were received. An
+  approximate answer is labelled `coverage unknown`, never complete, and a
+  series fills no empty buckets for it.
+* `complete over the events stored when it ran`: an aggregate counts every
+  stored event that matched. The service fails a query rather than return a
+  truncated aggregate, and it has no ingestion watermark yet, so events still
+  in flight are not counted.
+* `complete: all N matching events` or `PARTIAL: the first n of N matching
+  events`: whether a listing showed everything that matched.
+* A note when a double comparison skipped events holding NaN or an infinity.
+
+A reply that does not match its request (a missing count, a value of the
+wrong type, a percentile out of place, a repeated group) is reported as
+malformed instead of shown. A refusal prints the service's stable error code
+and message and exits 1;
+a usage mistake exits 2.
+
+== Walkthrough
+
+`cli/tests/walkthrough.rs` sends the RFD 0001 fixture through `toudai-ingest`
+into ClickHouse and walks an operator through time comparison, grouping,
+percentiles, outlier identification, and exact-event drill-down, checking each
+answer against `fixture-emitter/expected.jsonl`. Set `TOUDAI_WALKTHROUGH_OUT`
+to keep the transcript.

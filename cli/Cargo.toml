@@ -1,0 +1,20 @@
+[package]
+name = "toudai-cli"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# A thin operator client: it speaks only the query service's HTTP API, so it
+# depends on nothing from the `toudai` crate outside its tests.
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+toudai = { path = ".." }
+toudai-ingest = { path = "../ingest" }

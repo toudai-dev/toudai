@@ -74,6 +74,33 @@ pub enum QueryError {
         start_ns: i64,
         end_ns: i64,
     },
+    /// The time-series bucket width is not a positive number of nanoseconds.
+    InvalidBucket {
+        bucket_ns: i64,
+    },
+    /// The time range holds more buckets than one response may carry.
+    TooManyBuckets {
+        buckets: u128,
+        max: u32,
+    },
+    /// A percentile aggregate names no percentiles, or more than one
+    /// response may carry.
+    PercentileCount {
+        count: usize,
+        max: usize,
+    },
+    /// An event listing was grouped or bucketed.
+    ListingNotGrouped,
+    /// An event listing's page size is zero or above the maximum.
+    InvalidLimit {
+        limit: u32,
+        max: u32,
+    },
+    /// An event listing names more fields than one response may carry.
+    TooManyFields {
+        count: usize,
+        max: usize,
+    },
     EmptyAttributeKey,
     InvalidIdentifier {
         name: String,
@@ -124,6 +151,12 @@ impl QueryError {
             QueryError::UnsupportedOperation { .. } => "unsupported_operation",
             QueryError::MissingScope { .. } => "missing_scope",
             QueryError::InvalidTimeRange { .. } => "invalid_time_range",
+            QueryError::InvalidBucket { .. } => "invalid_bucket",
+            QueryError::TooManyBuckets { .. } => "too_many_buckets",
+            QueryError::PercentileCount { .. } => "invalid_percentiles",
+            QueryError::ListingNotGrouped => "listing_not_grouped",
+            QueryError::InvalidLimit { .. } => "invalid_limit",
+            QueryError::TooManyFields { .. } => "too_many_fields",
             QueryError::EmptyAttributeKey => "empty_attribute_key",
             QueryError::InvalidIdentifier { .. } => "invalid_identifier",
             QueryError::OrderingNotDefined { .. } => "ordering_not_defined",
@@ -150,6 +183,29 @@ impl fmt::Display for QueryError {
             QueryError::MissingScope { field } => write!(f, "query scope requires {field}"),
             QueryError::InvalidTimeRange { start_ns, end_ns } => {
                 write!(f, "time range [{start_ns}, {end_ns}) is empty")
+            }
+            QueryError::InvalidBucket { bucket_ns } => {
+                write!(f, "bucket width {bucket_ns} ns is not positive")
+            }
+            QueryError::TooManyBuckets { buckets, max } => write!(
+                f,
+                "the time range holds {buckets} buckets; at most {max} are allowed"
+            ),
+            QueryError::PercentileCount { count, max } => write!(
+                f,
+                "a percentile aggregate needs 1 to {max} percentiles, not {count}"
+            ),
+            QueryError::ListingNotGrouped => {
+                write!(f, "an event listing cannot be grouped or bucketed")
+            }
+            QueryError::InvalidLimit { limit, max } => {
+                write!(f, "an event listing returns 1 to {max} events, not {limit}")
+            }
+            QueryError::TooManyFields { count, max } => {
+                write!(
+                    f,
+                    "an event listing reports at most {max} fields, not {count}"
+                )
             }
             QueryError::EmptyAttributeKey => write!(f, "attribute key is empty"),
             QueryError::InvalidIdentifier { name } => {
@@ -182,7 +238,10 @@ impl fmt::Display for QueryError {
                 write!(f, "{} has no scalar value to count", value_type.as_str())
             }
             QueryError::AggregateRequiresSpans => {
-                write!(f, "span duration aggregates need the spans signal")
+                write!(
+                    f,
+                    "span duration aggregates and orders need the spans signal"
+                )
             }
             QueryError::IncompatibleType {
                 attr,

@@ -9,18 +9,23 @@
 //! parameters (`{p0:String}`), including attribute keys, so a key or string
 //! literal cannot change the statement.
 
-use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
+use super::model::{
+    Aggregate, AttrRef, CmpOp, EventOrder, Namespace, Percentile, Predicate, Query, Signal,
+};
 use super::schema::{
-    self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TIMESTAMP_COLUMN, TIMING_END_BEFORE_START, TYPED_SCALARS,
+    self, DATASET_COLUMN, EVENT_ID_COLUMN, ListingType, SPAN_DURATION_COLUMN,
+    SPAN_TIMING_STATUS_COLUMN, ServingTables, TIMESTAMP_COLUMN, TIMING_END_BEFORE_START,
+    TYPED_SCALARS, listing_columns,
 };
 use super::value::{Literal, ValueType};
 
 /// Result column names shared with `result`.
 pub mod columns {
     pub const EVENTS: &str = "events";
+    pub const BUCKET: &str = "bucket";
     pub const CONTRIBUTING: &str = "contributing";
     pub const SUM: &str = "sum_value";
+    pub const PERCENTILES: &str = "percentile_values";
     pub const NON_FINITE: &str = "non_finite";
     pub const INCOMPATIBLE_TYPES: &str = "incompatible_types";
     pub const TIMING_ERRORS: &str = "timing_errors";
@@ -32,6 +37,23 @@ pub mod columns {
 
     pub fn group_value(index: usize) -> String {
         format!("g{index}_value")
+    }
+
+    pub const MATCHED: &str = "matched";
+
+    /// A listed serving column. The prefix keeps the alias from shadowing the
+    /// column itself: `toString(duration_ns) AS duration_ns` would make
+    /// `ORDER BY duration_ns` sort text.
+    pub fn listed(name: &str) -> String {
+        format!("l_{name}")
+    }
+
+    pub fn field_type(index: usize) -> String {
+        format!("f{index}_type")
+    }
+
+    pub fn field_value(index: usize) -> String {
+        format!("f{index}_value")
     }
 }
 
@@ -106,10 +128,29 @@ impl Binder {
 
 /// Generate the statement for a request that passed `validate`.
 pub fn generate(query: &Query, tables: &ServingTables) -> SqlStatement {
+    if let Aggregate::Events {
+        limit,
+        order,
+        fields,
+    } = &query.aggregate
+    {
+        return generate_listing(query, tables, *limit, *order, fields);
+    }
     let mut binder = Binder::default();
     let mut select: Vec<String> = Vec::new();
     let mut group: Vec<String> = Vec::new();
 
+    if let Some(bucket_ns) = query.bucket_ns {
+        // Int128 so `timestamp - start` cannot wrap for any Int64 start; the
+        // index is below `MAX_BUCKETS` because the timestamp is in range.
+        select.push(format!(
+            "toUInt64(intDiv(toInt128(toUnixTimestamp64Nano({TIMESTAMP_COLUMN})) - toInt128({}), {})) AS {}",
+            binder.bind("Int64", query.time.start_ns.to_string()),
+            binder.bind("Int64", bucket_ns.to_string()),
+            columns::BUCKET
+        ));
+        group.push(columns::BUCKET.to_owned());
+    }
     for (index, attr) in query.group_by.iter().enumerate() {
         let key = binder.string(&attr.key);
         let (type_col, value_col) = (columns::group_type(index), columns::group_value(index));
@@ -142,6 +183,70 @@ pub fn generate(query: &Query, tables: &ServingTables) -> SqlStatement {
     sql.push_str(" FORMAT JSONEachRow");
     SqlStatement {
         sql,
+        params: binder.params,
+    }
+}
+
+/// One page of matching events. `count() OVER ()` is evaluated before the
+/// `LIMIT`, so the page and the number of events that matched come from one
+/// statement over one snapshot.
+fn generate_listing(
+    query: &Query,
+    tables: &ServingTables,
+    limit: u32,
+    order: EventOrder,
+    fields: &[AttrRef],
+) -> SqlStatement {
+    let mut binder = Binder::default();
+    let mut select = vec![
+        format!("{EVENT_ID_COLUMN} AS {}", columns::listed(EVENT_ID_COLUMN)),
+        format!(
+            "toString(toUnixTimestamp64Nano({TIMESTAMP_COLUMN})) AS {}",
+            columns::listed("timestamp_ns")
+        ),
+    ];
+    for (name, ty) in listing_columns(query.signal) {
+        select.push(match ty {
+            ListingType::Text | ListingType::TextProjection => {
+                format!("{name} AS {}", columns::listed(name))
+            }
+            ListingType::Int => format!("toString({name}) AS {}", columns::listed(name)),
+            ListingType::Nanos => format!(
+                "toString(toUnixTimestamp64Nano({name})) AS {}",
+                columns::listed(&format!("{name}_ns"))
+            ),
+        });
+    }
+    for (index, attr) in fields.iter().enumerate() {
+        let key = binder.string(&attr.key);
+        select.push(format!(
+            "{} AS {}",
+            type_expr(query.signal, attr, &key),
+            columns::field_type(index)
+        ));
+        select.push(format!(
+            "{} AS {}",
+            value_expr(query.signal, attr, &key),
+            columns::field_value(index)
+        ));
+    }
+    select.push(format!("count() OVER () AS {}", columns::MATCHED));
+    let conditions = conditions(query, &mut binder, |_| true);
+    let order_by = match order {
+        EventOrder::Newest => format!("{TIMESTAMP_COLUMN} DESC, {EVENT_ID_COLUMN} DESC"),
+        EventOrder::Oldest => format!("{TIMESTAMP_COLUMN} ASC, {EVENT_ID_COLUMN} ASC"),
+        EventOrder::Longest => format!(
+            "{SPAN_DURATION_COLUMN} DESC NULLS LAST, {TIMESTAMP_COLUMN} DESC, {EVENT_ID_COLUMN} DESC"
+        ),
+    };
+    let limit = binder.bind("UInt32", limit.to_string());
+    SqlStatement {
+        sql: format!(
+            "SELECT {} FROM {} WHERE {} ORDER BY {order_by} LIMIT {limit} FORMAT JSONEachRow",
+            select.join(", "),
+            tables.table(query.signal),
+            conditions.join(" AND ")
+        ),
         params: binder.params,
     }
 }
@@ -471,7 +576,85 @@ fn aggregate_columns(query: &Query, binder: &mut Binder) -> Vec<String> {
                 ),
             ]
         }
+        Aggregate::Percentiles {
+            attr,
+            value_type,
+            percentiles,
+        } => {
+            let key = binder.string(&attr.key);
+            let map = typed_map(signal, *value_type);
+            let has = record_has(signal, *value_type, &key);
+            let mut out = vec![format!("countIf({has}) AS {}", columns::CONTRIBUTING)];
+            let mut values = has.clone();
+            if *value_type == ValueType::Double {
+                out.push(format!(
+                    "countIf({has} AND NOT isFinite({map}[{key}])) AS {}",
+                    columns::NON_FINITE
+                ));
+                values = format!("{has} AND isFinite({map}[{key}])");
+            }
+            out.push(percentile_column(
+                &format!("{map}[{key}]"),
+                &values,
+                percentiles,
+                binder,
+            ));
+            if !super::plan::has_type_filter(&query.filters, attr, *value_type) {
+                out.push(format!(
+                    "arraySort(groupUniqArrayIf({}, {})) AS {}",
+                    type_expr(signal, attr, &key),
+                    record_incompatible(signal, *value_type, &key),
+                    columns::INCOMPATIBLE_TYPES
+                ));
+            }
+            out
+        }
+        Aggregate::Events { .. } => unreachable!("a listing has its own statement"),
+        Aggregate::SpanDurationPercentiles { percentiles } => {
+            let observable = format!("isNotNull({SPAN_DURATION_COLUMN})");
+            vec![
+                format!("countIf({observable}) AS {}", columns::CONTRIBUTING),
+                format!(
+                    "countIf({SPAN_TIMING_STATUS_COLUMN} = '{TIMING_END_BEFORE_START}') AS {}",
+                    columns::TIMING_ERRORS
+                ),
+                percentile_column(
+                    &format!("assumeNotNull({SPAN_DURATION_COLUMN})"),
+                    &observable,
+                    percentiles,
+                    binder,
+                ),
+            ]
+        }
     }
+}
+
+/// Exact nearest-rank percentiles of `value` over the rows where `condition`
+/// holds, as text in the order requested. Percentile `p` (thousandths of a
+/// percent) of `n` sorted values is the value at 1-based rank
+/// `max(1, ceil(p * n / 100000))`; the rank is integer arithmetic, so 99.9 of
+/// 1000 values is exactly the 999th. The values are collected and sorted,
+/// which costs memory in the number of contributing values: exact, not
+/// sketched, is the PoC choice. With no contributing value the text is a
+/// placeholder the result layer never reads.
+fn percentile_column(
+    value: &str,
+    condition: &str,
+    percentiles: &[Percentile],
+    binder: &mut Binder,
+) -> String {
+    let list: Vec<String> = percentiles
+        .iter()
+        .map(|p| p.thousandths().to_string())
+        .collect();
+    let bound = binder.bind("Array(UInt32)", format!("[{}]", list.join(",")));
+    let sorted = format!("arraySort(groupArrayIf({value}, {condition}))");
+    let scale = Percentile::SCALE;
+    format!(
+        "arrayMap(k -> toString({sorted}[toUInt64(greatest(1, intDiv(toUInt128(k) * length({sorted}) + {}, {scale})))]), {bound}) AS {}",
+        scale - 1,
+        columns::PERCENTILES
+    )
 }
 
 #[cfg(test)]
@@ -491,6 +674,7 @@ mod tests {
                 start_ns: 1,
                 end_ns: 2,
             },
+            bucket_ns: None,
             filters: vec![
                 Predicate::Exists(AttrRef::record(hostile)),
                 Predicate::Compare {

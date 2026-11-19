@@ -15,8 +15,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::query::{
-    Aggregate, AttrRef, CmpOp, Literal, Namespace, Predicate, Query, Scope, Signal, TimeRange,
-    ValueType,
+    Aggregate, AttrRef, CmpOp, EventOrder, Literal, Namespace, Percentile, Predicate, Query, Scope,
+    Signal, TimeRange, ValueType,
 };
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +46,7 @@ impl QueryRequest {
                 start_ns: self.time.start_ns.0,
                 end_ns: self.time.end_ns.0,
             },
+            bucket_ns: self.time.bucket_ns.map(|n| n.0),
             filters: self.filters.into_iter().map(Predicate::from).collect(),
             group_by: self.group_by.into_iter().map(AttrRef::from).collect(),
             aggregate: self.aggregate.into(),
@@ -65,6 +66,9 @@ enum SignalWire {
 struct TimeWire {
     start_ns: Nanos,
     end_ns: Nanos,
+    /// Time-series bucket width; absent for a single result over the range.
+    #[serde(default)]
+    bucket_ns: Option<Nanos>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -205,6 +209,30 @@ enum AggregateWire {
         value_type: ValueTypeWire,
     },
     SpanDuration {},
+    Percentiles {
+        attr: AttrWire,
+        value_type: ValueTypeWire,
+        percentiles: Vec<PercentileWire>,
+    },
+    SpanDurationPercentiles {
+        percentiles: Vec<PercentileWire>,
+    },
+    Events {
+        limit: u32,
+        #[serde(default)]
+        order: EventOrderWire,
+        #[serde(default)]
+        fields: Vec<AttrWire>,
+    },
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum EventOrderWire {
+    #[default]
+    Newest,
+    Oldest,
+    Longest,
 }
 
 impl From<AggregateWire> for Aggregate {
@@ -220,7 +248,64 @@ impl From<AggregateWire> for Aggregate {
                 value_type: value_type.0,
             },
             AggregateWire::SpanDuration {} => Aggregate::SpanDuration,
+            AggregateWire::Percentiles {
+                attr,
+                value_type,
+                percentiles,
+            } => Aggregate::Percentiles {
+                attr: attr.into(),
+                value_type: value_type.0,
+                percentiles: percentiles.into_iter().map(|p| p.0).collect(),
+            },
+            AggregateWire::SpanDurationPercentiles { percentiles } => {
+                Aggregate::SpanDurationPercentiles {
+                    percentiles: percentiles.into_iter().map(|p| p.0).collect(),
+                }
+            }
+            AggregateWire::Events {
+                limit,
+                order,
+                fields,
+            } => Aggregate::Events {
+                limit,
+                order: match order {
+                    EventOrderWire::Newest => EventOrder::Newest,
+                    EventOrderWire::Oldest => EventOrder::Oldest,
+                    EventOrderWire::Longest => EventOrder::Longest,
+                },
+                fields: fields.into_iter().map(AttrRef::from).collect(),
+            },
         }
+    }
+}
+
+/// A percentile as decimal text (`"99.9"`) or a JSON integer (`99`). A
+/// fractional JSON number is refused: it is parsed to the nearest binary64
+/// before this sees it, so `50.000000000000001` would arrive as 50 and could
+/// move a nearest rank.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(try_from = "Value")]
+struct PercentileWire(Percentile);
+
+impl TryFrom<Value> for PercentileWire {
+    type Error = String;
+
+    fn try_from(value: Value) -> Result<PercentileWire, String> {
+        let text = match &value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => match n.as_u64() {
+                Some(whole) => whole.to_string(),
+                None => {
+                    return Err(format!(
+                        "percentile {n} is not a JSON integer; write a fractional percentile as a decimal string"
+                    ));
+                }
+            },
+            other => return Err(format!("{other} is not a percentile")),
+        };
+        Percentile::parse(&text).map(PercentileWire).ok_or_else(|| {
+            format!("{text:?} is not a percentile from 0 to 100 with at most three decimals")
+        })
     }
 }
 
@@ -346,7 +431,7 @@ mod tests {
         let request = json!({
             "dataset": "fixture",
             "signal": "spans",
-            "time": {"start_ns": 5, "end_ns": "9007199254740993"},
+            "time": {"start_ns": 5, "end_ns": "9007199254740993", "bucket_ns": "1000"},
             "filters": [
                 {"kind": "exists", "attr": {"namespace": "record", "key": "a.b"}},
                 {"kind": "absent", "attr": {"namespace": "resource", "key": "r"}},
@@ -369,6 +454,7 @@ mod tests {
                     start_ns: 5,
                     end_ns: 9_007_199_254_740_993
                 },
+                bucket_ns: Some(1_000),
                 filters: vec![
                     Predicate::Exists(AttrRef::record("a.b")),
                     Predicate::Absent(AttrRef::resource("r")),
@@ -518,6 +604,103 @@ mod tests {
             };
             let expected: f64 = text.parse().unwrap();
             assert_eq!(got.to_bits(), expected.to_bits(), "{text}");
+        }
+    }
+
+    #[test]
+    fn percentiles_are_exact_decimals() {
+        let aggregate = |percentiles: Value| {
+            with(
+                "aggregate",
+                json!({"kind": "span_duration_percentiles", "percentiles": percentiles}),
+            )
+        };
+        let thousandths = |request: Value| match parse(request).map(|q| q.aggregate) {
+            Ok(Aggregate::SpanDurationPercentiles { percentiles }) => Ok(percentiles
+                .iter()
+                .map(|p| p.thousandths())
+                .collect::<Vec<_>>()),
+            Ok(other) => panic!("{other:?}"),
+            Err(e) => Err(e),
+        };
+        assert_eq!(
+            thousandths(aggregate(json!([
+                "0", "50", "99.9", "99.999", 100, "100.000", 10
+            ]))),
+            Ok(vec![0, 50_000, 99_900, 99_999, 100_000, 100_000, 10_000])
+        );
+        for bad in [
+            json!([99.9]),
+            json!([1e1]),
+            json!([50.0]),
+            json!([101]),
+            json!(["100.001"]),
+            json!(["101"]),
+            json!(["-1"]),
+            json!(["99.9999"]),
+            json!([".5"]),
+            json!(["5."]),
+            json!(["1e1"]),
+            json!([" 5"]),
+            json!([true]),
+        ] {
+            let err = thousandths(aggregate(bad.clone())).unwrap_err();
+            assert!(err.contains("percentile"), "{bad}: {err}");
+        }
+        // As on the wire: each of these tokens reads as an integral binary64.
+        for token in ["50.000000000000001", "100.000000000000001", "5e1"] {
+            let request = format!(
+                r#"{{"dataset":"d","signal":"spans","time":{{"start_ns":1,"end_ns":2}},
+                    "aggregate":{{"kind":"span_duration_percentiles","percentiles":[{token}]}}}}"#
+            );
+            let err = serde_json::from_str::<QueryRequest>(&request).unwrap_err();
+            assert!(err.to_string().contains("decimal string"), "{token}: {err}");
+        }
+        let request = with(
+            "aggregate",
+            json!({"kind": "percentiles", "attr": {"namespace": "record", "key": "k"},
+                   "value_type": "double", "percentiles": ["50"]}),
+        );
+        assert_eq!(
+            parse(request).unwrap().aggregate,
+            Aggregate::Percentiles {
+                attr: AttrRef::record("k"),
+                value_type: ValueType::Double,
+                percentiles: vec![Percentile::parse("50").unwrap()],
+            }
+        );
+    }
+
+    #[test]
+    fn event_listings() {
+        let listing = |aggregate: Value| parse(with("aggregate", aggregate)).map(|q| q.aggregate);
+        assert_eq!(
+            listing(json!({"kind": "events", "limit": 20})),
+            Ok(Aggregate::Events {
+                limit: 20,
+                order: EventOrder::Newest,
+                fields: vec![],
+            })
+        );
+        assert_eq!(
+            listing(json!({"kind": "events", "limit": 5, "order": "longest",
+                           "fields": [{"namespace": "resource", "key": "service.version"}]})),
+            Ok(Aggregate::Events {
+                limit: 5,
+                order: EventOrder::Longest,
+                fields: vec![AttrRef::resource("service.version")],
+            })
+        );
+        for (bad, detail) in [
+            (json!({"kind": "events"}), "missing field `limit`"),
+            (json!({"kind": "events", "limit": -1}), "invalid value"),
+            (
+                json!({"kind": "events", "limit": 1, "order": "random"}),
+                "unknown variant",
+            ),
+        ] {
+            let err = listing(bad.clone()).unwrap_err();
+            assert!(err.contains(detail), "{bad}: {err}");
         }
     }
 

@@ -7,8 +7,9 @@
 use serde_json::{Value, json};
 
 use super::error::{Operation, QueryError, UnsupportedValue};
-use super::model::{Aggregate, AttrRef};
+use super::model::{Aggregate, AttrRef, Percentile};
 use super::plan::{Plan, PlanDiagnostics, has_type_filter};
+use super::schema::{EVENT_ID_COLUMN, ListingType, listing_columns};
 use super::sql::{MISSING_TYPE, columns};
 use super::value::{TypedValue, ValueType};
 
@@ -29,6 +30,67 @@ impl GroupValue {
     }
 }
 
+/// A listed field value. Unlike a group key, a listing reports every received
+/// value: the query surface cannot operate on bytes, arrays, maps, or
+/// non-finite floats, but it can say they are there.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldValue {
+    Missing,
+    Value(TypedValue),
+    /// Bytes, an array, or a map: the type only; the value is in the
+    /// canonical payload.
+    CanonicalOnly(ValueType),
+    NonFinite(f64),
+}
+
+impl FieldValue {
+    /// Non-finite floats use the request literals' spellings.
+    pub fn to_json(&self) -> Value {
+        match self {
+            FieldValue::Missing => json!({ "type": MISSING_TYPE }),
+            FieldValue::Value(v) => v.to_json(),
+            FieldValue::CanonicalOnly(ty) => json!({ "type": ty.as_str() }),
+            FieldValue::NonFinite(v) => {
+                let text = if v.is_nan() {
+                    "NaN"
+                } else if *v > 0.0 {
+                    "Infinity"
+                } else {
+                    "-Infinity"
+                };
+                json!({ "type": "double", "value": text })
+            }
+        }
+    }
+}
+
+/// A serving envelope column of a listed event.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnvelopeValue {
+    Text(String),
+    /// `None` for an unavailable value, such as a span's unobservable duration.
+    Int(Option<i64>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventRow {
+    pub event_id: String,
+    pub timestamp_ns: i64,
+    /// `(name, value)` in [`listing_columns`] order; `DateTime64` columns are
+    /// named `<column>_ns`.
+    pub envelope: Vec<(String, EnvelopeValue)>,
+    /// One per requested field, in request order.
+    pub fields: Vec<FieldValue>,
+}
+
+/// One page of an event listing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventPage {
+    /// Events that matched, counted before the page limit.
+    pub matched: u64,
+    pub rows: Vec<EventRow>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Sum {
     Int(i64),
@@ -46,10 +108,16 @@ pub struct ValueStats {
     pub timing_errors: Option<u64>,
     /// `None` when nothing contributed.
     pub sum: Option<Sum>,
+    /// Percentile aggregates only: each requested percentile with its value,
+    /// `None` when nothing contributed. A percentile result has no sum.
+    pub percentiles: Option<Vec<(Percentile, Option<TypedValue>)>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResultRow {
+    /// Start of the row's time-series bucket; `None` unless the request set a
+    /// bucket width.
+    pub bucket_start_ns: Option<i64>,
     pub groups: Vec<GroupValue>,
     pub events: u64,
     pub values: Option<ValueStats>,
@@ -63,6 +131,8 @@ pub struct QueryResult {
     /// at a compared attribute. `None` when the request has no double
     /// comparison. The query succeeds; the count keeps the gap visible.
     pub non_finite_excluded: Option<u64>,
+    /// The page of an event listing; `rows` is empty then.
+    pub events: Option<EventPage>,
 }
 
 impl QueryResult {
@@ -77,16 +147,31 @@ impl QueryResult {
                     "groups": row.groups.iter().map(GroupValue::to_json).collect::<Vec<_>>(),
                     "events": count_json(row.events),
                 });
+                if let Some(start) = row.bucket_start_ns {
+                    out["bucket_start_ns"] = TypedValue::Int(start).to_json();
+                }
                 if let Some(stats) = &row.values {
                     out["contributing"] = count_json(stats.contributing);
                     if let Some(errors) = stats.timing_errors {
                         out["timing_errors"] = count_json(errors);
                     }
-                    out["sum"] = match stats.sum {
-                        None => Value::Null,
-                        Some(Sum::Int(v)) => TypedValue::Int(v).to_json(),
-                        Some(Sum::Double(v)) => TypedValue::Double(v).to_json(),
-                    };
+                    if let Some(percentiles) = &stats.percentiles {
+                        out["percentiles"] = percentiles
+                            .iter()
+                            .map(|(p, v)| {
+                                json!({
+                                    "percentile": p.to_string(),
+                                    "value": v.as_ref().map_or(Value::Null, TypedValue::to_json),
+                                })
+                            })
+                            .collect();
+                    } else {
+                        out["sum"] = match stats.sum {
+                            None => Value::Null,
+                            Some(Sum::Int(v)) => TypedValue::Int(v).to_json(),
+                            Some(Sum::Double(v)) => TypedValue::Double(v).to_json(),
+                        };
+                    }
                 }
                 out
             })
@@ -95,8 +180,31 @@ impl QueryResult {
         if let Some(excluded) = self.non_finite_excluded {
             diagnostics["non_finite_excluded"] = count_json(excluded);
         }
-        json!({ "rows": rows, "diagnostics": diagnostics })
+        match &self.events {
+            None => json!({ "rows": rows, "diagnostics": diagnostics }),
+            Some(page) => json!({
+                "rows": page.rows.iter().map(event_json).collect::<Vec<_>>(),
+                "matched": count_json(page.matched),
+                "diagnostics": diagnostics,
+            }),
+        }
     }
+}
+
+fn event_json(row: &EventRow) -> Value {
+    let mut out = json!({
+        "event_id": row.event_id,
+        "timestamp_ns": TypedValue::Int(row.timestamp_ns).to_json(),
+    });
+    for (name, value) in &row.envelope {
+        out[name.as_str()] = match value {
+            EnvelopeValue::Text(text) => json!(text),
+            EnvelopeValue::Int(Some(v)) => TypedValue::Int(*v).to_json(),
+            EnvelopeValue::Int(None) => Value::Null,
+        };
+    }
+    out["fields"] = row.fields.iter().map(FieldValue::to_json).collect();
+    out
 }
 
 fn count_json(value: u64) -> Value {
@@ -111,10 +219,17 @@ pub fn interpret(
     rows: &[Value],
     probe_rows: &[Value],
 ) -> Result<QueryResult, QueryError> {
-    let rows = rows
-        .iter()
-        .map(|row| interpret_row(plan, row))
-        .collect::<Result<Vec<_>, _>>()?;
+    let events = match &plan.query.aggregate {
+        Aggregate::Events { fields, .. } => Some(event_page(plan, fields.len(), rows)?),
+        _ => None,
+    };
+    let rows = match events {
+        Some(_) => Vec::new(),
+        None => rows
+            .iter()
+            .map(|row| interpret_row(plan, row))
+            .collect::<Result<Vec<_>, _>>()?,
+    };
     let non_finite_excluded = match (&plan.non_finite_probe, probe_rows) {
         (None, _) => None,
         (Some(_), [row]) => Some(count(row, columns::NON_FINITE_EXCLUDED)?),
@@ -124,7 +239,78 @@ pub fn interpret(
         rows,
         diagnostics: plan.diagnostics.clone(),
         non_finite_excluded,
+        events,
     })
+}
+
+fn event_page(plan: &Plan, fields: usize, rows: &[Value]) -> Result<EventPage, QueryError> {
+    let matched = match rows.first() {
+        Some(row) => count(row, columns::MATCHED)?,
+        None => 0,
+    };
+    let rows = rows
+        .iter()
+        .map(|row| {
+            let mut envelope = Vec::new();
+            for (name, ty) in listing_columns(plan.query.signal) {
+                let (name, value) = match ty {
+                    ListingType::Text => (
+                        name.to_string(),
+                        EnvelopeValue::Text(text(row, &columns::listed(name))?.to_owned()),
+                    ),
+                    ListingType::TextProjection => (
+                        format!("{name}_text"),
+                        EnvelopeValue::Text(text(row, &columns::listed(name))?.to_owned()),
+                    ),
+                    ListingType::Int => {
+                        let column = columns::listed(name);
+                        (
+                            name.to_string(),
+                            EnvelopeValue::Int(nullable_int(row, &column)?),
+                        )
+                    }
+                    ListingType::Nanos => {
+                        let name = format!("{name}_ns");
+                        let column = columns::listed(&name);
+                        (name, EnvelopeValue::Int(Some(int_text(row, &column)?)))
+                    }
+                };
+                envelope.push((name, value));
+            }
+            Ok(EventRow {
+                event_id: text(row, &columns::listed(EVENT_ID_COLUMN))?.to_owned(),
+                timestamp_ns: int_text(row, &columns::listed("timestamp_ns"))?,
+                envelope,
+                fields: (0..fields)
+                    .map(|i| {
+                        field_value(
+                            text(row, &columns::field_type(i))?,
+                            text(row, &columns::field_value(i))?,
+                        )
+                    })
+                    .collect::<Result<_, _>>()?,
+            })
+        })
+        .collect::<Result<Vec<_>, QueryError>>()?;
+    if rows.len() as u64 > matched {
+        return Err(malformed(
+            "an event listing returned more rows than matched",
+        ));
+    }
+    Ok(EventPage { matched, rows })
+}
+
+fn int_text(row: &Value, name: &str) -> Result<i64, QueryError> {
+    text(row, name)?
+        .parse()
+        .map_err(|_| malformed(format!("column {name} is not an integer")))
+}
+
+fn nullable_int(row: &Value, name: &str) -> Result<Option<i64>, QueryError> {
+    match field(row, name)? {
+        Value::Null => Ok(None),
+        _ => int_text(row, name).map(Some),
+    }
 }
 
 fn malformed(detail: impl Into<String>) -> QueryError {
@@ -164,26 +350,59 @@ fn interpret_row(plan: &Plan, row: &Value) -> Result<ResultRow, QueryError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ResultRow {
+        bucket_start_ns: bucket_start(plan, row)?,
         groups,
         events: count(row, columns::EVENTS)?,
         values: value_stats(plan, row)?,
     })
 }
 
+/// The bucket's start from its index: `start + index * width`, which must lie
+/// inside the requested range.
+fn bucket_start(plan: &Plan, row: &Value) -> Result<Option<i64>, QueryError> {
+    let Some(width) = plan.query.bucket_ns else {
+        return Ok(None);
+    };
+    let index = count(row, columns::BUCKET)?;
+    let time = plan.query.time;
+    let start = i128::from(time.start_ns) + i128::from(index) * i128::from(width);
+    if start >= i128::from(time.end_ns) {
+        return Err(malformed(format!(
+            "bucket {index} is outside the time range"
+        )));
+    }
+    Ok(Some(start as i64))
+}
+
+/// A group key: a received scalar or missing. Values the query surface cannot
+/// operate on fail the grouping.
 fn group_value(type_name: &str, value: &str) -> Result<GroupValue, QueryError> {
+    let unsupported = |value| QueryError::UnsupportedOperation {
+        operation: Operation::Group,
+        value,
+    };
+    match field_value(type_name, value)? {
+        FieldValue::Missing => Ok(GroupValue::Missing),
+        FieldValue::Value(v) => Ok(GroupValue::Value(v)),
+        FieldValue::CanonicalOnly(ty) => Err(unsupported(
+            UnsupportedValue::from_type(ty).expect("a canonical-only type"),
+        )),
+        FieldValue::NonFinite(_) => Err(unsupported(UnsupportedValue::NonFiniteFloat)),
+    }
+}
+
+/// The `(type, text)` pair a group or field expression returns.
+fn field_value(type_name: &str, value: &str) -> Result<FieldValue, QueryError> {
     if type_name == MISSING_TYPE {
-        return Ok(GroupValue::Missing);
+        return Ok(FieldValue::Missing);
     }
     let ty = ValueType::parse(type_name)
-        .ok_or_else(|| malformed(format!("unknown group type {type_name:?}")))?;
-    if let Some(value) = UnsupportedValue::from_type(ty) {
-        return Err(QueryError::UnsupportedOperation {
-            operation: Operation::Group,
-            value,
-        });
+        .ok_or_else(|| malformed(format!("unknown value type {type_name:?}")))?;
+    if ty.is_canonical_only() {
+        return Ok(FieldValue::CanonicalOnly(ty));
     }
     let bad = |what: &str| malformed(format!("{value:?} is not a valid {what}"));
-    Ok(GroupValue::Value(match ty {
+    Ok(FieldValue::Value(match ty {
         ValueType::String => TypedValue::String(value.to_owned()),
         ValueType::Bool => TypedValue::Bool(match value {
             "true" => true,
@@ -194,10 +413,7 @@ fn group_value(type_name: &str, value: &str) -> Result<GroupValue, QueryError> {
         ValueType::Double => {
             let v: f64 = value.parse().map_err(|_| bad("double"))?;
             if !v.is_finite() {
-                return Err(QueryError::UnsupportedOperation {
-                    operation: Operation::Group,
-                    value: UnsupportedValue::NonFiniteFloat,
-                });
+                return Ok(FieldValue::NonFinite(v));
             }
             TypedValue::Double(v)
         }
@@ -209,10 +425,12 @@ fn group_value(type_name: &str, value: &str) -> Result<GroupValue, QueryError> {
 fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryError> {
     match &plan.query.aggregate {
         Aggregate::Count => Ok(None),
+        Aggregate::Events { .. } => unreachable!("a listing has no aggregate rows"),
         Aggregate::CountValues { .. } => Ok(Some(ValueStats {
             contributing: count(row, columns::CONTRIBUTING)?,
             timing_errors: None,
             sum: None,
+            percentiles: None,
         })),
         Aggregate::SpanDuration => {
             let contributing = count(row, columns::CONTRIBUTING)?;
@@ -220,6 +438,7 @@ fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryErro
                 contributing,
                 timing_errors: Some(count(row, columns::TIMING_ERRORS)?),
                 sum: int_sum(row, contributing)?,
+                percentiles: None,
             }))
         }
         Aggregate::Sum { attr, value_type } => {
@@ -234,9 +453,91 @@ fn value_stats(plan: &Plan, row: &Value) -> Result<Option<ValueStats>, QueryErro
                 contributing,
                 timing_errors: None,
                 sum,
+                percentiles: None,
+            }))
+        }
+        Aggregate::Percentiles {
+            attr,
+            value_type,
+            percentiles,
+        } => {
+            check_incompatible(plan, row, attr, *value_type)?;
+            if *value_type == ValueType::Double && count(row, columns::NON_FINITE)? > 0 {
+                return Err(QueryError::UnsupportedOperation {
+                    operation: Operation::Aggregate,
+                    value: UnsupportedValue::NonFiniteFloat,
+                });
+            }
+            let contributing = count(row, columns::CONTRIBUTING)?;
+            Ok(Some(ValueStats {
+                contributing,
+                timing_errors: None,
+                sum: None,
+                percentiles: Some(percentile_values(
+                    row,
+                    percentiles,
+                    *value_type,
+                    contributing,
+                )?),
+            }))
+        }
+        Aggregate::SpanDurationPercentiles { percentiles } => {
+            let contributing = count(row, columns::CONTRIBUTING)?;
+            Ok(Some(ValueStats {
+                contributing,
+                timing_errors: Some(count(row, columns::TIMING_ERRORS)?),
+                sum: None,
+                percentiles: Some(percentile_values(
+                    row,
+                    percentiles,
+                    ValueType::Int,
+                    contributing,
+                )?),
             }))
         }
     }
+}
+
+/// Pair each requested percentile with its value read as `ty`.
+fn percentile_values(
+    row: &Value,
+    percentiles: &[Percentile],
+    ty: ValueType,
+    contributing: u64,
+) -> Result<Vec<(Percentile, Option<TypedValue>)>, QueryError> {
+    let values = field(row, columns::PERCENTILES)?
+        .as_array()
+        .filter(|values| values.len() == percentiles.len())
+        .ok_or_else(|| malformed("percentile_values does not match the request"))?;
+    percentiles
+        .iter()
+        .zip(values)
+        .map(|(p, value)| {
+            if contributing == 0 {
+                return Ok((*p, None));
+            }
+            let text = value
+                .as_str()
+                .ok_or_else(|| malformed("a percentile value is not text"))?;
+            let bad = || {
+                malformed(format!(
+                    "percentile value {text:?} is not a valid {}",
+                    ty.as_str()
+                ))
+            };
+            let value = match ty {
+                ValueType::Int => TypedValue::Int(text.parse().map_err(|_| bad())?),
+                _ => {
+                    let v: f64 = text.parse().map_err(|_| bad())?;
+                    if !v.is_finite() {
+                        return Err(bad());
+                    }
+                    TypedValue::Double(v)
+                }
+            };
+            Ok((*p, Some(value)))
+        })
+        .collect()
 }
 
 /// Fail on non-empty values of another type. Bytes, arrays, and maps are

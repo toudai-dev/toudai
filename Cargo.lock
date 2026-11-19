@@ -1619,6 +1619,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "toudai-cli"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "toudai",
+ "toudai-ingest",
+]
+
+[[package]]
 name = "toudai-ingest"
 version = "0.1.0"
 dependencies = [

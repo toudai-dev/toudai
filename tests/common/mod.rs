@@ -101,6 +101,12 @@ impl ClickHouse {
             .collect()
     }
 
+    /// Insert `JSONEachRow` rows into a serving table of the fixture database.
+    pub fn insert(&self, table: &str, rows: &str) {
+        let sql = format!("INSERT INTO {DATABASE}.{table} FORMAT JSONEachRow");
+        self.local(&["--query".to_owned(), sql], Some(rows));
+    }
+
     /// Execute hand-written SQL (fixture checks), returning the raw text.
     pub fn raw(&self, sql: &str, params: &[(&str, &str)]) -> String {
         let mut args = vec!["--query".to_owned(), sql.to_owned()];
@@ -195,6 +201,7 @@ pub fn logs_query() -> Query {
             start_ns: TS,
             end_ns: TS + 1,
         },
+        bucket_ns: None,
         filters: vec![],
         group_by: vec![],
         aggregate: Aggregate::Count,

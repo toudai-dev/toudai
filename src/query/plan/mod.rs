@@ -5,10 +5,12 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::error::{Operation, QueryError, UnsupportedValue};
-use super::model::{Aggregate, AttrRef, CmpOp, Namespace, Predicate, Query, Signal};
+use super::model::{
+    Aggregate, AttrRef, CmpOp, EventOrder, Namespace, Percentile, Predicate, Query, Signal,
+};
 use super::schema::{
-    self, DATASET_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN, ServingTables,
-    TIMESTAMP_COLUMN, TYPED_SCALARS,
+    self, DATASET_COLUMN, EVENT_ID_COLUMN, SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN,
+    ServingTables, TIMESTAMP_COLUMN, TYPED_SCALARS, listing_columns,
 };
 use super::sql::{self, SqlStatement};
 use super::value::{Literal, ValueType};
@@ -46,6 +48,15 @@ pub enum Guard {
     IncompatibleTypeCheck,
     /// Non-finite floats fail float aggregation and grouping.
     NonFiniteFloatCheck,
+    /// Percentiles are exact nearest-rank values: always a received value,
+    /// never interpolated or estimated.
+    NearestRankPercentiles,
+    /// A listing reports how many events matched, counted by the statement
+    /// that returns the page, so a truncated page is never read as all of them.
+    MatchedCount,
+    /// Listed fields report each value with its received type; values the
+    /// query surface cannot operate on are reported by type, not dropped.
+    TypedFieldValues,
 }
 
 impl Guard {
@@ -59,6 +70,9 @@ impl Guard {
             Guard::ContributingCounts => "contributing_counts",
             Guard::IncompatibleTypeCheck => "incompatible_type_check",
             Guard::NonFiniteFloatCheck => "non_finite_float_check",
+            Guard::NearestRankPercentiles => "nearest_rank_percentiles",
+            Guard::MatchedCount => "matched_count",
+            Guard::TypedFieldValues => "typed_field_values",
         }
     }
 }
@@ -97,6 +111,15 @@ pub(crate) fn has_type_filter(filters: &[Predicate], attr: &AttrRef, ty: ValueTy
     })
 }
 
+/// The most time-series buckets one response carries.
+pub const MAX_BUCKETS: u32 = 1_000;
+/// The most percentiles one aggregate computes.
+pub const MAX_PERCENTILES: usize = 16;
+/// The most events one listing returns.
+pub const MAX_EVENTS: u32 = 1_000;
+/// The most attribute fields one listing reports per event.
+pub const MAX_FIELDS: usize = 16;
+
 /// Check a request against the PoC typed-value contract.
 pub fn validate(query: &Query) -> Result<(), QueryError> {
     if query.scope.dataset.is_empty() {
@@ -107,6 +130,19 @@ pub fn validate(query: &Query) -> Result<(), QueryError> {
             start_ns: query.time.start_ns,
             end_ns: query.time.end_ns,
         });
+    }
+    if let Some(bucket_ns) = query.bucket_ns {
+        if bucket_ns <= 0 {
+            return Err(QueryError::InvalidBucket { bucket_ns });
+        }
+        let span = i128::from(query.time.end_ns) - i128::from(query.time.start_ns);
+        let buckets = (span + i128::from(bucket_ns) - 1) / i128::from(bucket_ns);
+        if buckets > i128::from(MAX_BUCKETS) {
+            return Err(QueryError::TooManyBuckets {
+                buckets: buckets as u128,
+                max: MAX_BUCKETS,
+            });
+        }
     }
     for predicate in &query.filters {
         match predicate {
@@ -176,17 +212,66 @@ fn validate_aggregate(query: &Query) -> Result<(), QueryError> {
             }
             Ok(())
         }
-        Aggregate::Sum { attr, value_type } => {
-            validate_key(attr)?;
-            validate_record_aggregate(attr, *value_type)?;
-            if !matches!(value_type, ValueType::Int | ValueType::Double) {
-                return Err(QueryError::NotNumeric {
-                    value_type: *value_type,
+        Aggregate::Sum { attr, value_type } => validate_numeric(attr, *value_type),
+        Aggregate::Percentiles {
+            attr,
+            value_type,
+            percentiles,
+        } => {
+            validate_numeric(attr, *value_type)?;
+            validate_percentiles(percentiles)
+        }
+        Aggregate::SpanDurationPercentiles { percentiles } => {
+            if query.signal != Signal::Spans {
+                return Err(QueryError::AggregateRequiresSpans);
+            }
+            validate_percentiles(percentiles)
+        }
+        Aggregate::Events {
+            limit,
+            order,
+            fields,
+        } => {
+            if !query.group_by.is_empty() || query.bucket_ns.is_some() {
+                return Err(QueryError::ListingNotGrouped);
+            }
+            if *limit == 0 || *limit > MAX_EVENTS {
+                return Err(QueryError::InvalidLimit {
+                    limit: *limit,
+                    max: MAX_EVENTS,
                 });
             }
-            Ok(())
+            if *order == EventOrder::Longest && query.signal != Signal::Spans {
+                return Err(QueryError::AggregateRequiresSpans);
+            }
+            if fields.len() > MAX_FIELDS {
+                return Err(QueryError::TooManyFields {
+                    count: fields.len(),
+                    max: MAX_FIELDS,
+                });
+            }
+            fields.iter().try_for_each(validate_key)
         }
     }
+}
+
+fn validate_numeric(attr: &AttrRef, ty: ValueType) -> Result<(), QueryError> {
+    validate_key(attr)?;
+    validate_record_aggregate(attr, ty)?;
+    if !matches!(ty, ValueType::Int | ValueType::Double) {
+        return Err(QueryError::NotNumeric { value_type: ty });
+    }
+    Ok(())
+}
+
+fn validate_percentiles(percentiles: &[Percentile]) -> Result<(), QueryError> {
+    if percentiles.is_empty() || percentiles.len() > MAX_PERCENTILES {
+        return Err(QueryError::PercentileCount {
+            count: percentiles.len(),
+            max: MAX_PERCENTILES,
+        });
+    }
+    Ok(())
 }
 
 fn validate_record_aggregate(attr: &AttrRef, ty: ValueType) -> Result<(), QueryError> {
@@ -259,7 +344,11 @@ pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
             }
         }
     }
-    for attr in &query.group_by {
+    let listed: &[AttrRef] = match &query.aggregate {
+        Aggregate::Events { fields, .. } => fields,
+        _ => &[],
+    };
+    for attr in query.group_by.iter().chain(listed) {
         if attr.namespace == Namespace::Record {
             all_record_maps(&mut columns);
         } else {
@@ -271,14 +360,21 @@ pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
         Aggregate::CountValues { value_type, .. } => {
             columns.extend(schema::typed_map(signal, *value_type));
         }
-        Aggregate::Sum { attr, value_type } => {
+        Aggregate::Sum { attr, value_type }
+        | Aggregate::Percentiles {
+            attr, value_type, ..
+        } => {
             columns.extend(schema::typed_map(signal, *value_type));
             if !has_type_filter(&query.filters, attr, *value_type) {
                 all_record_maps(&mut columns);
             }
         }
-        Aggregate::SpanDuration => {
+        Aggregate::SpanDuration | Aggregate::SpanDurationPercentiles { .. } => {
             columns.extend([SPAN_DURATION_COLUMN, SPAN_TIMING_STATUS_COLUMN]);
+        }
+        Aggregate::Events { .. } => {
+            columns.insert(EVENT_ID_COLUMN);
+            columns.extend(listing_columns(signal).iter().map(|(name, _)| *name));
         }
     }
     columns.into_iter().collect()
@@ -286,7 +382,8 @@ pub(crate) fn columns_read(query: &Query) -> Vec<&'static str> {
 
 pub(crate) fn guards(query: &Query) -> Vec<Guard> {
     let mut guards: BTreeSet<Guard> = BTreeSet::new();
-    let mut references_attr = !query.group_by.is_empty();
+    let fields = matches!(&query.aggregate, Aggregate::Events { fields, .. } if !fields.is_empty());
+    let mut references_attr = !query.group_by.is_empty() || fields;
     for predicate in &query.filters {
         references_attr = true;
         if let Predicate::Compare { value, .. } = predicate {
@@ -323,6 +420,29 @@ pub(crate) fn guards(query: &Query) -> Vec<Guard> {
         Aggregate::SpanDuration => {
             guards.insert(Guard::ContributingCounts);
             guards.insert(Guard::Int128Sum);
+        }
+        Aggregate::Percentiles {
+            attr, value_type, ..
+        } => {
+            guards.insert(Guard::ContributingCounts);
+            guards.insert(Guard::KeyMembershipPresence);
+            guards.insert(Guard::NearestRankPercentiles);
+            if *value_type == ValueType::Double {
+                guards.insert(Guard::NonFiniteFloatCheck);
+            }
+            if !has_type_filter(&query.filters, attr, *value_type) {
+                guards.insert(Guard::IncompatibleTypeCheck);
+            }
+        }
+        Aggregate::SpanDurationPercentiles { .. } => {
+            guards.insert(Guard::ContributingCounts);
+            guards.insert(Guard::NearestRankPercentiles);
+        }
+        Aggregate::Events { .. } => {
+            guards.insert(Guard::MatchedCount);
+            if fields {
+                guards.insert(Guard::TypedFieldValues);
+            }
         }
     }
     guards.into_iter().collect()
