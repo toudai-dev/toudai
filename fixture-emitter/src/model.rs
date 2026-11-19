@@ -214,9 +214,14 @@ pub fn build(seed: u64) -> Fixture {
         spans: Vec::new(),
         metrics: Vec::new(),
     };
+    // The order trace has the same trace ID in both datasets, so a trace lookup
+    // that leaks across datasets returns the other dataset's spans. Its own
+    // generator leaves every identifier drawn before it unchanged.
+    let order_trace = Rng::new(seed ^ (0xFF << 56)).trace_id();
     for (index, dataset) in DATASETS.iter().enumerate() {
         let mut rng = Rng::new(seed ^ ((index as u64 + 1) << 56));
         add_dataset(&mut fixture, &mut rng, index, dataset);
+        add_order_trace(&mut fixture, &mut rng, index, dataset, order_trace);
     }
     fixture
 }
@@ -606,6 +611,208 @@ fn add_dataset(f: &mut Fixture, rng: &mut Rng, index: usize, dataset: &str) {
     }
 }
 
+/// The trace that inventory items 10 and 11 (trace waterfall, trace with
+/// correlated logs) render: a three-level span tree with span events, a span
+/// whose parent was never sent, a span without an end, and two logs and an
+/// application event carrying the trace context. Each dataset sends it under
+/// the same `trace_id` with its own span IDs, so only the dataset scope keeps
+/// the two traces apart.
+fn add_order_trace(
+    f: &mut Fixture,
+    rng: &mut Rng,
+    index: usize,
+    dataset: &str,
+    trace_id: [u8; 16],
+) {
+    let t = BASE_NS + (index as u64) * 1_000_000_000 + 20_123_456_789;
+    let (root, validate, payment, charge, db, unfinished) = (
+        rng.span_id(),
+        rng.span_id(),
+        rng.span_id(),
+        rng.span_id(),
+        rng.span_id(),
+        rng.span_id(),
+    );
+    // A parent that is never sent, as when an upstream service drops its span.
+    let (orphan, lost_parent) = (rng.span_id(), rng.span_id());
+    let spans = ctx(dataset, "spans");
+    let span = |key: &str, span_id, parent, name: &str, kind, start, end, status, attrs| SpanRec {
+        ctx: spans.clone(),
+        trace_id,
+        span_id,
+        parent_span_id: parent,
+        name: name.to_string(),
+        kind,
+        start_ns: start,
+        end_ns: end,
+        status,
+        attrs: keyed(key, attrs),
+        events: Vec::new(),
+        notes: notes("trace"),
+    };
+    let mut root_span = span(
+        "span.order.root",
+        root,
+        None,
+        "POST /orders",
+        SpanKind::Server,
+        t,
+        t + 4_000_000,
+        Status::Error,
+        vec![
+            attr("http.method", s("POST")),
+            attr("http.route", s("/orders")),
+            attr("http.status_code", Val::Int(502)),
+        ],
+    );
+    root_span.events = vec![SpanEventRec {
+        name: "order.received".into(),
+        time_ns: t + 50_000,
+        attrs: vec![attr("order.lines", Val::Int(2))],
+    }];
+    let mut charge_span = span(
+        "span.order.charge",
+        charge,
+        Some(payment),
+        "POST /v1/charges",
+        SpanKind::Client,
+        t + 1_900_000,
+        t + 3_400_000,
+        Status::Error,
+        vec![attr("http.status_code", Val::Int(402))],
+    );
+    charge_span.events = vec![SpanEventRec {
+        name: "exception".into(),
+        time_ns: t + 3_350_000,
+        attrs: vec![
+            attr("exception.type", s("CardDeclined")),
+            attr("exception.message", s("card declined")),
+        ],
+    }];
+    // Children are emitted in an order unlike their start order and depth, so
+    // the waterfall's order comes from the parent links and start times, not
+    // from the order the rows were written.
+    f.spans.extend([
+        charge_span,
+        span(
+            "span.order.db",
+            db,
+            Some(root),
+            "INSERT orders",
+            SpanKind::Client,
+            t + 500_000,
+            t + 1_700_000,
+            Status::Unset,
+            vec![attr("db.system", s("clickhouse"))],
+        ),
+        root_span,
+        span(
+            "span.order.payment",
+            payment,
+            Some(root),
+            "payment.authorize",
+            SpanKind::Internal,
+            t + 1_800_000,
+            t + 3_500_000,
+            Status::Error,
+            Vec::new(),
+        ),
+        span(
+            "span.order.validate",
+            validate,
+            Some(root),
+            "order.validate",
+            SpanKind::Internal,
+            t + 100_000,
+            t + 400_000,
+            Status::Unset,
+            Vec::new(),
+        ),
+        // The span was exported without an end (OTLP end 0): its duration is
+        // unavailable, which the waterfall must show rather than zero.
+        span(
+            "span.order.unfinished",
+            unfinished,
+            Some(root),
+            "audit.write",
+            SpanKind::Internal,
+            t + 3_600_000,
+            0,
+            Status::Unset,
+            Vec::new(),
+        ),
+        span(
+            "span.order.orphan",
+            orphan,
+            Some(lost_parent),
+            "inventory.reserve",
+            SpanKind::Server,
+            t + 600_000,
+            t + 900_000,
+            Status::Unset,
+            Vec::new(),
+        ),
+    ]);
+
+    let log = |key: &str,
+               ctx: &Ctx,
+               ts,
+               sev: (i32, &'static str),
+               event_name: &str,
+               body: Option<&str>,
+               span_id,
+               attrs| LogRec {
+        ctx: ctx.clone(),
+        timestamp_ns: ts,
+        observed_ns: ts + 1_000_000,
+        severity_number: sev.0,
+        severity_text: sev.1,
+        event_name: event_name.to_string(),
+        body: body.map(s),
+        trace: Some((trace_id, span_id)),
+        attrs: keyed(key, attrs),
+        notes: notes("trace"),
+    };
+    let (logs, events) = (ctx(dataset, "logs"), ctx(dataset, "events"));
+    f.logs.extend([
+        log(
+            "log.order.accepted",
+            &logs,
+            t + 150_000,
+            (9, "INFO"),
+            "",
+            Some("order accepted"),
+            validate,
+            vec![attr("order.lines", Val::Int(2))],
+        ),
+        log(
+            "log.order.declined",
+            &logs,
+            t + 3_360_000,
+            (17, "ERROR"),
+            "",
+            Some("card declined"),
+            charge,
+            vec![attr("payment.provider", s("acme-pay"))],
+        ),
+        // An application event in the same trace: the unified medium returns
+        // it with the logs and spans.
+        log(
+            "event.order.failed",
+            &events,
+            t + 3_900_000,
+            (9, "INFO"),
+            "order.failed",
+            None,
+            root,
+            vec![
+                attr("order.total", Val::Double(42.5)),
+                attr("failure.stage", s("payment")),
+            ],
+        ),
+    ]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -644,7 +851,54 @@ mod tests {
             .map(|(_, v)| format!("{v:?}"))
             .collect();
         assert_eq!(datasets.len(), DATASETS.len());
+        // Six traces per dataset, plus the order trace both datasets share.
         let traces: std::collections::BTreeSet<_> = f.spans.iter().map(|s| s.trace_id).collect();
-        assert_eq!(traces.len(), 2 * 6);
+        assert_eq!(traces.len(), 2 * 6 + 1);
+        let spans: std::collections::BTreeSet<_> = f.spans.iter().map(|s| s.span_id).collect();
+        assert_eq!(spans.len(), f.spans.len(), "span IDs are unique");
+    }
+
+    /// Every parent link in the order trace names a span of the same dataset,
+    /// except the one orphan, and every log in the trace names a sent span.
+    #[test]
+    fn order_trace_links() {
+        let f = build(1);
+        let order = |key: &str| key.starts_with("span.order.");
+        for dataset in DATASETS {
+            let in_dataset = |ctx: &Ctx| {
+                ctx.resource
+                    .iter()
+                    .any(|(_, v)| matches!(v, Val::Str(d) if d == dataset))
+            };
+            let spans: Vec<_> = f
+                .spans
+                .iter()
+                .filter(|s| {
+                    in_dataset(&s.ctx)
+                        && s.attrs
+                            .iter()
+                            .any(|(k, v)| k == KEY_ATTR && matches!(v, Val::Str(key) if order(key)))
+                })
+                .collect();
+            assert_eq!(spans.len(), 7);
+            let ids: Vec<_> = spans.iter().map(|s| s.span_id).collect();
+            let orphans: Vec<_> = spans
+                .iter()
+                .filter(|s| s.parent_span_id.is_some_and(|p| !ids.contains(&p)))
+                .collect();
+            assert_eq!(orphans.len(), 1);
+            assert_eq!(
+                spans.iter().filter(|s| s.parent_span_id.is_none()).count(),
+                1
+            );
+            let trace = spans[0].trace_id;
+            let logs: Vec<_> = f
+                .logs
+                .iter()
+                .filter(|l| in_dataset(&l.ctx) && l.trace.is_some_and(|(t, _)| t == trace))
+                .collect();
+            assert_eq!(logs.len(), 3);
+            assert!(logs.iter().all(|l| ids.contains(&l.trace.unwrap().1)));
+        }
     }
 }

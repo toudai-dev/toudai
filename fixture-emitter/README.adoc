@@ -105,6 +105,14 @@ unique within a dataset and joins an event to its expected row. Per dataset:
 |unsupported
 |`span.invalid-values`: non-finite and extreme numbers, homogeneous arrays, empty string, empty array
 
+|spans
+|trace
+|The order trace: `span.order.root` with children `span.order.validate`, `span.order.db`, `span.order.payment` (whose child is `span.order.charge`), and `span.order.unfinished` (no end time), plus `span.order.orphan`, whose parent is never sent. The root and the charge span carry span events. Both datasets send it under one `trace_id` with their own span IDs, so a trace lookup that ignored the dataset would mix them
+
+|logs
+|trace
+|`log.order.accepted`, `log.order.declined`, and the application event `event.order.failed` (`order.failed`), each carrying the order trace's context on a sent span
+
 |metrics (`fixture` only)
 |native-metric
 |counter `checkout.requests` = 7
